@@ -1,0 +1,19 @@
+{
+  "Typewriter Speed": {
+    "prefix": "typ",
+    "body": ["typewriter = true", "typewriter.speed(${1:40})"],
+    "description": "Active et règle la vitesse du typewriter"
+  },
+  "Show Sprite": {
+    "prefix": "sho",
+    "body": [
+      "${1:personnage}.show(\"${2:emotion}\") at ${3|left,center,right|} with ${4|fade,dissolve|}"
+    ],
+    "description": "Affiche un personnage avec une transition"
+  },
+  "If Block": {
+    "prefix": "if",
+    "body": ["if ${1:condition} {", "\t$0", "}"],
+    "description": "Crée une condition"
+  }
+}

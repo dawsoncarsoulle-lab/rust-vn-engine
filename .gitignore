@@ -1,0 +1,11 @@
+# Rust build
+/target
+
+# Runtime data
+/saves
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Examples cleanup - pas encore

@@ -1,0 +1,173 @@
+use crate::types::{GameState, MusicState, SpriteState};
+use rvn_parser::{Hotspot, Position, Transition};
+use std::io;
+
+// ─── TRAIT ───────────────────────────────────────────────────────────────────
+
+pub trait Renderer {
+    fn set_background(&mut self, path: &str, transition: &Transition);
+    fn show_sprite(
+        &mut self,
+        id: &str,
+        emotion: Option<&str>,
+        position: &Position,
+        transition: &Transition,
+        from: Option<&SpriteState>,
+    );
+    fn hide_sprite(&mut self, id: &str, transition: &Transition, from: &SpriteState);
+    fn move_sprite(
+        &mut self,
+        id: &str,
+        position: &Position,
+        transition: &Transition,
+        from: &SpriteState,
+    );
+    fn show_dialogue(&mut self, character: Option<&str>, text: &str);
+    fn show_choice(&mut self, options: &[String]) -> usize;
+    fn music_play(&mut self, file: &str, transition: &Transition, previous: Option<&str>);
+    fn music_stop(&mut self, transition: &Transition);
+    fn music_set_volume(&mut self, level: f32);
+    fn sfx_play(&mut self, file: &str, transition: &Transition);
+    fn sfx_stop(&mut self, file: &str, transition: &Transition);
+    fn show_imagemap(
+        &mut self,
+        background: &str,
+        hover_image: Option<&str>,
+        hotspots: &[Hotspot],
+    ) -> usize;
+
+    /// Appelé quand les paramètres typewriter changent.
+    /// `speed_cps` = 0.0 → désactivé.
+    fn set_typewriter_config(&mut self, _speed_cps: f32) {}
+
+    /// Restaure l'audio depuis un état sauvegardé.
+    fn restore_audio(&mut self, music: &MusicState) {
+        if let Some(file) = &music.current_file {
+            self.music_play(file, &Transition::None, None);
+            self.music_set_volume(music.volume);
+        } else {
+            self.music_stop(&Transition::None);
+        }
+    }
+
+    /// Restaure l'écran complet (fond + sprites + audio) depuis un GameState.
+    /// Utilisé par rollback et load.
+    fn restore_screen(&mut self, state: &GameState) {
+        self.set_background(&state.background_image.clone(), &Transition::None);
+        let sprites: Vec<(String, SpriteState)> = state
+            .sprites
+            .iter()
+            .filter(|(_, s)| s.visible)
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        for (id, sprite) in &sprites {
+            self.show_sprite(
+                id,
+                sprite.emotion.as_deref(),
+                &sprite.position,
+                &Transition::None,
+                None,
+            );
+        }
+        self.restore_audio(&state.music.clone());
+    }
+}
+
+// ─── TERMINAL RENDERER ───────────────────────────────────────────────────────
+
+/// Renderer minimaliste pour tests CLI et headless.
+pub struct TerminalRenderer;
+
+impl Renderer for TerminalRenderer {
+    fn set_background(&mut self, path: &str, t: &Transition) {
+        println!("[bg] {path}  [{t}]");
+    }
+    fn show_sprite(
+        &mut self,
+        id: &str,
+        emo: Option<&str>,
+        pos: &Position,
+        t: &Transition,
+        _: Option<&SpriteState>,
+    ) {
+        println!("[show] {id} {} @ {pos}  [{t}]", emo.unwrap_or("—"));
+    }
+    fn hide_sprite(&mut self, id: &str, t: &Transition, _: &SpriteState) {
+        println!("[hide] {id}  [{t}]");
+    }
+    fn move_sprite(&mut self, id: &str, pos: &Position, t: &Transition, _: &SpriteState) {
+        println!("[move] {id} → {pos}  [{t}]");
+    }
+    fn show_dialogue(&mut self, character: Option<&str>, text: &str) {
+        match character {
+            Some(name) => println!("{name} : \"{text}\""),
+            None => println!("  {text}"),
+        }
+        let mut buf = String::new();
+        print!("> ");
+        let _ = io::stdin().read_line(&mut buf);
+    }
+    fn show_choice(&mut self, options: &[String]) -> usize {
+        println!("\nCHOIX :");
+        for (i, opt) in options.iter().enumerate() {
+            println!("  {}. {}", i + 1, opt);
+        }
+        loop {
+            let mut buf = String::new();
+            let _ = io::stdin().read_line(&mut buf);
+            if let Ok(n) = buf.trim().parse::<usize>() {
+                if n >= 1 && n <= options.len() {
+                    return n - 1;
+                }
+            }
+        }
+    }
+    fn music_play(&mut self, file: &str, t: &Transition, prev: Option<&str>) {
+        match prev {
+            Some(p) => println!("[music] crossfade {p} → {file}  [{t}]"),
+            None => println!("[music] play {file}  [{t}]"),
+        }
+    }
+    fn music_stop(&mut self, t: &Transition) {
+        println!("[music] stop  [{t}]");
+    }
+    fn music_set_volume(&mut self, level: f32) {
+        println!("[music] volume {level:.2}");
+    }
+    fn sfx_play(&mut self, file: &str, t: &Transition) {
+        println!("[sfx] play {file}  [{t}]");
+    }
+    fn sfx_stop(&mut self, file: &str, t: &Transition) {
+        println!("[sfx] stop {file}  [{t}]");
+    }
+    fn show_imagemap(
+        &mut self,
+        background: &str,
+        _hover: Option<&str>,
+        hotspots: &[Hotspot],
+    ) -> usize {
+        println!("[imagemap] fond: {background}");
+        for (i, hs) in hotspots.iter().enumerate() {
+            let name = hs.name.as_deref().unwrap_or("?");
+            println!(
+                "  {}. {} ({},{}) → ({},{})",
+                i + 1,
+                name,
+                hs.area.x1,
+                hs.area.y1,
+                hs.area.x2,
+                hs.area.y2
+            );
+        }
+        loop {
+            print!("Cliquez sur une zone (1-{}) : ", hotspots.len());
+            let mut buf = String::new();
+            let _ = io::stdin().read_line(&mut buf);
+            if let Ok(n) = buf.trim().parse::<usize>() {
+                if n >= 1 && n <= hotspots.len() {
+                    return n - 1;
+                }
+            }
+        }
+    }
+}

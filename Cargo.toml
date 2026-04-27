@@ -1,0 +1,11 @@
+[workspace]
+members = [
+    "rvn_parser",
+    "rvn_core",
+    "rvn_bevy",
+    "rvn_cli",
+]
+resolver = "2"
+
+[profile.dev]
+opt-level = 1

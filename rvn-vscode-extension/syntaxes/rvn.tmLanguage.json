@@ -1,0 +1,28 @@
+{
+  "scopeName": "source.rvn",
+  "patterns": [
+    {
+      "name": "keyword.control.rvn",
+      "match": "\\b(if|else|jump|choice|init|label|imagemap|hotspot)\\b"
+    },
+    {
+      "name": "entity.name.function.rvn",
+      "match": "\\b(scene|set|music\\.play|music\\.stop|music\\.volume|sfx\\.play|sfx\\.stop|typewriter\\.speed|typewriter)\\b"
+    },
+    {
+      "name": "string.quoted.double.rvn",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.rvn",
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "comment.line.double-slash.rvn",
+      "match": "//.*$"
+    }
+  ]
+}

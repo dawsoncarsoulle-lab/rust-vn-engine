@@ -1,0 +1,44 @@
+{
+  "slot": 1,
+  "label": "Sauvegarde rapide",
+  "timestamp": 1776751256,
+  "script_name": "script.rvn",
+  "pc": 4,
+  "background_image": "backgrounds/forest.png",
+  "call_stack": [],
+  "vars": {
+    "player_name": {
+      "type": "Str",
+      "v": "Archiviste"
+    },
+    "hp": {
+      "type": "Int",
+      "v": 100
+    },
+    "gold": {
+      "type": "Int",
+      "v": 20
+    },
+    "max_hp": {
+      "type": "Int",
+      "v": 100
+    },
+    "has_sword": {
+      "type": "Bool",
+      "v": false
+    }
+  },
+  "sprites": {},
+  "last_transition": {
+    "type": "Fade",
+    "duration_ms": 1000
+  },
+  "music": {
+    "current_file": "music/theme.ogg",
+    "volume": 0.5
+  },
+  "typewriter": {
+    "enabled": true,
+    "chars_per_sec": 40
+  }
+}

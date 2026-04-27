@@ -1,0 +1,177 @@
+use bevy::prelude::*;
+use rvn_core::{GameState, Renderer, SpriteState};
+use rvn_parser::{Hotspot, Position, Transition};
+
+use crate::vn_command::VnCommand;
+
+pub struct BevyRenderer {
+    pub pending: Vec<VnCommand>,
+    pub choice_result: Option<usize>,
+    pub waiting_for_input: bool,
+}
+
+impl BevyRenderer {
+    pub fn new() -> Self {
+        Self {
+            pending: Vec::new(),
+            choice_result: None,
+            waiting_for_input: false,
+        }
+    }
+
+    pub fn take_pending(&mut self) -> Vec<VnCommand> {
+        std::mem::take(&mut self.pending)
+    }
+}
+
+impl Renderer for BevyRenderer {
+    fn set_background(&mut self, path: &str, transition: &Transition) {
+        self.pending.push(VnCommand::SetBackground {
+            path: path.to_string(),
+            transition: transition.clone(),
+        });
+    }
+
+    fn show_sprite(
+        &mut self,
+        id: &str,
+        emotion: Option<&str>,
+        position: &Position,
+        transition: &Transition,
+        _from: Option<&SpriteState>,
+    ) {
+        self.pending.push(VnCommand::ShowSprite {
+            id: id.to_string(),
+            emotion: emotion.map(str::to_string),
+            position: position.clone(),
+            transition: transition.clone(),
+        });
+    }
+
+    fn hide_sprite(&mut self, id: &str, transition: &Transition, _from: &SpriteState) {
+        self.pending.push(VnCommand::HideSprite {
+            id: id.to_string(),
+            transition: transition.clone(),
+        });
+    }
+
+    fn move_sprite(
+        &mut self,
+        id: &str,
+        position: &Position,
+        transition: &Transition,
+        _from: &SpriteState,
+    ) {
+        self.pending.push(VnCommand::MoveSprite {
+            id: id.to_string(),
+            position: position.clone(),
+            transition: transition.clone(),
+        });
+    }
+
+    fn show_dialogue(&mut self, character: Option<&str>, text: &str) {
+        self.pending.push(VnCommand::ShowDialogue {
+            character: character.map(str::to_string),
+            text: text.to_string(),
+        });
+    }
+
+    fn show_choice(&mut self, options: &[String]) -> usize {
+        if let Some(idx) = self.choice_result.take() {
+            self.waiting_for_input = false;
+            idx
+        } else {
+            self.pending.push(VnCommand::ShowChoice {
+                options: options.to_vec(),
+            });
+            self.waiting_for_input = true;
+            0
+        }
+    }
+
+    fn music_play(&mut self, file: &str, transition: &Transition, previous: Option<&str>) {
+        self.pending.push(VnCommand::MusicPlay {
+            file: file.to_string(),
+            transition: transition.clone(),
+            previous: previous.map(str::to_string),
+        });
+    }
+
+    fn music_stop(&mut self, _transition: &Transition) {
+        self.pending.push(VnCommand::MusicStop);
+    }
+
+    fn music_set_volume(&mut self, level: f32) {
+        self.pending.push(VnCommand::MusicSetVolume { level });
+    }
+
+    fn sfx_play(&mut self, file: &str, _transition: &Transition) {
+        self.pending.push(VnCommand::SfxPlay {
+            file: file.to_string(),
+        });
+    }
+
+    fn sfx_stop(&mut self, file: &str, _transition: &Transition) {
+        self.pending.push(VnCommand::SfxStop {
+            file: file.to_string(),
+        });
+    }
+
+    fn show_imagemap(
+        &mut self,
+        background: &str,
+        hover_image: Option<&str>,
+        hotspots: &[Hotspot],
+    ) -> usize {
+        if let Some(idx) = self.choice_result.take() {
+            self.waiting_for_input = false;
+            idx
+        } else {
+            let hs = hotspots
+                .iter()
+                .map(|h| (h.name.clone(), (h.area.x1, h.area.y1, h.area.x2, h.area.y2)))
+                .collect();
+            self.pending.push(VnCommand::ShowImagemap {
+                background: background.to_string(),
+                hover_image: hover_image.map(str::to_string),
+                hotspots: hs,
+            });
+            self.waiting_for_input = true;
+            0
+        }
+    }
+
+    fn restore_screen(&mut self, state: &GameState) {
+        self.pending.push(VnCommand::SetBackground {
+            path: state.background_image.clone(),
+            transition: Transition::None,
+        });
+        for (id, sprite) in &state.sprites {
+            if sprite.visible {
+                self.pending.push(VnCommand::ShowSprite {
+                    id: id.clone(),
+                    emotion: sprite.emotion.clone(),
+                    position: sprite.position.clone(),
+                    transition: Transition::None,
+                });
+            } else {
+                self.pending.push(VnCommand::HideSprite {
+                    id: id.clone(),
+                    transition: Transition::None,
+                });
+            }
+        }
+        if let Some(file) = &state.music.current_file {
+            self.pending.push(VnCommand::MusicPlay {
+                file: file.clone(),
+                transition: Transition::None,
+                previous: None,
+            });
+        }
+    }
+
+    fn set_typewriter_config(&mut self, speed_cps: f32) {
+        self.pending
+            .push(VnCommand::SetTypewriterConfig { speed_cps });
+    }
+}
