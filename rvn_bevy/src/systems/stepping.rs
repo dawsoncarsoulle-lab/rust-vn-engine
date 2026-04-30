@@ -3,7 +3,7 @@ use rvn_parser::Transition;
 
 use crate::resources::{ScriptErrorMessage, VnEngine, VnRenderState, VnState};
 use crate::vn_command::VnCommand;
-use rvn_core::error::ScriptError;
+use rvn_core::{error::ScriptError, Interaction};
 
 use crate::systems::debug_overlay::{DebugOverlayState, DebugStepRequest};
 
@@ -31,108 +31,53 @@ pub fn stepping_system(
         return;
     }
 
-    if let Err(e) = engine.0.step_silent() {
-        let script_err = ScriptError::from_runtime(&e);
-        error!("{script_err}");
-        eprintln!("\n{script_err}");
-        error_msg.0 = script_err.to_string();
-        next_state.set(VnState::Error);
-        return;
-    }
-
-    if engine.0.is_finished() {
-        for cmd in engine.0.renderer.take_pending() {
-            vn_events.send(cmd);
-        }
-        vn_events.send(VnCommand::ScriptFinished);
-        next_state.set(VnState::Finished);
-        return;
-    }
-
-    let wants_to_wait = match engine.0.peek_statement().cloned() {
-        Some(rvn_parser::Statement::Dialogue { .. }) => {
-            if let Err(e) = engine.0.step() {
-                let script_err = ScriptError::from_runtime(&e);
-                error!("{script_err}");
-                eprintln!("\n{script_err}");
-                error_msg.0 = script_err.to_string();
-                next_state.set(VnState::Error);
-                return;
-            }
-            true
-        }
-
-        Some(rvn_parser::Statement::Choice { options }) => {
-            if engine.0.renderer.choice_result.is_some() {
-                if let Err(e) = engine.0.step() {
-                    let script_err = ScriptError::from_runtime(&e);
-                    error!("{script_err}");
-                    eprintln!("\n{script_err}");
-                    error_msg.0 = script_err.to_string();
-                    next_state.set(VnState::Error);
-                    return;
-                }
-                engine
-                    .0
-                    .renderer
-                    .pending
-                    .iter()
-                    .any(|c| matches!(c, VnCommand::ShowDialogue { .. }))
-            } else {
-                let labels: Vec<String> = options
-                    .into_iter()
-                    .map(|(label, _)| label.to_string())
-                    .collect();
-                engine
-                    .0
-                    .renderer
-                    .pending
-                    .push(VnCommand::ShowChoice { options: labels });
-                true
-            }
-        }
-
-        Some(rvn_parser::Statement::Imagemap {
-            background,
-            hover_image,
-            hotspots,
-        }) => {
-            if engine.0.renderer.choice_result.is_some() {
-                if let Err(e) = engine.0.step() {
-                    let script_err = ScriptError::from_runtime(&e);
-                    error!("{script_err}");
-                    eprintln!("\n{script_err}");
-                    error_msg.0 = script_err.to_string();
-                    next_state.set(VnState::Error);
-                    return;
-                }
-                engine
-                    .0
-                    .renderer
-                    .pending
-                    .iter()
-                    .any(|c| matches!(c, VnCommand::ShowDialogue { .. }))
-            } else {
-                let hs = hotspots
-                    .into_iter()
-                    .map(|h| (h.name, (h.area.x1, h.area.y1, h.area.x2, h.area.y2)))
-                    .collect();
-                engine.0.renderer.pending.push(VnCommand::ShowImagemap {
-                    background,
-                    hover_image,
-                    hotspots: hs,
-                });
-                true
-            }
-        }
-
-        _ => {
-            next_state.set(VnState::Finished);
+    let interaction = match engine.0.step_until_interaction() {
+        Ok(interaction) => interaction,
+        Err(e) => {
+            let script_err = ScriptError::from_runtime(&e);
+            error!("{script_err}");
+            eprintln!("\n{script_err}");
+            error_msg.0 = script_err.to_string();
+            next_state.set(VnState::Error);
             return;
         }
     };
 
-    let pending = engine.0.renderer.take_pending();
+    let mut pending = engine.0.renderer.take_pending();
+    let wants_to_wait = interaction.is_some();
+
+    if let Some(interaction) = interaction {
+        match interaction {
+            Interaction::Dialogue { character, text } => {
+                pending.push(VnCommand::ShowDialogue { character, text });
+            }
+            Interaction::Choice { options } => {
+                pending.push(VnCommand::ShowChoice { options });
+            }
+            Interaction::Imagemap {
+                background,
+                hover_image,
+                hotspots,
+            } => {
+                let hotspots = hotspots
+                    .into_iter()
+                    .map(|h| (h.name, (h.area.x1, h.area.y1, h.area.x2, h.area.y2)))
+                    .collect();
+                pending.push(VnCommand::ShowImagemap {
+                    background,
+                    hover_image,
+                    hotspots,
+                });
+            }
+        }
+    } else if engine.0.is_finished() {
+        vn_events.send(VnCommand::ScriptFinished);
+        next_state.set(VnState::Finished);
+        return;
+    } else {
+        next_state.set(VnState::Finished);
+        return;
+    }
 
     let has_anim = pending.iter().any(|cmd| {
         matches!(

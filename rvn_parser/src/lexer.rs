@@ -95,6 +95,8 @@ pub enum Token<'a> {
     BracketClose,
     #[token("typewriter")]
     Typewriter,
+    #[token("use")]
+    Use,
 
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
     Ident(&'a str),
@@ -102,7 +104,11 @@ pub enum Token<'a> {
     #[regex(r#""([^"\\]|\\t|\\u|\\n|\\")*""#)]
     String(&'a str),
 
-    #[regex(r"-?[0-9]+", |lex| lex.slice().parse::<i64>().ok())]
+    // Match integer literals without a leading minus.  Negative numbers are lexed as a
+    // separate Minus token followed by an Int token so that unary minus can be
+    // distinguished from a literal negative value.  The parser will handle
+    // combining a leading minus with the following integer as a negation.
+    #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().ok())]
     Int(i64),
 
     #[regex(r"[0-9]+\.[0-9]+", |lex| lex.slice().parse::<f32>().ok())]

@@ -231,6 +231,7 @@ impl TypewriterState {
 // ─── Localisation ─────────────────────────────────────────────────────────────
 
 /// Configuration de localisation + timestamps pour le hot-reload.
+#[allow(dead_code)]
 #[derive(Resource)]
 pub struct LocaleConfig {
     pub default_lang: String,

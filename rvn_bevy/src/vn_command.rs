@@ -52,6 +52,7 @@ pub enum VnCommand {
     MusicPlay {
         file: String,
         transition: Transition,
+        #[allow(dead_code)]
         previous: Option<String>,
     },
     MusicStop,

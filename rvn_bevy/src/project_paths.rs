@@ -9,6 +9,7 @@
 use std::path::PathBuf;
 use bevy::prelude::Resource;
 
+#[allow(dead_code)]
 #[derive(Resource, Clone)]
 pub struct ProjectPaths {
     /// Root directory of the project (the folder containing `rvn.toml`).

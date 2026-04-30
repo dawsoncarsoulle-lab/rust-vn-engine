@@ -1,3 +1,4 @@
+use rvn_parser::parse;
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
@@ -10,7 +11,7 @@ use clap::{Parser, Subcommand};
 use include_dir::{include_dir, Dir};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use rvn_bevy::run_game;
-use rvn_parser::{parse, Expr, InterpolatedText, Statement, TextSegment};
+use rvn_parser::{parse_file_with_uses, Expr, InterpolatedText, Statement, TextSegment};
 use serde::Deserialize;
 
 static DEFAULT_TEMPLATE: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/template/default");
@@ -60,6 +61,14 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::New { name } => create_project(&name)?,
         Commands::Run { project } => {
+            if let Err(errors) = check_project(&project) {
+                print_project_errors(&project, &errors);
+                eprintln!(
+                    "\nrvn run aborted: fix the project errors above before launching the runtime."
+                );
+                std::process::exit(1);
+            }
+
             if let Err(e) = run_game(&project) {
                 eprintln!("{e}");
                 std::process::exit(1);
@@ -68,10 +77,7 @@ fn main() -> Result<()> {
         Commands::Check { project } => match check_project(&project) {
             Ok(()) => println!("✅ No issues found in {project}."),
             Err(errors) => {
-                eprintln!("❌ Found {} issue(s) in {project}:", errors.len());
-                for err in errors {
-                    eprintln!("- {err}");
-                }
+                print_project_errors(&project, &errors);
                 std::process::exit(1);
             }
         },
@@ -84,6 +90,13 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn print_project_errors(project: &str, errors: &[String]) {
+    eprintln!("❌ RVN project validation failed in {project}:");
+    for err in errors {
+        eprintln!("- {err}");
+    }
 }
 
 fn create_project(name: &str) -> Result<()> {
@@ -102,7 +115,10 @@ fn create_project(name: &str) -> Result<()> {
 
     let rvn_toml_path = project_dir.join("rvn.toml");
     let mut config_contents = fs::read_to_string(&rvn_toml_path).with_context(|| {
-        format!("unable to read configuration file '{}'", rvn_toml_path.display())
+        format!(
+            "unable to read configuration file '{}'",
+            rvn_toml_path.display()
+        )
     })?;
     config_contents = config_contents.replace("Mon Jeu RVN", name);
     fs::write(&rvn_toml_path, config_contents).with_context(|| {
@@ -165,6 +181,7 @@ struct ProjectSection {
     title: Option<String>,
     #[serde(default = "default_main_script")]
     main_script: String,
+    start_label: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -212,8 +229,8 @@ fn default_saves() -> String {
 
 fn load_project_config(project_dir: &Path) -> std::result::Result<ProjectConfig, String> {
     let path = project_dir.join("rvn.toml");
-    let content = fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
+    let content =
+        fs::read_to_string(&path).map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
     toml::from_str(&content).map_err(|e| format!("Failed to parse {}: {e}", path.display()))
 }
 
@@ -227,25 +244,17 @@ fn check_project(project: &str) -> std::result::Result<(), Vec<String>> {
     };
 
     let script_path = project_dir.join(&cfg.project.main_script);
-    let script_content = match fs::read_to_string(&script_path) {
-        Ok(content) => content,
+    let script = match parse_file_with_uses(&script_path) {
+        Ok(script) => script,
         Err(e) => {
             return Err(vec![format!(
-                "Failed to read script {}: {e}",
+                "Script loading error from {}:\n{e}",
                 script_path.display()
             )])
         }
     };
 
-    let script = match parse(&script_content) {
-        Ok(script) => script,
-        Err(e) => {
-            return Err(vec![format!(
-                "Syntax error in {}:\n{e}",
-                script_path.display()
-            )])
-        }
-    };
+    validate_interactions(&script, &mut errors);
 
     let mut labels = Vec::new();
     let mut jumps = Vec::new();
@@ -280,6 +289,13 @@ fn check_project(project: &str) -> std::result::Result<(), Vec<String>> {
     }
 
     let label_set: HashSet<String> = labels.into_iter().collect();
+    if let Some(start_label) = &cfg.project.start_label {
+        if !label_set.contains(start_label) {
+            errors.push(format!(
+                "Configuration error: start_label `{start_label}` does not exist in the resolved project scripts. Add `label {start_label}` or update rvn.toml."
+            ));
+        }
+    }
     for target in &jumps {
         if !label_set.contains(target) {
             errors.push(format!("Undefined label target '{target}'."));
@@ -288,7 +304,9 @@ fn check_project(project: &str) -> std::result::Result<(), Vec<String>> {
 
     for id in &used_characters {
         if !declared_characters.contains(id) {
-            errors.push(format!("Undefined character id '{id}'. Declare it in init with character.create(...)."));
+            errors.push(format!(
+                "Undefined character id '{id}'. Declare it in init with character.create(...)."
+            ));
         }
     }
 
@@ -298,7 +316,9 @@ fn check_project(project: &str) -> std::result::Result<(), Vec<String>> {
             continue;
         }
         if !assigned_vars.contains(var) {
-            errors.push(format!("Variable '{var}' is used before being assigned with `set {var} = ...`."));
+            errors.push(format!(
+                "Variable '{var}' is used before being assigned with `set {var} = ...`."
+            ));
         }
     }
 
@@ -306,7 +326,7 @@ fn check_project(project: &str) -> std::result::Result<(), Vec<String>> {
     let bg_exts = ["png", "jpg", "jpeg", "webp"];
     for bg in &backgrounds {
         if !asset_exists(&assets_dir, bg, &bg_exts) {
-            errors.push(format!("Background asset '{bg}' not found under {}.", assets_dir.display()));
+            errors.push(format!("RVN asset error: background `{bg}` not found under `{}`. Accepted extensions: png, jpg, jpeg, webp.", assets_dir.display()));
         }
     }
 
@@ -317,7 +337,7 @@ fn check_project(project: &str) -> std::result::Result<(), Vec<String>> {
             None => format!("sprites/{character_id}/default"),
         };
         if !asset_exists(&assets_dir, &sprite_path, &sprite_exts) {
-            errors.push(format!("Sprite asset '{sprite_path}' not found under {}.", assets_dir.display()));
+            errors.push(format!("RVN asset error: sprite `{sprite_path}` not found under `{}`. Expected something like `assets/{sprite_path}.png`.", assets_dir.display()));
         }
     }
 
@@ -329,7 +349,7 @@ fn check_project(project: &str) -> std::result::Result<(), Vec<String>> {
             format!("music/{music}")
         };
         if !asset_exists(&assets_dir, &path, &audio_exts) {
-            errors.push(format!("Music asset '{path}' not found under {}.", assets_dir.display()));
+            errors.push(format!("RVN asset error: music `{path}` not found under `{}`. Accepted extensions: ogg, mp3, wav, flac.", assets_dir.display()));
         }
     }
 
@@ -340,24 +360,67 @@ fn check_project(project: &str) -> std::result::Result<(), Vec<String>> {
             format!("sfx/{sfx}")
         };
         if !asset_exists(&assets_dir, &path, &audio_exts) {
-            errors.push(format!("Sound effect asset '{path}' not found under {}.", assets_dir.display()));
+            errors.push(format!("RVN asset error: sound effect `{path}` not found under `{}`. Accepted extensions: ogg, mp3, wav, flac.", assets_dir.display()));
         }
     }
 
     if !project_dir.join(&cfg.paths.theme).exists() {
-        errors.push(format!("Theme file '{}' not found.", project_dir.join(&cfg.paths.theme).display()));
+        errors.push(format!(
+            "Project file error: theme file `{}` not found.",
+            project_dir.join(&cfg.paths.theme).display()
+        ));
     }
     if !project_dir.join(&cfg.paths.locales).exists() {
-        errors.push(format!("Locales directory '{}' not found.", project_dir.join(&cfg.paths.locales).display()));
+        errors.push(format!(
+            "Project directory error: locales directory `{}` not found.",
+            project_dir.join(&cfg.paths.locales).display()
+        ));
     }
     if !project_dir.join(&cfg.paths.saves).exists() {
-        errors.push(format!("Saves directory '{}' not found.", project_dir.join(&cfg.paths.saves).display()));
+        errors.push(format!(
+            "Project directory error: saves directory `{}` not found.",
+            project_dir.join(&cfg.paths.saves).display()
+        ));
     }
 
     if errors.is_empty() {
         Ok(())
     } else {
         Err(errors)
+    }
+}
+
+fn validate_interactions(script: &[Statement], errors: &mut Vec<String>) {
+    for stmt in script {
+        match stmt {
+            Statement::Use { .. } => {}
+            Statement::Init { body } => validate_interactions(body, errors),
+            Statement::Choice { options } => {
+                if options.is_empty() {
+                    errors.push("Script validation error: `choice` block has no option. Add at least one `\"Label\" => { ... }` entry.".to_string());
+                }
+                for (_, body) in options {
+                    validate_interactions(body, errors);
+                }
+            }
+            Statement::Imagemap { hotspots, .. } => {
+                if hotspots.is_empty() {
+                    errors.push("Script validation error: `imagemap` has no hotspot. Add at least one `hotspot { area: (...) } => { ... }` block.".to_string());
+                }
+                for hotspot in hotspots {
+                    validate_interactions(&hotspot.body, errors);
+                }
+            }
+            Statement::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                validate_interactions(then_branch, errors);
+                validate_interactions(else_branch, errors);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -377,6 +440,7 @@ fn collect_from_script(
 ) {
     for stmt in script {
         match stmt {
+            Statement::Use { .. } => {}
             Statement::Init { body } => collect_from_script(
                 body,
                 labels,
@@ -466,15 +530,24 @@ fn collect_from_script(
                 sprites.push((character_id.clone(), emotion.clone()));
             }
             Statement::HideSprite { character_id, .. }
-            | Statement::MoveSprite { character_id, .. } => used_characters.push(character_id.clone()),
-            Statement::MethodCall { target, method, arg, .. } => {
+            | Statement::MoveSprite { character_id, .. } => {
+                used_characters.push(character_id.clone())
+            }
+            Statement::MethodCall {
+                target,
+                method,
+                arg,
+                ..
+            } => {
                 if method == "show" {
                     used_characters.push(target.clone());
                     sprites.push((target.clone(), arg.clone()));
                 }
             }
             Statement::MusicPlay { file, .. } => music_files.push(file.clone()),
-            Statement::SfxPlay { file, .. } | Statement::SfxStop { file, .. } => sfx_files.push(file.clone()),
+            Statement::SfxPlay { file, .. } | Statement::SfxStop { file, .. } => {
+                sfx_files.push(file.clone())
+            }
             Statement::Imagemap {
                 background,
                 hover_image,
@@ -537,7 +610,10 @@ fn asset_exists(assets_dir: &Path, path_without_or_with_ext: &str, extensions: &
     }
 
     for ext in extensions {
-        if assets_dir.join(format!("{path_without_or_with_ext}.{ext}")).exists() {
+        if assets_dir
+            .join(format!("{path_without_or_with_ext}.{ext}"))
+            .exists()
+        {
             return true;
         }
     }
@@ -601,7 +677,11 @@ fn spawn_run_process(current_exe: &Path, project: &str) -> std::result::Result<C
         .map_err(|e| format!("Failed to start game process: {e}"))
 }
 
-fn restart_child(child: &mut Child, current_exe: &Path, project: &str) -> std::result::Result<(), String> {
+fn restart_child(
+    child: &mut Child,
+    current_exe: &Path,
+    project: &str,
+) -> std::result::Result<(), String> {
     let _ = child.kill();
     let _ = child.wait();
     *child = spawn_run_process(current_exe, project)?;

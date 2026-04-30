@@ -7,7 +7,7 @@ pub mod rollback;
 pub mod save;
 pub mod types;
 
-pub use engine::Engine;
+pub use engine::{Engine, Interaction};
 pub use error::RuntimeError;
 pub use eval::{EvalError, eval_bool, eval_expr, eval_interpolated};
 pub use locale::{LocaleManager, collect_strings_from_flat_script, collect_strings_from_script};
@@ -273,7 +273,7 @@ mod tests {
     fn test_music_play_met_a_jour_state() {
         let mut e = engine(r#"music.play("theme.ogg")"#);
         e.step().unwrap();
-        assert_eq!(e.state.music.current_file, Some("theme.ogg".into()));
+        assert_eq!(e.state.music.current_file, Some("music/theme.ogg".into()));
     }
 
     #[test]
@@ -288,5 +288,38 @@ mod tests {
                 .iter()
                 .any(|s| s.contains("Le score est 100."))
         );
+    }
+
+    #[test]
+    fn test_event_driven_choice_api() {
+        let src = r#"
+            set n = 2
+            choice {
+                "Option [n]" => { jump a }
+                "Quitter" => { jump b }
+            }
+            label a
+                sarah "A"
+            label b
+                sarah "B"
+        "#;
+        let mut e = engine(src);
+        let interaction = e.step_until_interaction().unwrap().unwrap();
+        match interaction {
+            Interaction::Choice { options } => {
+                assert_eq!(options[0], "Option 2");
+                assert_eq!(options[1], "Quitter");
+            }
+            other => panic!("interaction inattendue: {other:?}"),
+        }
+        e.submit_choice(0).unwrap();
+        let interaction = e.step_until_interaction().unwrap().unwrap();
+        match interaction {
+            Interaction::Dialogue { character, text } => {
+                assert_eq!(character.as_deref(), Some("sarah"));
+                assert_eq!(text, "A");
+            }
+            other => panic!("interaction inattendue: {other:?}"),
+        }
     }
 }

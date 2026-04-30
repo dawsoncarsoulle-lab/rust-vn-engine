@@ -1,4 +1,3 @@
-use bevy::prelude::*;
 use rvn_core::{GameState, Renderer, SpriteState};
 use rvn_parser::{Hotspot, Position, Transition};
 

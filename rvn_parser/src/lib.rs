@@ -11,17 +11,104 @@ pub use error::*;
 pub use expr::{BinOpKind, Expr, InterpolatedText, TextSegment};
 pub use parser::{parse, parse_interpolated_str};
 
+use std::collections::HashSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+/// Parse un fichier `.rvn` en résolvant récursivement les instructions `use`.
+///
+/// Les chemins sont résolus relativement au fichier qui contient le `use`.
+/// Les cycles sont détectés et signalés clairement. Un fichier déjà chargé est
+/// ignoré lors des inclusions suivantes afin d'éviter les doubles définitions.
+pub fn parse_file_with_uses<P: AsRef<Path>>(path: P) -> Result<Script, String> {
+    let mut stack = Vec::new();
+    let mut loaded = HashSet::new();
+    parse_file_with_uses_inner(path.as_ref(), &mut stack, &mut loaded)
+}
+
+fn parse_file_with_uses_inner(
+    path: &Path,
+    stack: &mut Vec<PathBuf>,
+    loaded: &mut HashSet<PathBuf>,
+) -> Result<Script, String> {
+    let canonical = fs::canonicalize(path)
+        .map_err(|e| format!("fichier RVN introuvable `{}`: {e}", path.display()))?;
+
+    if let Some(pos) = stack.iter().position(|p| p == &canonical) {
+        let mut cycle: Vec<String> = stack[pos..]
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
+        cycle.push(canonical.display().to_string());
+        return Err(format!("cycle de `use` détecté: {}", cycle.join(" -> ")));
+    }
+
+    if !loaded.insert(canonical.clone()) {
+        return Ok(Vec::new());
+    }
+
+    stack.push(canonical.clone());
+    let source = fs::read_to_string(&canonical)
+        .map_err(|e| format!("impossible de lire `{}`: {e}", canonical.display()))?;
+    let script = parse(&source)
+        .map_err(|e| format!("Erreur de parsing dans `{}`:\n{}", canonical.display(), e))?;
+    let base_dir = canonical.parent().unwrap_or_else(|| Path::new("."));
+
+    let mut resolved = Vec::new();
+    for stmt in script {
+        match stmt {
+            Statement::Use { paths } => {
+                for use_path in paths {
+                    let targets = expand_use_path(base_dir, &use_path)?;
+                    for target in targets {
+                        let mut nested = parse_file_with_uses_inner(&target, stack, loaded)?;
+                        resolved.append(&mut nested);
+                    }
+                }
+            }
+            other => resolved.push(other),
+        }
+    }
+
+    stack.pop();
+    Ok(resolved)
+}
+
+fn expand_use_path(base_dir: &Path, raw: &str) -> Result<Vec<PathBuf>, String> {
+    if raw.ends_with("/*") || raw.ends_with("/*.rvn") {
+        let dir_part = raw
+            .strip_suffix("/*.rvn")
+            .or_else(|| raw.strip_suffix("/*"))
+            .unwrap_or(raw);
+        let dir = base_dir.join(dir_part);
+        let mut files = Vec::new();
+        let entries = fs::read_dir(&dir)
+            .map_err(|e| format!("impossible de lire le dossier `use` `{}`: {e}", dir.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("erreur de lecture dans `{}`: {e}", dir.display()))?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("rvn") {
+                files.push(path);
+            }
+        }
+        files.sort();
+        if files.is_empty() {
+            return Err(format!(
+                "aucun fichier `.rvn` trouvé pour le `use` wildcard `{}`",
+                dir.display()
+            ));
+        }
+        return Ok(files);
+    }
+
+    Ok(vec![base_dir.join(raw)])
+}
+
 // ─── TESTS ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── Helpers ──────────────────────────────────────────────────────────────
-
-    fn plain(s: &str) -> InterpolatedText {
-        InterpolatedText::plain(s)
-    }
 
     // ── Interpolation ─────────────────────────────────────────────────────────
 
@@ -364,5 +451,22 @@ mod tests {
                 len: 3
             }
         );
+    }    #[test]
+    fn test_use_single_file() {
+        let s = parse(r#"use "chapitres/intro.rvn""#).unwrap();
+        let Statement::Use { paths } = &s[0] else {
+            panic!()
+        };
+        assert_eq!(paths, &vec!["chapitres/intro.rvn".to_string()]);
     }
+
+    #[test]
+    fn test_use_group() {
+        let s = parse(r#"use { "a.rvn", "b.rvn", }"#).unwrap();
+        let Statement::Use { paths } = &s[0] else {
+            panic!()
+        };
+        assert_eq!(paths, &vec!["a.rvn".to_string(), "b.rvn".to_string()]);
+    }
+
 }

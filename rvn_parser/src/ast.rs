@@ -142,6 +142,11 @@ pub struct Hotspot {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
+    /// Charge un ou plusieurs fichiers .rvn avant exécution.
+    /// Cette instruction est résolue par le loader de projet avant de créer le moteur.
+    Use {
+        paths: Vec<String>,
+    },
     Init {
         body: Vec<Statement>,
     },

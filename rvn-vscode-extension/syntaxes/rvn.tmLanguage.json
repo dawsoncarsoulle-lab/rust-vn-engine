@@ -3,7 +3,7 @@
   "patterns": [
     {
       "name": "keyword.control.rvn",
-      "match": "\\b(if|else|jump|choice|init|label|imagemap|hotspot)\\b"
+      "match": "\\b(use|if|else|jump|call|return|choice|init|label|imagemap|hotspot)\\b"
     },
     {
       "name": "entity.name.function.rvn",

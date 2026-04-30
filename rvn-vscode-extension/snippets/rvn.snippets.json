@@ -1,4 +1,14 @@
 {
+  "Use Script": {
+    "prefix": "use",
+    "body": ["use \"${1:scripts/chapter.rvn}\""],
+    "description": "Charge un fichier RVN"
+  },
+  "Use Group": {
+    "prefix": "useg",
+    "body": ["use {", "\t\"${1:common/personnages.rvn}\",", "\t\"${2:chapters/01_intro.rvn}\",", "}"],
+    "description": "Charge plusieurs fichiers RVN"
+  },
   "Typewriter Speed": {
     "prefix": "typ",
     "body": ["typewriter = true", "typewriter.speed(${1:40})"],

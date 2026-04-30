@@ -302,6 +302,7 @@ fn collect_recursive(stmts: &[rvn_parser::Statement], out: &mut Vec<String>) {
                     collect_recursive(body, out);
                 }
             }
+            Statement::Use { .. } => {},
             Statement::Init { body } => collect_recursive(body, out),
             Statement::If {
                 then_branch,

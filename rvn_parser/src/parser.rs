@@ -117,11 +117,38 @@ impl<'a> Parser<'a> {
     }
 
     fn expect(&mut self, expected: &'static str) -> ParseResult<Token<'a>> {
+        // Consume the next non-newline token and ensure it matches the given expectation
+        // when the expected string corresponds to a specific punctuation token.  For
+        // contextual expectations such as "string pour name" this simply returns the
+        // next token without additional checks.  If the end of file is reached, an EOF
+        // error is returned with the expected description.
         let loc = self.current_location();
-        match self.advance().cloned() {
-            Some(tok) => Ok(tok),
-            None => Err(self.err_eof(loc, expected)),
+        let tok = match self.advance().cloned() {
+            Some(tok) => tok,
+            None => return Err(self.err_eof(loc, expected)),
+        };
+        // Only perform a token kind check when the expected string represents a
+        // punctuation token.  Otherwise, callers handle the returned token and
+        // implement their own checks.
+        let matches = match expected {
+            "{" => matches!(tok, Token::BraceOpen),
+            "}" => matches!(tok, Token::BraceClose),
+            "(" => matches!(tok, Token::ParenOpen),
+            ")" => matches!(tok, Token::ParenClose),
+            "[" => matches!(tok, Token::BracketOpen),
+            "]" => matches!(tok, Token::BracketClose),
+            ":" => matches!(tok, Token::Colon),
+            "," => matches!(tok, Token::Comma),
+            "." => matches!(tok, Token::Dot),
+            "=" => matches!(tok, Token::Assign),
+            "=>" => matches!(tok, Token::Arrow),
+            // For descriptive expectations we skip checking here
+            _ => true,
+        };
+        if !matches {
+            return Err(self.err_token(loc, &tok, expected));
         }
+        Ok(tok)
     }
 
     fn unwrap_string(tok: &Token<'a>) -> &'a str {
@@ -142,11 +169,29 @@ impl<'a> Parser<'a> {
     }
 
     fn expect_i32(&mut self, ctx: &'static str) -> ParseResult<i32> {
+        // Accept an optional leading minus sign followed by an Int token.  This allows
+        // negative coordinate values to be parsed in rect definitions.  If a minus
+        // appears without an integer following it, an error is raised.
         let loc = self.current_location();
-        match self.advance().cloned() {
-            Some(Token::Int(n)) => Ok(n as i32),
-            Some(tok) => Err(self.err_token(loc, &tok, ctx)),
-            None => Err(self.err_eof(loc, ctx)),
+        let tok = match self.advance().cloned() {
+            Some(tok) => tok,
+            None => return Err(self.err_eof(loc, ctx)),
+        };
+        match tok {
+            Token::Int(n) => Ok(n as i32),
+            Token::Minus => {
+                // Expect an integer after the minus sign
+                let next_tok = match self.advance().cloned() {
+                    Some(tok) => tok,
+                    None => return Err(self.err_eof(loc, ctx)),
+                };
+                if let Token::Int(n) = next_tok {
+                    Ok(-(n as i32))
+                } else {
+                    Err(self.err_token(loc, &next_tok, ctx))
+                }
+            }
+            other => Err(self.err_token(loc, &other, ctx)),
         }
     }
 
@@ -299,7 +344,7 @@ impl<'a> Parser<'a> {
         let mut lit = String::new();
         let mut chars = raw.char_indices().peekable();
 
-        while let Some((i, c)) = chars.next() {
+        while let Some((_i, c)) = chars.next() {
             match c {
                 '[' => {
                     // Échappement [[ → [
@@ -388,6 +433,7 @@ impl<'a> Parser<'a> {
     fn parse_statement(&mut self) -> ParseResult<Statement> {
         let loc = self.current_location();
         match self.peek().cloned() {
+            Some(Token::Use) => self.parse_use(),
             Some(Token::Init) => self.parse_init(),
             Some(Token::Choice) => self.parse_choice(),
             Some(Token::Set) => self.parse_set(),
@@ -406,6 +452,63 @@ impl<'a> Parser<'a> {
             Some(Token::Ident(_)) => self.parse_ident_statement(),
             Some(tok) => Err(self.err_token(loc, &tok, "début d'une instruction")),
             None => Err(self.err_eof(loc, "début d'une instruction")),
+        }
+    }
+
+    // ── `use "file.rvn"` / `use { "a.rvn", "b.rvn" }` ─────────────────────
+
+    fn parse_use(&mut self) -> ParseResult<Statement> {
+        self.advance();
+        let loc = self.current_location();
+        match self.peek().cloned() {
+            Some(Token::String(_)) => {
+                let tok = self.expect("chemin de fichier après `use`")?;
+                Ok(Statement::Use {
+                    paths: vec![Self::unwrap_string(&tok).to_string()],
+                })
+            }
+            Some(Token::BraceOpen) => {
+                self.advance();
+                let mut paths = Vec::new();
+                loop {
+                    let item_loc = self.current_location();
+                    match self.peek().cloned() {
+                        Some(Token::BraceClose) => {
+                            self.advance();
+                            break;
+                        }
+                        Some(Token::String(_)) => {
+                            let tok = self.expect("chemin de fichier dans `use { ... }`")?;
+                            paths.push(Self::unwrap_string(&tok).to_string());
+                            match self.peek().cloned() {
+                                Some(Token::Comma) => {
+                                    self.advance();
+                                }
+                                Some(Token::BraceClose) => {},
+                                Some(tok) => {
+                                    return Err(self.err_token(
+                                        item_loc,
+                                        &tok,
+                                        "`,` ou `}` après un chemin de fichier",
+                                    ));
+                                }
+                                None => return Err(self.err_eof(item_loc, "}` pour fermer `use`")),
+                            }
+                        }
+                        Some(tok) => {
+                            return Err(self.err_token(
+                                item_loc,
+                                &tok,
+                                "string de chemin ou `}` dans `use { ... }`",
+                            ));
+                        }
+                        None => return Err(self.err_eof(item_loc, "}` pour fermer `use`")),
+                    }
+                }
+                Ok(Statement::Use { paths })
+            }
+            Some(tok) => Err(self.err_token(loc, &tok, "chemin de fichier après `use`")),
+            None => Err(self.err_eof(loc, "chemin de fichier après `use`")),
         }
     }
 

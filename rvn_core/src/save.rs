@@ -472,6 +472,7 @@ mod tests {
 
         let mut state2 = sample_state();
         state2.pc = 99;
+        state2.current_interactive_pc = 99;
         mgr.save(&state2, 1, "Écrasé".into(), "s.rvn".into())
             .unwrap();
 

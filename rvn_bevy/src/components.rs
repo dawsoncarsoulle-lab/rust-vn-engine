@@ -17,6 +17,7 @@ pub struct CharacterNameText;
 #[derive(Component)]
 pub struct DialogueText;
 
+#[allow(dead_code)]
 #[derive(Component)]
 pub struct ChoiceButton(pub usize);
 

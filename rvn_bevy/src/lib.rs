@@ -10,46 +10,81 @@
 
 mod bevy_renderer;
 mod components;
+mod project_paths;
 mod resources;
 mod systems;
 mod vn_command;
-mod project_paths;
-
-use bevy::prelude::*;
 use crate::bevy_renderer::BevyRenderer;
+use crate::project_paths::ProjectPaths;
 use crate::resources::{
     CharacterRegistry, ChoiceFocus, DialogueHistory, ImagemapState, LocaleConfig, MenuState,
     MusicEntity, MusicVolume, ScriptErrorMessage, Theme, ThemeWatcher, TypewriterConfig,
     TypewriterState, VnEngine, VnRenderState, VnState,
 };
-use crate::project_paths::ProjectPaths;
+use crate::systems::save_menu::{SaveMenuMode, SaveMenuState};
 use crate::systems::settings_menu::{Settings, SettingsMenuState};
-use crate::systems::save_menu::{SaveMenuState, SaveMenuMode};
 use crate::systems::{
-    apply_theme_system, audio_fade_system, audio_system, background_system,
-    build_character_registry, choice_system, despawn_error_overlay, despawn_history_overlay,
-    despawn_menu_overlay, despawn_title_screen, dialogue_system, fade_system,
-    history_input_system, imagemap_cleanup_system, imagemap_dimensions_system,
-    imagemap_hover_system, imagemap_system, input_system, locale_lang_watch_system,
-    locale_reload_system, menu_input_system, menu_interaction_system, player_input_system,
-    script_finished_system, spawn_error_overlay, spawn_history_overlay, spawn_menu_overlay,
-    spawn_title_screen, sprite_system, stepping_system, theme_reload_system,
-    title_interaction_system, typewriter_config_system, typewriter_system, update_choice_buttons,
-    // Imports pour l'overlay de debug
-    DebugOverlayState, DebugStepRequest, debug_toggle_system, debug_step_input_system,
-    spawn_or_despawn_debug_overlay_system, update_debug_overlay_system,
+    apply_settings_to_runtime_system,
+    apply_theme_system,
+    audio_fade_system,
+    audio_system,
+    background_system,
+    build_character_registry,
+    choice_system,
+    debug_step_input_system,
+    debug_toggle_system,
+    despawn_error_overlay,
+    despawn_history_overlay,
+    despawn_menu_overlay,
+    despawn_save_menu_overlay,
+    despawn_settings_menu_overlay,
+    despawn_title_screen,
+    dialogue_system,
+    fade_system,
+    history_input_system,
+    imagemap_cleanup_system,
+    imagemap_dimensions_system,
+    imagemap_hover_system,
+    imagemap_system,
+    input_system,
+    locale_lang_watch_system,
+    locale_reload_system,
+    menu_input_system,
+    menu_interaction_system,
+    player_input_system,
+    save_menu_interaction_system,
+    script_finished_system,
+    settings_menu_interaction_system,
     setup_ui,
+    spawn_error_overlay,
+    spawn_history_overlay,
+    spawn_menu_overlay,
+    spawn_or_despawn_debug_overlay_system,
     // Save/load menu systems
-    spawn_save_menu_overlay, save_menu_interaction_system, despawn_save_menu_overlay,
+    spawn_save_menu_overlay,
     // Settings menu systems
-    spawn_settings_menu_overlay, settings_menu_interaction_system, update_settings_value_text_system, apply_settings_to_runtime_system, despawn_settings_menu_overlay,
+    spawn_settings_menu_overlay,
+    spawn_title_screen,
+    sprite_system,
+    stepping_system,
+    theme_reload_system,
+    title_interaction_system,
+    typewriter_config_system,
+    typewriter_system,
+    update_choice_buttons,
+    update_debug_overlay_system,
+    update_settings_value_text_system,
+    // Imports pour l'overlay de debug
+    DebugOverlayState,
+    DebugStepRequest,
 };
 use crate::vn_command::{PlayerInput, VnCommand};
+use bevy::prelude::*;
 use rvn_core::{
     locale::{collect_strings_from_flat_script, LocaleManager},
     Engine,
 };
-use rvn_parser::parse;
+use rvn_parser::{parse_file_with_uses, Statement};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
@@ -71,8 +106,7 @@ struct ProjectSection {
     /// Relative path to the main script file within the project directory.
     #[serde(default = "default_main_script")]
     main_script: String,
-    /// Optional start label (unused for now).
-    #[allow(dead_code)]
+    /// Optional start label.
     start_label: Option<String>,
 }
 
@@ -180,26 +214,15 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
             e
         )
     })?;
-    let cfg: RvnToml = toml::from_str(&rvn_toml_content).map_err(|e| {
-        format!(
-            "Impossible de parser {}: {}",
-            rvn_toml_path.display(),
-            e
-        )
-    })?;
+    let cfg: RvnToml = toml::from_str(&rvn_toml_content)
+        .map_err(|e| format!("Impossible de parser {}: {}", rvn_toml_path.display(), e))?;
 
     // 2. Determine the script path relative to the project directory.
+    // 2. Determine the script path relative to the project directory and resolve `use` directives.
     let script_path = project_dir.join(&cfg.project.main_script);
-    let script_content = std::fs::read_to_string(&script_path).map_err(|e| {
+    let script = parse_file_with_uses(&script_path).map_err(|e| {
         format!(
-            "Impossible de lire le fichier {}: {}",
-            script_path.display(),
-            e
-        )
-    })?;
-    let script = parse(&script_content).map_err(|e| {
-        format!(
-            "Erreur de parsing dans `{}`:\n{}",
+            "Erreur de chargement des scripts depuis `{}`:\n{}",
             script_path.display(),
             e
         )
@@ -234,6 +257,24 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
     let mut engine = Engine::new(script, renderer, 64)
         .map_err(|e| format!("Erreur d'initialisation du moteur: {e}"))?;
     engine.locale = Some(locale_mgr);
+    // If a start label is specified in the configuration, jump to that label in
+    // the script after initialisation.  This allows the author to control
+    // where execution begins (for example, skipping an optional prologue).
+    if let Some(ref start_label) = cfg.project.start_label {
+        // Find the position of the label in the script and update the program counter.
+        if let Some(pos) = engine
+            .script
+            .iter()
+            .position(|stmt| matches!(stmt, Statement::Label { name } if name == start_label))
+        {
+            engine.state.pc = pos;
+        } else {
+            return Err(format!(
+                "start_label `{start_label}` introuvable dans `{}`",
+                script_path.display()
+            ));
+        }
+    }
 
     // 7. Collect strings from the flat script and update default locale.
     let strings = collect_strings_from_flat_script(&engine.script);
@@ -281,10 +322,7 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
     // Bevy resolves AssetServer paths through the default `assets/` folder under
     // BEVY_ASSET_ROOT. Therefore the root must be the project directory, not
     // the assets directory itself. Otherwise paths become `assets/assets/...`.
-    std::env::set_var(
-        "BEVY_ASSET_ROOT",
-        project_dir.to_string_lossy().to_string(),
-    );
+    std::env::set_var("BEVY_ASSET_ROOT", project_dir.to_string_lossy().to_string());
 
     // 11a. Build a ProjectPaths resource to make paths accessible to systems.
     let project_paths = ProjectPaths::new(
@@ -412,7 +450,14 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
         )
         .add_systems(Update, update_debug_overlay_system)
         // Debug overlay : toggling, spawn/despawn et gestion du step F10
-        .add_systems(Update, (debug_toggle_system, spawn_or_despawn_debug_overlay_system, debug_step_input_system))
+        .add_systems(
+            Update,
+            (
+                debug_toggle_system,
+                spawn_or_despawn_debug_overlay_system,
+                debug_step_input_system,
+            ),
+        )
         .run();
 
     Ok(())
@@ -423,4 +468,3 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
 fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
 }
-

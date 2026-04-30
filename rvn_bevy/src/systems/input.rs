@@ -3,9 +3,11 @@ use rvn_parser::Transition;
 
 use super::{CHOICE_MARGIN_ABOVE_BOX, TEXTBOX_H, WIN_H, WIN_W};
 use crate::resources::{
-    ChoiceFocus, ImagemapState, MenuState, TypewriterState, VnEngine, VnRenderState, VnState,
+    ChoiceFocus, ImagemapState, MenuState, ScriptErrorMessage, TypewriterState, VnEngine,
+    VnRenderState, VnState,
 };
 use crate::vn_command::{PlayerInput, VnCommand};
+use rvn_core::error::ScriptError;
 
 pub fn input_system(
     keys: Res<ButtonInput<KeyCode>>,
@@ -175,15 +177,31 @@ pub fn player_input_system(
     mut tw_state: ResMut<TypewriterState>,
     mut choice_focus: ResMut<ChoiceFocus>,
     mut vn_events: EventWriter<VnCommand>,
+    mut error_msg: ResMut<ScriptErrorMessage>,
 ) {
     for input in events.read() {
         match input {
             PlayerInput::Advance => {
+                if let Err(e) = engine.0.advance_dialogue() {
+                    let script_err = ScriptError::from_runtime(&e);
+                    error!("{script_err}");
+                    eprintln!("\n{script_err}");
+                    error_msg.0 = script_err.to_string();
+                    next_state.set(VnState::Error);
+                    return;
+                }
                 next_state.set(VnState::Stepping);
             }
 
             PlayerInput::Choose(idx) => {
-                engine.0.renderer.choice_result = Some(*idx);
+                if let Err(e) = engine.0.submit_selection(*idx) {
+                    let script_err = ScriptError::from_runtime(&e);
+                    error!("{script_err}");
+                    eprintln!("\n{script_err}");
+                    error_msg.0 = script_err.to_string();
+                    next_state.set(VnState::Error);
+                    return;
+                }
                 render_state.choice_options.clear();
                 imagemap_state.clear();
                 choice_focus.clear();
