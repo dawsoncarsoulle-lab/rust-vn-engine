@@ -28,6 +28,7 @@ use crate::systems::{
     apply_theme_system,
     audio_fade_system,
     audio_system,
+    background_cover_resize_system,
     background_system,
     build_character_registry,
     choice_system,
@@ -65,6 +66,7 @@ use crate::systems::{
     // Settings menu systems
     spawn_settings_menu_overlay,
     spawn_title_screen,
+    sprite_animation_system,
     sprite_system,
     stepping_system,
     theme_reload_system,
@@ -404,7 +406,9 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
                 stepping_system.run_if(in_state(VnState::Stepping)),
                 (
                     background_system,
+                    background_cover_resize_system,
                     sprite_system,
+                    sprite_animation_system,
                     dialogue_system,
                     choice_system,
                     imagemap_system,

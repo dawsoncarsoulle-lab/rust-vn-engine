@@ -138,6 +138,22 @@ pub struct Hotspot {
     pub body: Vec<Statement>,
 }
 
+// ─── ANIMATIONS ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnimationValue {
+    Bool(bool),
+    Int(i64),
+    Float(f32),
+    Str(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnimationParam {
+    pub name: String,
+    pub value: AnimationValue,
+}
+
 // ─── AST ─────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
@@ -211,6 +227,14 @@ pub enum Statement {
         character_id: String,
         position: Position,
         transition: Transition,
+    },
+    SpriteAnimate {
+        character_id: String,
+        animation: String,
+        params: Vec<AnimationParam>,
+    },
+    SpriteStopAnimation {
+        character_id: String,
     },
     MethodCall {
         target: String,

@@ -82,10 +82,15 @@ fn expand_use_path(base_dir: &Path, raw: &str) -> Result<Vec<PathBuf>, String> {
             .unwrap_or(raw);
         let dir = base_dir.join(dir_part);
         let mut files = Vec::new();
-        let entries = fs::read_dir(&dir)
-            .map_err(|e| format!("impossible de lire le dossier `use` `{}`: {e}", dir.display()))?;
+        let entries = fs::read_dir(&dir).map_err(|e| {
+            format!(
+                "impossible de lire le dossier `use` `{}`: {e}",
+                dir.display()
+            )
+        })?;
         for entry in entries {
-            let entry = entry.map_err(|e| format!("erreur de lecture dans `{}`: {e}", dir.display()))?;
+            let entry =
+                entry.map_err(|e| format!("erreur de lecture dans `{}`: {e}", dir.display()))?;
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) == Some("rvn") {
                 files.push(path);
@@ -451,7 +456,8 @@ mod tests {
                 len: 3
             }
         );
-    }    #[test]
+    }
+    #[test]
     fn test_use_single_file() {
         let s = parse(r#"use "chapitres/intro.rvn""#).unwrap();
         let Statement::Use { paths } = &s[0] else {
@@ -468,5 +474,29 @@ mod tests {
         };
         assert_eq!(paths, &vec!["a.rvn".to_string(), "b.rvn".to_string()]);
     }
+    #[test]
+    fn test_sprite_animate_with_params() {
+        let s =
+            parse(r#"eileen.animate("bounce", loop: true, duration: 0.5, height: 18)"#).unwrap();
+        let Statement::SpriteAnimate {
+            character_id,
+            animation,
+            params,
+        } = &s[0]
+        else {
+            panic!("expected SpriteAnimate");
+        };
+        assert_eq!(character_id, "eileen");
+        assert_eq!(animation, "bounce");
+        assert_eq!(params.len(), 3);
+    }
 
+    #[test]
+    fn test_sprite_stop_animation() {
+        let s = parse("eileen.stop_animation()").unwrap();
+        assert!(matches!(
+            &s[0],
+            Statement::SpriteStopAnimation { character_id } if character_id == "eileen"
+        ));
+    }
 }

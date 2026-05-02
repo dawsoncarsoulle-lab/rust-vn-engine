@@ -8,6 +8,27 @@ pub struct VnSprite {
     pub id: String,
 }
 
+#[derive(Component, Clone, Copy)]
+pub struct SpriteBaseTransform {
+    pub translation: Vec3,
+    pub scale: Vec3,
+}
+
+#[derive(Debug, Clone)]
+pub enum AnimationKind {
+    Shake { intensity: f32 },
+    Bounce { height: f32 },
+    Pulse { scale: f32 },
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct SpriteAnimation {
+    pub kind: AnimationKind,
+    pub duration_secs: f32,
+    pub elapsed_secs: f32,
+    pub looping: bool,
+}
+
 #[derive(Component)]
 pub struct DialogueBox;
 

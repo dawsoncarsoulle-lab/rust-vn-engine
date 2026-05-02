@@ -36,7 +36,7 @@ pub enum Interaction {
 pub fn flatten_ast(script: &mut Script, extra: &mut Vec<Statement>, counter: &mut usize) {
     for stmt in script.iter_mut() {
         match stmt {
-            Statement::Use { .. } | Statement::Init { .. } => {},
+            Statement::Use { .. } | Statement::Init { .. } => {}
             Statement::If {
                 then_branch,
                 else_branch,
@@ -553,9 +553,9 @@ impl<R: Renderer> Engine<R> {
                     self.state.pc += 1;
                     return Ok(());
                 }
-                let selected = self
-                    .renderer
-                    .show_imagemap(&background, hover_image.as_deref(), &hotspots);
+                let selected =
+                    self.renderer
+                        .show_imagemap(&background, hover_image.as_deref(), &hotspots);
                 // Clamp to a valid index to avoid panics if the renderer returns an
                 // out-of-range selection.
                 let idx = selected.min(hotspots.len().saturating_sub(1));
@@ -626,6 +626,19 @@ impl<R: Renderer> Engine<R> {
                 transition,
             } => {
                 self.exec_move(&character_id, position, transition)?;
+                self.state.pc += 1;
+            }
+            Statement::SpriteAnimate {
+                character_id,
+                animation,
+                params,
+            } => {
+                self.renderer
+                    .animate_sprite(&character_id, &animation, &params);
+                self.state.pc += 1;
+            }
+            Statement::SpriteStopAnimation { character_id } => {
+                self.renderer.stop_sprite_animation(&character_id);
                 self.state.pc += 1;
             }
             Statement::MethodCall {

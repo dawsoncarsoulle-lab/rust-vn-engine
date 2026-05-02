@@ -89,7 +89,7 @@ pub fn ensure_extension(path: &str) -> String {
 }
 
 pub use audio::{audio_fade_system, audio_system};
-pub use background::background_system;
+pub use background::{background_cover_resize_system, background_system};
 pub use choice::{choice_system, update_choice_buttons};
 pub use dialogue::dialogue_system;
 pub use error_overlay::{despawn_error_overlay, spawn_error_overlay};
@@ -102,7 +102,7 @@ pub use input::{input_system, menu_input_system, player_input_system};
 pub use locale::{locale_lang_watch_system, locale_reload_system};
 pub use menu::{despawn_menu_overlay, menu_interaction_system, spawn_menu_overlay};
 pub use setup::{build_character_registry, setup_ui};
-pub use sprite::sprite_system;
+pub use sprite::{sprite_animation_system, sprite_system};
 pub use stepping::script_finished_system;
 pub use stepping::stepping_system;
 pub use theme::{apply_theme_system, theme_reload_system};
@@ -112,33 +112,22 @@ pub use typewriter::{typewriter_config_system, typewriter_system};
 // Réexporte les composants et systèmes du menu de sauvegarde afin que
 // `lib.rs` puisse les importer facilement.
 pub use save_menu::{
-    SaveMenuState, SaveMenuMode, SaveMenuOverlay, SaveSlotButton, SaveMenuCancelButton,
-    spawn_save_menu_overlay, save_menu_interaction_system, despawn_save_menu_overlay,
+    despawn_save_menu_overlay, save_menu_interaction_system, spawn_save_menu_overlay,
+    SaveMenuCancelButton, SaveMenuMode, SaveMenuOverlay, SaveMenuState, SaveSlotButton,
 };
 
 // Réexporte les ressources et systèmes du menu des paramètres.
 pub use settings_menu::{
-    Settings,
-    SettingsMenuState,
-    SettingsMenuOverlay,
-    SettingsButton,
-    SettingsValueText,
-    spawn_settings_menu_overlay,
-    settings_menu_interaction_system,
-    update_settings_value_text_system,
-    apply_settings_to_runtime_system,
-    despawn_settings_menu_overlay,
+    apply_settings_to_runtime_system, despawn_settings_menu_overlay,
+    settings_menu_interaction_system, spawn_settings_menu_overlay,
+    update_settings_value_text_system, Settings, SettingsButton, SettingsMenuOverlay,
+    SettingsMenuState, SettingsValueText,
 };
 
 // Re-exporte les systèmes de l'overlay de debug afin que lib.rs puisse les
 // importer facilement.
 pub use debug_overlay::{
-    DebugOverlay,
-    DebugOverlayState,
-    DebugOverlayText,
-    debug_toggle_system,
-    debug_step_input_system,
+    debug_step_input_system, debug_toggle_system, spawn_or_despawn_debug_overlay_system,
+    update_debug_overlay_system, DebugOverlay, DebugOverlayState, DebugOverlayText,
     DebugStepRequest,
-    spawn_or_despawn_debug_overlay_system,
-    update_debug_overlay_system,
 };

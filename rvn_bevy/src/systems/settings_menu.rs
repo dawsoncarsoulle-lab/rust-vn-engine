@@ -168,7 +168,11 @@ pub fn spawn_settings_menu_overlay(
             spawn_toggle_row(
                 parent,
                 "Typewriter",
-                if settings.typewriter { "On".to_string() } else { "Off".to_string() },
+                if settings.typewriter {
+                    "On".to_string()
+                } else {
+                    "Off".to_string()
+                },
                 Some(settings.typewriter),
                 SettingsButton::TypewriterToggle,
                 SettingsValueText::Typewriter,
@@ -186,7 +190,11 @@ pub fn spawn_settings_menu_overlay(
             spawn_toggle_row(
                 parent,
                 "Plein écran",
-                if settings.fullscreen { "On".to_string() } else { "Off".to_string() },
+                if settings.fullscreen {
+                    "On".to_string()
+                } else {
+                    "Off".to_string()
+                },
                 Some(settings.fullscreen),
                 SettingsButton::FullscreenToggle,
                 SettingsValueText::Fullscreen,
@@ -267,56 +275,54 @@ fn spawn_setting_row(
                 value_kind,
             ));
             // Buttons
-            row
-                .spawn((
-                    ButtonBundle {
-                        style: Style {
-                            width: Val::Px(30.0),
-                            height: Val::Px(30.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        background_color: Color::srgba(0.20, 0.20, 0.40, 0.95).into(),
+            row.spawn((
+                ButtonBundle {
+                    style: Style {
+                        width: Val::Px(30.0),
+                        height: Val::Px(30.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
                         ..default()
                     },
-                    dec_button,
-                ))
-                .with_children(|btn| {
-                    btn.spawn(TextBundle::from_section(
-                        "-",
-                        TextStyle {
-                            font_size: 16.0,
-                            color: Color::WHITE,
-                            ..default()
-                        },
-                    ));
-                });
-            row
-                .spawn((
-                    ButtonBundle {
-                        style: Style {
-                            width: Val::Px(30.0),
-                            height: Val::Px(30.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        background_color: Color::srgba(0.20, 0.20, 0.40, 0.95).into(),
+                    background_color: Color::srgba(0.20, 0.20, 0.40, 0.95).into(),
+                    ..default()
+                },
+                dec_button,
+            ))
+            .with_children(|btn| {
+                btn.spawn(TextBundle::from_section(
+                    "-",
+                    TextStyle {
+                        font_size: 16.0,
+                        color: Color::WHITE,
                         ..default()
                     },
-                    inc_button,
-                ))
-                .with_children(|btn| {
-                    btn.spawn(TextBundle::from_section(
-                        "+",
-                        TextStyle {
-                            font_size: 16.0,
-                            color: Color::WHITE,
-                            ..default()
-                        },
-                    ));
-                });
+                ));
+            });
+            row.spawn((
+                ButtonBundle {
+                    style: Style {
+                        width: Val::Px(30.0),
+                        height: Val::Px(30.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    background_color: Color::srgba(0.20, 0.20, 0.40, 0.95).into(),
+                    ..default()
+                },
+                inc_button,
+            ))
+            .with_children(|btn| {
+                btn.spawn(TextBundle::from_section(
+                    "+",
+                    TextStyle {
+                        font_size: 16.0,
+                        color: Color::WHITE,
+                        ..default()
+                    },
+                ));
+            });
         });
 }
 
@@ -368,31 +374,30 @@ fn spawn_toggle_row(
                 ),
                 value_kind,
             ));
-            row
-                .spawn((
-                    ButtonBundle {
-                        style: Style {
-                            width: Val::Px(60.0),
-                            height: Val::Px(30.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        background_color: Color::srgba(0.20, 0.20, 0.40, 0.95).into(),
+            row.spawn((
+                ButtonBundle {
+                    style: Style {
+                        width: Val::Px(60.0),
+                        height: Val::Px(30.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
                         ..default()
                     },
-                    toggle_button,
-                ))
-                .with_children(|btn| {
-                    btn.spawn(TextBundle::from_section(
-                        "Toggle",
-                        TextStyle {
-                            font_size: 14.0,
-                            color: Color::WHITE,
-                            ..default()
-                        },
-                    ));
-                });
+                    background_color: Color::srgba(0.20, 0.20, 0.40, 0.95).into(),
+                    ..default()
+                },
+                toggle_button,
+            ))
+            .with_children(|btn| {
+                btn.spawn(TextBundle::from_section(
+                    "Toggle",
+                    TextStyle {
+                        font_size: 14.0,
+                        color: Color::WHITE,
+                        ..default()
+                    },
+                ));
+            });
         });
 }
 
@@ -400,7 +405,10 @@ fn spawn_toggle_row(
 /// values and toggles flags based on which button was clicked.  Closes the
 /// overlay when the Close button is pressed.
 pub fn settings_menu_interaction_system(
-    mut interaction_query: Query<(&Interaction, &SettingsButton), (Changed<Interaction>, With<Button>)>,
+    mut interaction_query: Query<
+        (&Interaction, &SettingsButton),
+        (Changed<Interaction>, With<Button>),
+    >,
     mut settings_state: ResMut<SettingsMenuState>,
     mut settings: ResMut<Settings>,
     mut windows: Query<&mut Window>,
@@ -479,11 +487,19 @@ pub fn update_settings_value_text_system(
             SettingsValueText::TextSpeed => format!("{:.1}", settings.text_speed),
             SettingsValueText::AutoSpeed => format!("{:.1}", settings.auto_speed),
             SettingsValueText::Typewriter => {
-                if settings.typewriter { "On".to_string() } else { "Off".to_string() }
+                if settings.typewriter {
+                    "On".to_string()
+                } else {
+                    "Off".to_string()
+                }
             }
             SettingsValueText::Language => settings.language.clone(),
             SettingsValueText::Fullscreen => {
-                if settings.fullscreen { "On".to_string() } else { "Off".to_string() }
+                if settings.fullscreen {
+                    "On".to_string()
+                } else {
+                    "Off".to_string()
+                }
             }
         };
 
@@ -495,14 +511,17 @@ pub fn update_settings_value_text_system(
                     SettingsValueText::Fullscreen => settings.fullscreen,
                     _ => false,
                 };
-                if enabled { Color::srgba(0.2, 0.9, 0.2, 1.0) } else { Color::srgba(0.9, 0.2, 0.2, 1.0) }
+                if enabled {
+                    Color::srgba(0.2, 0.9, 0.2, 1.0)
+                } else {
+                    Color::srgba(0.9, 0.2, 0.2, 1.0)
+                }
             }
             SettingsValueText::Language => Color::srgba(0.5, 0.5, 0.9, 1.0),
             _ => Color::srgba(0.5, 0.5, 0.5, 1.0),
         };
     }
 }
-
 
 /// Applies user-facing settings to the actual runtime resources.
 ///

@@ -6,7 +6,7 @@
 //   - MusicStop : reste unitaire (pas de fade-out demandé pour l'instant).
 
 use bevy::prelude::*;
-use rvn_parser::{Position, Transition};
+use rvn_parser::{AnimationParam, Position, Transition};
 
 #[derive(Event, Debug, Clone)]
 pub enum VnCommand {
@@ -29,6 +29,14 @@ pub enum VnCommand {
         id: String,
         position: Position,
         transition: Transition,
+    },
+    AnimateSprite {
+        id: String,
+        animation: String,
+        params: Vec<AnimationParam>,
+    },
+    StopSpriteAnimation {
+        id: String,
     },
 
     // ── Dialogue / choix ──────────────────────────────────────────────────────

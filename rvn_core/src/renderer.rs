@@ -1,5 +1,5 @@
 use crate::types::{GameState, MusicState, SpriteState};
-use rvn_parser::{Hotspot, Position, Transition};
+use rvn_parser::{AnimationParam, Hotspot, Position, Transition};
 use std::io;
 
 // ─── TRAIT ───────────────────────────────────────────────────────────────────
@@ -22,6 +22,14 @@ pub trait Renderer {
         transition: &Transition,
         from: &SpriteState,
     );
+
+    /// Lance une animation sur un sprite. Les renderers peuvent ignorer
+    /// cette commande s'ils ne supportent pas les animations.
+    fn animate_sprite(&mut self, _id: &str, _animation: &str, _params: &[AnimationParam]) {}
+
+    /// Arrête l'animation en cours sur un sprite et restaure sa transform de base.
+    fn stop_sprite_animation(&mut self, _id: &str) {}
+
     fn show_dialogue(&mut self, character: Option<&str>, text: &str);
     fn show_choice(&mut self, options: &[String]) -> usize;
     fn music_play(&mut self, file: &str, transition: &Transition, previous: Option<&str>);
@@ -97,6 +105,12 @@ impl Renderer for TerminalRenderer {
     }
     fn move_sprite(&mut self, id: &str, pos: &Position, t: &Transition, _: &SpriteState) {
         println!("[move] {id} → {pos}  [{t}]");
+    }
+    fn animate_sprite(&mut self, id: &str, animation: &str, _params: &[AnimationParam]) {
+        println!("[animate] {id}.{animation}");
+    }
+    fn stop_sprite_animation(&mut self, id: &str) {
+        println!("[animate] stop {id}");
     }
     fn show_dialogue(&mut self, character: Option<&str>, text: &str) {
         match character {

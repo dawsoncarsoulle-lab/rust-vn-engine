@@ -1,5 +1,5 @@
 use rvn_core::{GameState, Renderer, SpriteState};
-use rvn_parser::{Hotspot, Position, Transition};
+use rvn_parser::{AnimationParam, Hotspot, Position, Transition};
 
 use crate::vn_command::VnCommand;
 
@@ -66,6 +66,19 @@ impl Renderer for BevyRenderer {
             position: position.clone(),
             transition: transition.clone(),
         });
+    }
+
+    fn animate_sprite(&mut self, id: &str, animation: &str, params: &[AnimationParam]) {
+        self.pending.push(VnCommand::AnimateSprite {
+            id: id.to_string(),
+            animation: animation.to_string(),
+            params: params.to_vec(),
+        });
+    }
+
+    fn stop_sprite_animation(&mut self, id: &str) {
+        self.pending
+            .push(VnCommand::StopSpriteAnimation { id: id.to_string() });
     }
 
     fn show_dialogue(&mut self, character: Option<&str>, text: &str) {

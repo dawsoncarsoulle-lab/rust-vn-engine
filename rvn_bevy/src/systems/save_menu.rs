@@ -6,14 +6,16 @@
 //! or load depending on the current mode.  The menu can be cancelled
 //! to return to the pause menu without taking any action.
 
-use std::time::{UNIX_EPOCH, Duration};
+use std::time::{Duration, UNIX_EPOCH};
 
 use bevy::prelude::*;
 use chrono::{DateTime, Local};
-use rvn_core::save::{SaveManager, SaveData};
+use rvn_core::save::{SaveData, SaveManager};
 
-use crate::resources::{DialogueHistory, ImagemapState, TypewriterState, VnEngine, VnRenderState, VnState, MenuState};
 use crate::project_paths::ProjectPaths;
+use crate::resources::{
+    DialogueHistory, ImagemapState, MenuState, TypewriterState, VnEngine, VnRenderState, VnState,
+};
 use crate::vn_command::VnCommand;
 use rvn_parser::Transition;
 
@@ -33,7 +35,10 @@ pub struct SaveMenuState {
 
 impl Default for SaveMenuState {
     fn default() -> Self {
-        Self { active: false, mode: SaveMenuMode::Save }
+        Self {
+            active: false,
+            mode: SaveMenuMode::Save,
+        }
     }
 }
 
@@ -61,8 +66,12 @@ pub fn spawn_save_menu_overlay(
     query: Query<Entity, With<SaveMenuOverlay>>,
 ) {
     // Only spawn when becoming active and overlay is not already present
-    if !save_state.active { return; }
-    if !query.is_empty() { return; }
+    if !save_state.active {
+        return;
+    }
+    if !query.is_empty() {
+        return;
+    }
 
     // Build a SaveManager to list existing saves
     let save_mgr = match SaveManager::new(&project_paths.saves, MAX_SLOTS as u32) {
@@ -205,7 +214,16 @@ pub fn spawn_save_menu_overlay(
 /// Handle interactions with the save menu overlay.
 pub fn save_menu_interaction_system(
     mut commands: Commands,
-    mut interaction_query: Query<(&Interaction, Entity, Option<&SaveSlotButton>, Option<&SaveMenuCancelButton>, &mut BackgroundColor), Changed<Interaction>>, 
+    mut interaction_query: Query<
+        (
+            &Interaction,
+            Entity,
+            Option<&SaveSlotButton>,
+            Option<&SaveMenuCancelButton>,
+            &mut BackgroundColor,
+        ),
+        Changed<Interaction>,
+    >,
     mut save_state: ResMut<SaveMenuState>,
     mut next_state: ResMut<NextState<VnState>>,
     mut menu_state: ResMut<MenuState>,
@@ -217,9 +235,12 @@ pub fn save_menu_interaction_system(
     mut history: ResMut<DialogueHistory>,
     mut vn_events: EventWriter<VnCommand>,
 ) {
-    if !save_state.active { return; }
+    if !save_state.active {
+        return;
+    }
 
-    for (interaction, entity, slot_comp, cancel_comp, mut bg_color) in interaction_query.iter_mut() {
+    for (interaction, entity, slot_comp, cancel_comp, mut bg_color) in interaction_query.iter_mut()
+    {
         match interaction {
             Interaction::Hovered => {
                 *bg_color = Color::srgba(0.20, 0.20, 0.40, 0.95).into();
@@ -243,9 +264,13 @@ pub fn save_menu_interaction_system(
                                 SaveMenuMode::Save => {
                                     let label = format!("Sauvegarde {}", slot_index);
                                     let script_name = "script.rvn".to_string();
-                                    match engine.0.save(&mgr, slot_index as u32, label, script_name) {
+                                    match engine.0.save(&mgr, slot_index as u32, label, script_name)
+                                    {
                                         Ok(_) => info!("[save_menu] saved slot {}", slot_index),
-                                        Err(e) => error!("[save_menu] error saving slot {}: {}", slot_index, e),
+                                        Err(e) => error!(
+                                            "[save_menu] error saving slot {}: {}",
+                                            slot_index, e
+                                        ),
                                     }
                                     save_state.active = false;
                                 }
@@ -261,10 +286,18 @@ pub fn save_menu_interaction_system(
                                             let mut pending = engine.0.renderer.take_pending();
                                             for cmd in pending.iter_mut() {
                                                 match cmd {
-                                                    VnCommand::SetBackground { transition, .. } => *transition = Transition::None,
-                                                    VnCommand::ShowSprite { transition, .. } => *transition = Transition::None,
-                                                    VnCommand::HideSprite { transition, .. } => *transition = Transition::None,
-                                                    VnCommand::MoveSprite { transition, .. } => *transition = Transition::None,
+                                                    VnCommand::SetBackground {
+                                                        transition, ..
+                                                    } => *transition = Transition::None,
+                                                    VnCommand::ShowSprite {
+                                                        transition, ..
+                                                    } => *transition = Transition::None,
+                                                    VnCommand::HideSprite {
+                                                        transition, ..
+                                                    } => *transition = Transition::None,
+                                                    VnCommand::MoveSprite {
+                                                        transition, ..
+                                                    } => *transition = Transition::None,
                                                     _ => {}
                                                 }
                                             }
@@ -274,7 +307,10 @@ pub fn save_menu_interaction_system(
                                             menu_state.return_to = None;
                                             next_state.set(VnState::Waiting);
                                         }
-                                        Err(e) => error!("[save_menu] error loading slot {}: {}", slot_index, e),
+                                        Err(e) => error!(
+                                            "[save_menu] error loading slot {}: {}",
+                                            slot_index, e
+                                        ),
                                     }
                                     save_state.active = false;
                                 }
@@ -294,7 +330,9 @@ pub fn despawn_save_menu_overlay(
     save_state: Res<SaveMenuState>,
     overlay_query: Query<Entity, With<SaveMenuOverlay>>,
 ) {
-    if save_state.active { return; }
+    if save_state.active {
+        return;
+    }
     for entity in overlay_query.iter() {
         commands.entity(entity).despawn_recursive();
     }

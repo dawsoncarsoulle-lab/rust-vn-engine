@@ -5,7 +5,7 @@ use rvn_parser::Transition;
 use crate::resources::{
     DialogueHistory, ImagemapState, MenuState, TypewriterState, VnEngine, VnRenderState, VnState,
 };
-use crate::systems::save_menu::{SaveMenuState, SaveMenuMode};
+use crate::systems::save_menu::{SaveMenuMode, SaveMenuState};
 use crate::systems::settings_menu::SettingsMenuState;
 use crate::vn_command::VnCommand;
 

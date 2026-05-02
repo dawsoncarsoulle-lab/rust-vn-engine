@@ -117,7 +117,8 @@ pub fn audio_system(
                 commands.spawn((
                     AudioBundle {
                         source,
-                        settings: PlaybackSettings::ONCE.with_volume(Volume::new(settings.sfx_volume)),
+                        settings: PlaybackSettings::ONCE
+                            .with_volume(Volume::new(settings.sfx_volume)),
                     },
                     SfxSource { file: file.clone() },
                 ));

@@ -484,7 +484,7 @@ impl<'a> Parser<'a> {
                                 Some(Token::Comma) => {
                                     self.advance();
                                 }
-                                Some(Token::BraceClose) => {},
+                                Some(Token::BraceClose) => {}
                                 Some(tok) => {
                                     return Err(self.err_token(
                                         item_loc,
@@ -611,7 +611,11 @@ impl<'a> Parser<'a> {
                     }
                 }
                 Some(tok) => {
-                    return Err(self.err_token(loc, &tok, "hotspot, background ou } dans imagemap"));
+                    return Err(self.err_token(
+                        loc,
+                        &tok,
+                        "hotspot, background ou } dans imagemap",
+                    ));
                 }
                 None => return Err(self.err_eof(loc, "} pour fermer imagemap")),
             }
@@ -759,6 +763,18 @@ impl<'a> Parser<'a> {
         self.advance();
         let method = self.expect_ident("nom de méthode")?;
         self.expect("(")?;
+
+        if method == "animate" {
+            return self.parse_animate_call(target);
+        }
+
+        if method == "stop_animation" {
+            self.expect(")")?;
+            return Ok(Statement::SpriteStopAnimation {
+                character_id: target,
+            });
+        }
+
         let args = self.parse_optional_args()?;
         self.expect(")")?;
 
@@ -848,6 +864,66 @@ impl<'a> Parser<'a> {
                 })
             }
         }
+    }
+
+    fn parse_animate_call(&mut self, target: String) -> ParseResult<Statement> {
+        let loc = self.current_location();
+        let animation = match self.advance().cloned() {
+            Some(Token::String(raw)) => raw[1..raw.len() - 1].to_string(),
+            Some(tok) => return Err(self.err_token(loc, &tok, "nom d'animation string")),
+            None => return Err(self.err_eof(loc, "nom d'animation")),
+        };
+
+        let mut params = Vec::new();
+        if matches!(self.peek(), Some(Token::Comma)) {
+            self.advance();
+        }
+
+        loop {
+            match self.peek() {
+                Some(Token::ParenClose) => {
+                    self.advance();
+                    break;
+                }
+                Some(Token::Ident(_)) => {
+                    let name = self.expect_ident("nom de paramètre d'animation")?;
+                    self.expect(":")?;
+                    let loc = self.current_location();
+                    let value = match self.advance().cloned() {
+                        Some(Token::True) => AnimationValue::Bool(true),
+                        Some(Token::False) => AnimationValue::Bool(false),
+                        Some(Token::Int(n)) => AnimationValue::Int(n),
+                        Some(Token::Float(f)) => AnimationValue::Float(f),
+                        Some(Token::String(raw)) => {
+                            AnimationValue::Str(raw[1..raw.len() - 1].to_string())
+                        }
+                        Some(tok) => {
+                            return Err(self.err_token(
+                                loc,
+                                &tok,
+                                "valeur de paramètre animation (bool, nombre ou string)",
+                            ));
+                        }
+                        None => return Err(self.err_eof(loc, "valeur de paramètre animation")),
+                    };
+                    params.push(AnimationParam { name, value });
+                    if matches!(self.peek(), Some(Token::Comma)) {
+                        self.advance();
+                    }
+                }
+                Some(tok) => {
+                    let loc = self.current_location();
+                    return Err(self.err_token(loc, tok, "paramètre nommé ou `)`"));
+                }
+                None => return Err(self.err_eof(self.current_location(), "`)`")),
+            }
+        }
+
+        Ok(Statement::SpriteAnimate {
+            character_id: target,
+            animation,
+            params,
+        })
     }
 
     // ── `[at …]` optionnel ───────────────────────────────────────────────────

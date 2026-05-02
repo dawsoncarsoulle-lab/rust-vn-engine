@@ -1,4 +1,3 @@
-use rvn_parser::parse;
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
@@ -47,6 +46,13 @@ enum Commands {
         project: String,
     },
 
+    /// Build a validated, distributable data package for an RVN project.
+    Build {
+        /// Path to the project directory.
+        #[arg(value_name = "PROJECT_DIR", default_value = ".")]
+        project: String,
+    },
+
     /// Launch an existing visual novel project in development mode.
     Dev {
         /// Path to the project directory.
@@ -81,6 +87,9 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         },
+        Commands::Build { project } => {
+            build_project(&project)?;
+        }
         Commands::Dev { project } => {
             if let Err(e) = dev_project(&project) {
                 eprintln!("{e}");
@@ -232,6 +241,113 @@ fn load_project_config(project_dir: &Path) -> std::result::Result<ProjectConfig,
     let content =
         fs::read_to_string(&path).map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
     toml::from_str(&content).map_err(|e| format!("Failed to parse {}: {e}", path.display()))
+}
+
+fn build_project(project: &str) -> Result<()> {
+    let project_dir = Path::new(project);
+
+    if let Err(errors) = check_project(project) {
+        print_project_errors(project, &errors);
+        anyhow::bail!("rvn build aborted: fix the project errors above before building.");
+    }
+
+    let cfg = load_project_config(project_dir).map_err(anyhow::Error::msg)?;
+    let dist_dir = project_dir.join("dist");
+
+    if dist_dir.exists() {
+        fs::remove_dir_all(&dist_dir).with_context(|| {
+            format!(
+                "unable to remove previous build directory '{}'",
+                dist_dir.display()
+            )
+        })?;
+    }
+    fs::create_dir_all(&dist_dir)
+        .with_context(|| format!("unable to create build directory '{}'", dist_dir.display()))?;
+
+    copy_file_relative(project_dir, &dist_dir, Path::new("rvn.toml"))?;
+    copy_dir_relative(project_dir, &dist_dir, Path::new(&cfg.paths.assets))?;
+    copy_dir_relative(project_dir, &dist_dir, Path::new(&cfg.paths.locales))?;
+    copy_file_relative(project_dir, &dist_dir, Path::new(&cfg.paths.theme))?;
+
+    let main_script = Path::new(&cfg.project.main_script);
+    if let Some(script_dir) = main_script.parent().filter(|p| !p.as_os_str().is_empty()) {
+        copy_dir_relative(project_dir, &dist_dir, script_dir)?;
+    } else {
+        copy_file_relative(project_dir, &dist_dir, main_script)?;
+    }
+
+    // Saves are user data and should not be copied into a build.  We still create
+    // the directory expected by rvn.toml so the exported project can run without
+    // manual setup.
+    fs::create_dir_all(dist_dir.join(&cfg.paths.saves)).with_context(|| {
+        format!(
+            "unable to create saves directory '{}' in build output",
+            cfg.paths.saves
+        )
+    })?;
+
+    println!("✅ RVN project built successfully.");
+    println!("Output: {}", dist_dir.display());
+    println!();
+    println!("To test the build data package:");
+    println!("  rvn run {}", dist_dir.display());
+    Ok(())
+}
+
+fn copy_file_relative(project_dir: &Path, dist_dir: &Path, relative: &Path) -> Result<()> {
+    let src = project_dir.join(relative);
+    let dst = dist_dir.join(relative);
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("unable to create directory '{}'", parent.display()))?;
+    }
+    fs::copy(&src, &dst).with_context(|| {
+        format!(
+            "unable to copy file '{}' to '{}'",
+            src.display(),
+            dst.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn copy_dir_relative(project_dir: &Path, dist_dir: &Path, relative: &Path) -> Result<()> {
+    let src = project_dir.join(relative);
+    let dst = dist_dir.join(relative);
+    copy_dir_all(&src, &dst)
+        .with_context(|| format!("unable to copy directory '{}'", src.display()))
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst)
+        .with_context(|| format!("unable to create directory '{}'", dst.display()))?;
+
+    for entry in fs::read_dir(src).with_context(|| format!("unable to read '{}'", src.display()))? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if file_type.is_dir() {
+            copy_dir_all(&src_path, &dst_path)?;
+        } else if file_type.is_file() {
+            if let Some(parent) = dst_path.parent() {
+                fs::create_dir_all(parent).with_context(|| {
+                    format!("unable to create directory '{}'", parent.display())
+                })?;
+            }
+            fs::copy(&src_path, &dst_path).with_context(|| {
+                format!(
+                    "unable to copy file '{}' to '{}'",
+                    src_path.display(),
+                    dst_path.display()
+                )
+            })?;
+        }
+    }
+
+    Ok(())
 }
 
 fn check_project(project: &str) -> std::result::Result<(), Vec<String>> {
@@ -411,6 +527,9 @@ fn validate_interactions(script: &[Statement], errors: &mut Vec<String>) {
                     validate_interactions(&hotspot.body, errors);
                 }
             }
+            Statement::SpriteAnimate {
+                animation, params, ..
+            } => validate_animation(animation, params, errors),
             Statement::If {
                 then_branch,
                 else_branch,
@@ -420,6 +539,48 @@ fn validate_interactions(script: &[Statement], errors: &mut Vec<String>) {
                 validate_interactions(else_branch, errors);
             }
             _ => {}
+        }
+    }
+}
+
+fn validate_animation(
+    animation: &str,
+    params: &[rvn_parser::AnimationParam],
+    errors: &mut Vec<String>,
+) {
+    let allowed_params: &[&str] = match animation {
+        "shake" => &["loop", "duration", "intensity"],
+        "bounce" => &["loop", "duration", "height"],
+        "pulse" => &["loop", "duration", "scale"],
+        other => {
+            errors.push(format!(
+                "Script validation error: unknown animation `{other}`. Supported animations: shake, bounce, pulse."
+            ));
+            return;
+        }
+    };
+
+    for param in params {
+        if !allowed_params.contains(&param.name.as_str()) {
+            errors.push(format!(
+                "Script validation error: unknown parameter `{}` for animation `{}`. Allowed parameters: {}.",
+                param.name,
+                animation,
+                allowed_params.join(", ")
+            ));
+            continue;
+        }
+
+        match (param.name.as_str(), &param.value) {
+            ("loop", rvn_parser::AnimationValue::Bool(_)) => {}
+            ("duration" | "intensity" | "height" | "scale", rvn_parser::AnimationValue::Int(_)) => {}
+            ("duration" | "intensity" | "height" | "scale", rvn_parser::AnimationValue::Float(_)) => {}
+            ("loop", _) => errors.push(format!(
+                "Script validation error: parameter `loop` for animation `{animation}` must be a boolean."
+            )),
+            (name, _) => errors.push(format!(
+                "Script validation error: parameter `{name}` for animation `{animation}` must be a number."
+            )),
         }
     }
 }
@@ -530,7 +691,9 @@ fn collect_from_script(
                 sprites.push((character_id.clone(), emotion.clone()));
             }
             Statement::HideSprite { character_id, .. }
-            | Statement::MoveSprite { character_id, .. } => {
+            | Statement::MoveSprite { character_id, .. }
+            | Statement::SpriteAnimate { character_id, .. }
+            | Statement::SpriteStopAnimation { character_id } => {
                 used_characters.push(character_id.clone())
             }
             Statement::MethodCall {

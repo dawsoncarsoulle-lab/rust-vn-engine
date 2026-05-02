@@ -53,6 +53,17 @@ mod tests {
         fn move_sprite(&mut self, id: &str, pos: &Position, t: &Transition, _: &SpriteState) {
             self.events.push(format!("move:{id}:{pos}:{t}"));
         }
+        fn animate_sprite(
+            &mut self,
+            id: &str,
+            animation: &str,
+            _params: &[rvn_parser::AnimationParam],
+        ) {
+            self.events.push(format!("animate:{id}:{animation}"));
+        }
+        fn stop_sprite_animation(&mut self, id: &str) {
+            self.events.push(format!("stop_animation:{id}"));
+        }
         fn show_dialogue(&mut self, c: Option<&str>, text: &str) {
             self.events.push(format!("dlg:{}:{text}", c.unwrap_or("")));
         }
@@ -321,5 +332,27 @@ mod tests {
             }
             other => panic!("interaction inattendue: {other:?}"),
         }
+    }
+    #[test]
+    fn test_sprite_animation_commands() {
+        let src = r#"
+            eileen.animate("shake", intensity: 12, duration: 0.3)
+            eileen.stop_animation()
+        "#;
+        let mut e = engine(src);
+        step(&mut e);
+        step(&mut e);
+        assert!(
+            e.renderer
+                .events
+                .iter()
+                .any(|s| s == "animate:eileen:shake")
+        );
+        assert!(
+            e.renderer
+                .events
+                .iter()
+                .any(|s| s == "stop_animation:eileen")
+        );
     }
 }
