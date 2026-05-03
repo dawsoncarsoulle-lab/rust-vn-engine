@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use rvn_core::save::SaveManager;
 use rvn_parser::Transition;
 
+use crate::project_paths::ProjectPaths;
 use crate::resources::{
     DialogueHistory, ImagemapState, Theme, TypewriterState, VnEngine, VnRenderState, VnState,
 };
@@ -141,6 +142,7 @@ pub fn title_interaction_system(
     mut imagemap_state: ResMut<ImagemapState>,
     mut tw_state: ResMut<TypewriterState>,
     mut history: ResMut<DialogueHistory>,
+    project_paths: Res<ProjectPaths>,
     mut vn_events: EventWriter<VnCommand>,
     mut exit: EventWriter<AppExit>,
 ) {
@@ -162,8 +164,7 @@ pub fn title_interaction_system(
                     }
 
                     TitleButton::LoadGame => {
-                        let save_dir = std::env::current_dir().unwrap_or_default().join("saves");
-                        if let Ok(mgr) = SaveManager::new(&save_dir, 5) {
+                        if let Ok(mgr) = SaveManager::new(&project_paths.saves, 5) {
                             if engine.0.load(&mgr, 1).is_ok() {
                                 info!("[titre] partie chargée depuis slot 1");
                                 render_state.choice_options.clear();

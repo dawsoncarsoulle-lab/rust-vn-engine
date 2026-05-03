@@ -6,6 +6,7 @@
 pub mod audio;
 pub mod background;
 pub mod choice;
+pub mod cinematic;
 pub mod dialogue;
 pub mod error_overlay;
 pub mod fade;
@@ -91,6 +92,7 @@ pub fn ensure_extension(path: &str) -> String {
 pub use audio::{audio_fade_system, audio_system};
 pub use background::{background_cover_resize_system, background_system};
 pub use choice::{choice_system, update_choice_buttons};
+pub use cinematic::{cinematic_cover_resize_system, cinematic_system};
 pub use dialogue::dialogue_system;
 pub use error_overlay::{despawn_error_overlay, spawn_error_overlay};
 pub use fade::fade_system;

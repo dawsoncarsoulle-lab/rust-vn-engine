@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::time::Duration;
@@ -151,7 +151,9 @@ fn create_project(name: &str) -> Result<()> {
             rvn_toml_path.display()
         )
     })?;
-    config_contents = config_contents.replace("Mon Jeu RVN", name);
+    config_contents = config_contents
+        .replace("Mon Jeu RVN", name)
+        .replace("La Clairière des Échos", name);
     fs::write(&rvn_toml_path, config_contents).with_context(|| {
         format!(
             "unable to write configuration file '{}'",
@@ -208,7 +210,6 @@ struct ProjectConfig {
 
 #[derive(Debug, Deserialize)]
 struct ProjectSection {
-    #[allow(dead_code)]
     title: Option<String>,
     #[serde(default = "default_main_script")]
     main_script: String,
@@ -268,6 +269,7 @@ fn load_project_config(project_dir: &Path) -> std::result::Result<ProjectConfig,
 fn build_project(project: &str) -> Result<()> {
     let project_dir = Path::new(project);
 
+    println!("Check en cours...");
     let report = check_project(project, CheckOptions::default());
     if report.has_errors() {
         print_project_diagnostics(project, &report.diagnostics);
@@ -275,8 +277,73 @@ fn build_project(project: &str) -> Result<()> {
     }
 
     let cfg = load_project_config(project_dir).map_err(anyhow::Error::msg)?;
-    let dist_dir = project_dir.join("dist");
+    let game_name = cfg
+        .project
+        .title
+        .as_deref()
+        .filter(|title| !title.trim().is_empty())
+        .map(sanitize_game_name)
+        .unwrap_or_else(|| {
+            project_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(sanitize_game_name)
+                .unwrap_or_else(|| "Game".to_string())
+        });
+    let platform = detect_platform()?;
+    let dist_dir = create_dist_structure(project_dir, &game_name, &platform)?;
 
+    println!("Build runtime...");
+    let runtime_binary = build_runtime()?;
+
+    println!("Copie fichiers...");
+    copy_project_files(project_dir, &dist_dir, &cfg)?;
+
+    let output_binary = dist_dir.join(&game_name);
+    fs::copy(&runtime_binary, &output_binary).with_context(|| {
+        format!(
+            "unable to copy runtime binary '{}' to '{}'",
+            runtime_binary.display(),
+            output_binary.display()
+        )
+    })?;
+
+    println!("Build terminé.");
+    println!("Build terminé : {}/", dist_dir.display());
+    println!("Lancez : ./{}", game_name);
+    Ok(())
+}
+
+fn sanitize_game_name(name: &str) -> String {
+    let sanitized: String = name
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if sanitized.is_empty() {
+        "Game".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn detect_platform() -> Result<String> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => Ok("linux-x64".to_string()),
+        (os, arch) => anyhow::bail!("unsupported build platform: {os}-{arch}"),
+    }
+}
+
+fn create_dist_structure(project_dir: &Path, game_name: &str, platform: &str) -> Result<PathBuf> {
+    let dist_dir = project_dir
+        .join("dist")
+        .join(format!("{game_name}-{platform}"));
     if dist_dir.exists() {
         fs::remove_dir_all(&dist_dir).with_context(|| {
             format!(
@@ -285,36 +352,61 @@ fn build_project(project: &str) -> Result<()> {
             )
         })?;
     }
-    fs::create_dir_all(&dist_dir)
-        .with_context(|| format!("unable to create build directory '{}'", dist_dir.display()))?;
+    fs::create_dir_all(dist_dir.join("data")).with_context(|| {
+        format!(
+            "unable to create build data directory '{}'",
+            dist_dir.join("data").display()
+        )
+    })?;
+    Ok(dist_dir)
+}
 
-    copy_file_relative(project_dir, &dist_dir, Path::new("rvn.toml"))?;
-    copy_dir_relative(project_dir, &dist_dir, Path::new(&cfg.paths.assets))?;
-    copy_dir_relative(project_dir, &dist_dir, Path::new(&cfg.paths.locales))?;
-    copy_file_relative(project_dir, &dist_dir, Path::new(&cfg.paths.theme))?;
+fn build_runtime() -> Result<PathBuf> {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .context("unable to resolve RVN workspace root")?;
+    let manifest_path = workspace_root.join("Cargo.toml");
+    let status = Command::new("cargo")
+        .args(["build", "--release", "-p", "rvn_bevy", "--manifest-path"])
+        .arg(&manifest_path)
+        .status()
+        .context("unable to invoke cargo build for rvn_bevy runtime")?;
+
+    if !status.success() {
+        anyhow::bail!("runtime build failed with status {status}");
+    }
+
+    let binary_name = if cfg!(windows) {
+        "rvn_bevy.exe"
+    } else {
+        "rvn_bevy"
+    };
+    Ok(workspace_root
+        .join("target")
+        .join("release")
+        .join(binary_name))
+}
+
+fn copy_project_files(project_dir: &Path, dist_dir: &Path, cfg: &ProjectConfig) -> Result<()> {
+    let data_dir = dist_dir.join("data");
+    copy_file_relative(project_dir, &data_dir, Path::new("rvn.toml"))?;
+    copy_optional_file_relative(project_dir, &data_dir, Path::new(&cfg.paths.theme))?;
+    copy_dir_relative(project_dir, &data_dir, Path::new(&cfg.paths.assets))?;
+    copy_dir_relative(project_dir, &data_dir, Path::new(&cfg.paths.locales))?;
 
     let main_script = Path::new(&cfg.project.main_script);
     if let Some(script_dir) = main_script.parent().filter(|p| !p.as_os_str().is_empty()) {
-        copy_dir_relative(project_dir, &dist_dir, script_dir)?;
+        copy_dir_relative(project_dir, &data_dir, script_dir)?;
     } else {
-        copy_file_relative(project_dir, &dist_dir, main_script)?;
+        copy_file_relative(project_dir, &data_dir, main_script)?;
     }
 
-    // Saves are user data and should not be copied into a build.  We still create
-    // the directory expected by rvn.toml so the exported project can run without
-    // manual setup.
-    fs::create_dir_all(dist_dir.join(&cfg.paths.saves)).with_context(|| {
+    fs::create_dir_all(data_dir.join(&cfg.paths.saves)).with_context(|| {
         format!(
             "unable to create saves directory '{}' in build output",
             cfg.paths.saves
         )
     })?;
-
-    println!("✅ RVN project built successfully.");
-    println!("Output: {}", dist_dir.display());
-    println!();
-    println!("To test the build data package:");
-    println!("  rvn run {}", dist_dir.display());
     Ok(())
 }
 
@@ -333,6 +425,14 @@ fn copy_file_relative(project_dir: &Path, dist_dir: &Path, relative: &Path) -> R
         )
     })?;
     Ok(())
+}
+
+fn copy_optional_file_relative(project_dir: &Path, dist_dir: &Path, relative: &Path) -> Result<()> {
+    let src = project_dir.join(relative);
+    if !src.exists() {
+        return Ok(());
+    }
+    copy_file_relative(project_dir, dist_dir, relative)
 }
 
 fn copy_dir_relative(project_dir: &Path, dist_dir: &Path, relative: &Path) -> Result<()> {

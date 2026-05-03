@@ -1,4 +1,4 @@
-use crate::{GameState, MusicState, SpriteState, TypewriterState};
+use crate::{CinematicState, GameState, MusicState, SpriteState, TypewriterState};
 use rvn_parser::{Position, Transition, Value};
 
 use serde::{Deserialize, Serialize};
@@ -171,6 +171,8 @@ pub struct SaveData {
     pub call_stack: Vec<usize>,
     pub vars: HashMap<String, SaveValue>,
     pub sprites: HashMap<String, SaveSprite>,
+    #[serde(default)]
+    pub cinematic: CinematicState,
     pub last_transition: SaveTransition,
     pub music: MusicState,
     pub typewriter: TypewriterState,
@@ -201,6 +203,7 @@ impl SaveData {
                 .iter()
                 .map(|(k, s)| (k.clone(), SaveSprite::from(s)))
                 .collect(),
+            cinematic: state.cinematic.clone(),
             last_transition: SaveTransition::from(&state.last_transition),
             music: state.music.clone(),
             typewriter: state.typewriter.clone(),
@@ -223,6 +226,7 @@ impl SaveData {
                 .into_iter()
                 .map(|(k, s)| (k, SpriteState::from(s)))
                 .collect(),
+            cinematic: self.cinematic,
             last_transition: Transition::from(self.last_transition),
             music: self.music,
             typewriter: self.typewriter,
@@ -357,6 +361,7 @@ mod tests {
             last_transition: Transition::Dissolve { duration_ms: 300 },
             vars,
             sprites,
+            cinematic: CinematicState::default(),
             music: MusicState::new(),
             typewriter: TypewriterState {
                 enabled: true,
@@ -503,6 +508,7 @@ mod tests {
             last_transition: Transition::None,
             vars: HashMap::new(),
             sprites,
+            cinematic: CinematicState::default(),
             music: MusicState::new(),
             typewriter: TypewriterState {
                 enabled: true,

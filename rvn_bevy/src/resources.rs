@@ -12,6 +12,9 @@ use std::collections::HashMap;
 #[derive(Resource)]
 pub struct VnEngine(pub Engine<BevyRenderer>);
 
+#[derive(Resource, Default)]
+pub struct CgAssetRegistry(pub HashMap<String, String>);
+
 // ─── Machine à états ─────────────────────────────────────────────────────────
 
 #[derive(States, Default, PartialEq, Eq, Hash, Clone, Debug)]

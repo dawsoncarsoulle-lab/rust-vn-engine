@@ -1,13 +1,13 @@
 use rvn_parser::{Hotspot, Position, Script, Statement, Transition, Value};
 use std::collections::HashMap;
 
-use crate::error::{RuntimeError, ScriptError};
+use crate::error::RuntimeError;
 use crate::eval::{EvalError, eval_bool, eval_expr, eval_interpolated};
 use crate::locale::LocaleManager;
 use crate::renderer::Renderer;
 use crate::rollback::{HistoryDisplay, RollbackHistory};
 use crate::save::SaveManager;
-use crate::types::{GameState, MusicState, SpriteState, TypewriterState};
+use crate::types::{CinematicState, GameState, MusicState, SpriteState, TypewriterState};
 
 /// Interaction actuellement proposée par le moteur.
 ///
@@ -206,6 +206,7 @@ impl<R: Renderer> Engine<R> {
                 call_stack: Vec::new(),
                 last_transition: Transition::None,
                 sprites: HashMap::new(),
+                cinematic: CinematicState::default(),
                 music: MusicState::new(),
                 typewriter: TypewriterState::new(),
             },
@@ -387,6 +388,25 @@ impl<R: Renderer> Engine<R> {
             }
         }
         true
+    }
+
+    fn render_interaction(&mut self, interaction: Interaction) {
+        match interaction {
+            Interaction::Dialogue { character, text } => {
+                self.renderer.show_dialogue(character.as_deref(), &text);
+            }
+            Interaction::Choice { options } => {
+                self.renderer.show_choice(&options);
+            }
+            Interaction::Imagemap {
+                background,
+                hover_image,
+                hotspots,
+            } => {
+                self.renderer
+                    .show_imagemap(&background, hover_image.as_deref(), &hotspots);
+            }
+        }
     }
 
     pub fn can_rollback(&self) -> bool {
@@ -602,6 +622,18 @@ impl<R: Renderer> Engine<R> {
                 self.state.background_image = background.clone();
                 self.state.last_transition = transition.clone();
                 self.renderer.set_background(&background, &transition);
+                self.state.pc += 1;
+            }
+            Statement::CinematicShow { id, transition } => {
+                self.state.cinematic.current = Some(id.clone());
+                self.state.cinematic.transition = transition.clone();
+                self.renderer.show_cinematic(&id, transition.as_deref());
+                self.state.pc += 1;
+            }
+            Statement::CinematicHide { transition } => {
+                self.state.cinematic.current = None;
+                self.state.cinematic.transition = transition.clone();
+                self.renderer.hide_cinematic(transition.as_deref());
                 self.state.pc += 1;
             }
             Statement::ShowSprite {
@@ -906,6 +938,9 @@ impl<R: Renderer> Engine<R> {
         self.state = data.into_game_state();
         self.history.clear();
         self.renderer.restore_screen(&self.state);
+        if let Ok(Some(interaction)) = self.current_interaction() {
+            self.render_interaction(interaction);
+        }
         Ok(())
     }
 

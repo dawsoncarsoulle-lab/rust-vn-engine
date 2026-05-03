@@ -430,6 +430,29 @@ mod tests {
     }
 
     #[test]
+    fn test_cinematic_show_with_fade() {
+        let s = parse(r#"cinematic "demo" with fade"#).unwrap();
+        assert!(matches!(
+            &s[0],
+            Statement::CinematicShow {
+                id,
+                transition: Some(transition),
+            } if id == "demo" && transition == "fade"
+        ));
+    }
+
+    #[test]
+    fn test_cinematic_hide_with_fade() {
+        let s = parse("cinematic hide with fade").unwrap();
+        assert!(matches!(
+            &s[0],
+            Statement::CinematicHide {
+                transition: Some(transition),
+            } if transition == "fade"
+        ));
+    }
+
+    #[test]
     fn test_byte_offset_to_location_basics() {
         let src = "hello\nworld\nfoo";
         assert_eq!(

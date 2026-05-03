@@ -39,6 +39,8 @@ pub enum Token<'a> {
     Return,
     #[token("scene")]
     Scene,
+    #[token("cinematic")]
+    Cinematic,
     #[token("with")]
     With,
     #[token("fade")]

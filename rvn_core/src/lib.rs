@@ -13,7 +13,7 @@ pub use eval::{EvalError, eval_bool, eval_expr, eval_interpolated};
 pub use locale::{LocaleManager, collect_strings_from_flat_script, collect_strings_from_script};
 pub use renderer::{Renderer, TerminalRenderer};
 pub use rollback::{HistoryDisplay, RollbackHistory};
-pub use types::{GameState, MusicState, SpriteState, TypewriterState};
+pub use types::{CinematicState, GameState, MusicState, SpriteState, TypewriterState};
 
 // ─── TESTS ───────────────────────────────────────────────────────────────────
 
@@ -277,6 +277,33 @@ mod tests {
         e2.load(&mgr, 1).unwrap();
         assert!(e2.renderer.events.iter().any(|s| s.contains("restore:")));
         assert!(e2.renderer.events.iter().any(|s| s.contains("chambre")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_load_reaffiche_dialogue_courant() {
+        use crate::save::SaveManager;
+        let dir = std::env::temp_dir().join("rvn_load_current_dialogue_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mgr = SaveManager::new(&dir, 5).unwrap();
+        let src = "scene chambre with fade\nsarah \"Bonjour !\"\nsarah \"Au revoir !\"";
+
+        let mut e = Engine::new(parse(src).unwrap(), Mock::default(), 32).unwrap();
+        step(&mut e);
+        step(&mut e);
+        e.save(&mgr, 1, "test".into(), "x.rvn".into()).unwrap();
+
+        let mut e2 = Engine::new(parse(src).unwrap(), Mock::default(), 32).unwrap();
+        e2.load(&mgr, 1).unwrap();
+
+        assert!(
+            e2.renderer
+                .events
+                .iter()
+                .any(|s| s == "dlg:sarah:Au revoir !"),
+            "events: {:?}",
+            e2.renderer.events
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

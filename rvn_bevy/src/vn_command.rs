@@ -15,6 +15,13 @@ pub enum VnCommand {
         path: String,
         transition: Transition,
     },
+    ShowCinematic {
+        id: String,
+        transition: Option<String>,
+    },
+    HideCinematic {
+        transition: Option<String>,
+    },
     ShowSprite {
         id: String,
         emotion: Option<String>,

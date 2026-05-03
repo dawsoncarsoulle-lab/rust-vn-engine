@@ -87,6 +87,14 @@ pub fn stepping_system(
                 | VnCommand::HideSprite { transition, .. }
                 | VnCommand::MoveSprite { transition, .. }
             if *transition != Transition::None
+        ) || matches!(
+            cmd,
+            VnCommand::ShowCinematic {
+                transition: Some(transition),
+                ..
+            } | VnCommand::HideCinematic {
+                transition: Some(transition)
+            } if transition == "fade" || transition == "dissolve"
         )
     });
 

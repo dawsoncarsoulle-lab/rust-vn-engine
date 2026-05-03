@@ -31,6 +31,19 @@ impl Renderer for BevyRenderer {
         });
     }
 
+    fn show_cinematic(&mut self, id: &str, transition: Option<&str>) {
+        self.pending.push(VnCommand::ShowCinematic {
+            id: id.to_string(),
+            transition: transition.map(str::to_string),
+        });
+    }
+
+    fn hide_cinematic(&mut self, transition: Option<&str>) {
+        self.pending.push(VnCommand::HideCinematic {
+            transition: transition.map(str::to_string),
+        });
+    }
+
     fn show_sprite(
         &mut self,
         id: &str,
@@ -172,6 +185,15 @@ impl Renderer for BevyRenderer {
                     transition: Transition::None,
                 });
             }
+        }
+        if let Some(id) = &state.cinematic.current {
+            self.pending.push(VnCommand::ShowCinematic {
+                id: id.clone(),
+                transition: None,
+            });
+        } else {
+            self.pending
+                .push(VnCommand::HideCinematic { transition: None });
         }
         if let Some(file) = &state.music.current_file {
             self.pending.push(VnCommand::MusicPlay {

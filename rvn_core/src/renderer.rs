@@ -6,6 +6,8 @@ use std::io;
 
 pub trait Renderer {
     fn set_background(&mut self, path: &str, transition: &Transition);
+    fn show_cinematic(&mut self, _id: &str, _transition: Option<&str>) {}
+    fn hide_cinematic(&mut self, _transition: Option<&str>) {}
     fn show_sprite(
         &mut self,
         id: &str,
@@ -62,6 +64,11 @@ pub trait Renderer {
     /// Utilisé par rollback et load.
     fn restore_screen(&mut self, state: &GameState) {
         self.set_background(&state.background_image.clone(), &Transition::None);
+        if let Some(id) = &state.cinematic.current {
+            self.show_cinematic(id, None);
+        } else {
+            self.hide_cinematic(None);
+        }
         let sprites: Vec<(String, SpriteState)> = state
             .sprites
             .iter()
@@ -89,6 +96,12 @@ pub struct TerminalRenderer;
 impl Renderer for TerminalRenderer {
     fn set_background(&mut self, path: &str, t: &Transition) {
         println!("[bg] {path}  [{t}]");
+    }
+    fn show_cinematic(&mut self, id: &str, transition: Option<&str>) {
+        println!("[cinematic] show {id}  [{}]", transition.unwrap_or("none"));
+    }
+    fn hide_cinematic(&mut self, transition: Option<&str>) {
+        println!("[cinematic] hide  [{}]", transition.unwrap_or("none"));
     }
     fn show_sprite(
         &mut self,

@@ -4,6 +4,9 @@ use bevy::prelude::*;
 pub struct VnBackground;
 
 #[derive(Component)]
+pub struct VnCinematic;
+
+#[derive(Component)]
 pub struct VnSprite {
     pub id: String,
 }

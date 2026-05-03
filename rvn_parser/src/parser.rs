@@ -446,6 +446,7 @@ impl<'a> Parser<'a> {
                 Ok(Statement::Return)
             }
             Some(Token::Scene) => self.parse_scene(),
+            Some(Token::Cinematic) => self.parse_cinematic(),
             Some(Token::Imagemap) => self.parse_imagemap(),
             Some(Token::Typewriter) => self.parse_typewriter(),
             Some(Token::String(_)) => self.parse_dialogue_text_only(),
@@ -723,6 +724,26 @@ impl<'a> Parser<'a> {
         })
     }
 
+    // ── `cinematic "id" [with transition]` / `cinematic hide [with transition]` ──
+
+    fn parse_cinematic(&mut self) -> ParseResult<Statement> {
+        self.advance();
+        let loc = self.current_location();
+        match self.advance().cloned() {
+            Some(Token::String(raw)) => {
+                let id = raw[1..raw.len() - 1].to_string();
+                let transition = self.try_parse_with_name()?;
+                Ok(Statement::CinematicShow { id, transition })
+            }
+            Some(Token::Ident(s)) if s == "hide" => {
+                let transition = self.try_parse_with_name()?;
+                Ok(Statement::CinematicHide { transition })
+            }
+            Some(tok) => Err(self.err_token(loc, &tok, "`\"id\"` ou `hide` après `cinematic`")),
+            None => Err(self.err_eof(loc, "`\"id\"` ou `hide` après `cinematic`")),
+        }
+    }
+
     // ── Identifiant ──────────────────────────────────────────────────────────
 
     fn parse_ident_statement(&mut self) -> ParseResult<Statement> {
@@ -993,6 +1014,25 @@ impl<'a> Parser<'a> {
                 Ok(Transition::Dissolve { duration_ms: d })
             }
             Some(tok) => Err(self.err_token(loc, &tok, "`fade` ou `dissolve` après `with`")),
+            None => Err(self.err_eof(loc, "nom de transition")),
+        }
+    }
+
+    fn try_parse_with_name(&mut self) -> ParseResult<Option<String>> {
+        if matches!(self.peek_raw(), Some(Token::Newline) | None) {
+            return Ok(None);
+        }
+        if !matches!(self.peek(), Some(Token::With)) {
+            return Ok(None);
+        }
+        self.advance();
+        let loc = self.current_location();
+
+        match self.advance().cloned() {
+            Some(Token::Fade) => Ok(Some("fade".to_string())),
+            Some(Token::Dissolve) => Ok(Some("dissolve".to_string())),
+            Some(Token::Ident(name)) => Ok(Some(name.to_string())),
+            Some(tok) => Err(self.err_token(loc, &tok, "nom de transition après `with`")),
             None => Err(self.err_eof(loc, "nom de transition")),
         }
     }

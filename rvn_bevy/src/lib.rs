@@ -17,8 +17,8 @@ mod vn_command;
 use crate::bevy_renderer::BevyRenderer;
 use crate::project_paths::ProjectPaths;
 use crate::resources::{
-    CharacterRegistry, ChoiceFocus, DialogueHistory, ImagemapState, LocaleConfig, MenuState,
-    MusicEntity, MusicVolume, ScriptErrorMessage, Theme, ThemeWatcher, TypewriterConfig,
+    CgAssetRegistry, CharacterRegistry, ChoiceFocus, DialogueHistory, ImagemapState, LocaleConfig,
+    MenuState, MusicEntity, MusicVolume, ScriptErrorMessage, Theme, ThemeWatcher, TypewriterConfig,
     TypewriterState, VnEngine, VnRenderState, VnState,
 };
 use crate::systems::save_menu::{SaveMenuMode, SaveMenuState};
@@ -32,6 +32,8 @@ use crate::systems::{
     background_system,
     build_character_registry,
     choice_system,
+    cinematic_cover_resize_system,
+    cinematic_system,
     debug_step_input_system,
     debug_toggle_system,
     despawn_error_overlay,
@@ -89,6 +91,7 @@ use rvn_core::{
 use rvn_parser::{parse_file_with_uses, Statement};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
+use std::{collections::HashMap, fs};
 
 /// Project configuration loaded from `rvn.toml`.
 /// The top‑level table has sections for the project metadata, window size and asset paths.
@@ -319,12 +322,17 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
     let window_width = cfg.window.width.unwrap_or(1280) as f32;
     let window_height = cfg.window.height.unwrap_or(720) as f32;
 
-    // 11. Set the Bevy asset root to the project directory.
-    //
-    // Bevy resolves AssetServer paths through the default `assets/` folder under
-    // BEVY_ASSET_ROOT. Therefore the root must be the project directory, not
-    // the assets directory itself. Otherwise paths become `assets/assets/...`.
-    std::env::set_var("BEVY_ASSET_ROOT", project_dir.to_string_lossy().to_string());
+    // 11. Set the Bevy asset root to the configured assets directory.
+    let bevy_asset_path = fs::canonicalize(&assets_dir)
+        .map_err(|e| {
+            format!(
+                "Impossible de résoudre le dossier d'assets `{}`: {}",
+                assets_dir.display(),
+                e
+            )
+        })?
+        .to_string_lossy()
+        .to_string();
 
     // 11a. Build a ProjectPaths resource to make paths accessible to systems.
     let project_paths = ProjectPaths::new(
@@ -334,12 +342,14 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
         theme_path.clone(),
         project_dir.join(&cfg.paths.saves),
     );
+    let cg_registry = build_cg_asset_registry(&assets_dir);
 
     // 12. Build and run the Bevy application.
     App::new()
         .add_plugins(
             DefaultPlugins
                 .set(AssetPlugin {
+                    file_path: bevy_asset_path,
                     watch_for_changes_override: Some(true),
                     ..default()
                 })
@@ -365,6 +375,7 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
         .insert_resource(TypewriterState::default())
         .insert_resource(MenuState::default())
         .insert_resource(CharacterRegistry::default())
+        .insert_resource(cg_registry)
         .insert_resource(DialogueHistory::default())
         .insert_resource(ChoiceFocus::default())
         .insert_resource(ScriptErrorMessage::default())
@@ -409,6 +420,8 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
                     background_cover_resize_system,
                     sprite_system,
                     sprite_animation_system,
+                    cinematic_system,
+                    cinematic_cover_resize_system,
                     dialogue_system,
                     choice_system,
                     imagemap_system,
@@ -467,8 +480,42 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
     Ok(())
 }
 
+pub fn run_game_from_path<P: AsRef<Path>>(path: P) -> Result<(), String> {
+    run_game(path)
+}
+
 /// Spawns the 2D camera.  This duplicates the definition from the original main.rs so
 /// that the library does not depend on the old binary entry point.
 fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
+}
+
+fn build_cg_asset_registry(assets_dir: &Path) -> CgAssetRegistry {
+    let mut registry = HashMap::new();
+    let cgs_dir = assets_dir.join("cgs");
+    let Ok(entries) = fs::read_dir(cgs_dir) else {
+        return CgAssetRegistry(registry);
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
+            continue;
+        };
+        if !matches!(ext, "png" | "jpg" | "jpeg" | "webp") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        registry.insert(stem.to_string(), format!("cgs/{file_name}"));
+    }
+
+    CgAssetRegistry(registry)
 }

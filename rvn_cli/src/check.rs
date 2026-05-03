@@ -157,6 +157,7 @@ struct Symbols {
     declared_characters: HashMap<String, Location>,
     used_characters: Vec<(String, Location)>,
     backgrounds: Vec<(String, Location)>,
+    cinematics: Vec<(String, Location)>,
     sprites: Vec<(String, Option<String>, Location)>,
     music_files: Vec<(String, Location)>,
     sfx_files: Vec<(String, Location)>,
@@ -429,6 +430,13 @@ fn collect_block(
             }
             Statement::Scene { background, .. } => {
                 symbols.backgrounds.push((background.clone(), loc.clone()))
+            }
+            Statement::CinematicShow { id, transition } => {
+                symbols.cinematics.push((id.clone(), loc.clone()));
+                validate_cinematic_transition(transition.as_deref(), &loc, diagnostics);
+            }
+            Statement::CinematicHide { transition } => {
+                validate_cinematic_transition(transition.as_deref(), &loc, diagnostics);
             }
             Statement::ShowSprite {
                 character_id,
@@ -914,6 +922,22 @@ fn validate_assets(
             );
         }
     }
+    let cg_exts = ["png", "jpg", "jpeg", "webp"];
+    for (id, loc) in &symbols.cinematics {
+        let path = format!("cgs/{id}");
+        if !asset_exists(&assets_dir, &path, &cg_exts) {
+            diagnostics.push(
+                Diagnostic::error(
+                    "missing-cinematic-asset",
+                    format!(
+                        "Erreur: cinematic asset introuvable: '{path}' under '{}'",
+                        assets_dir.display()
+                    ),
+                )
+                .at(Some(loc.clone())),
+            );
+        }
+    }
     let sprite_exts = ["png", "jpg", "jpeg", "webp"];
     for (character_id, emotion, loc) in &symbols.sprites {
         let sprite_path = match emotion {
@@ -984,15 +1008,6 @@ fn validate_assets(
             format!(
                 "locales directory '{}' not found",
                 project_dir.join(&paths.locales).display()
-            ),
-        ));
-    }
-    if !project_dir.join(&paths.saves).exists() {
-        diagnostics.push(Diagnostic::error(
-            "missing-project-dir",
-            format!(
-                "saves directory '{}' not found",
-                project_dir.join(&paths.saves).display()
             ),
         ));
     }
@@ -1129,6 +1144,26 @@ fn asset_exists(assets_dir: &Path, path_without_or_with_ext: &str, extensions: &
     })
 }
 
+fn validate_cinematic_transition(
+    transition: Option<&str>,
+    loc: &Location,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(transition) = transition else {
+        return;
+    };
+    if !matches!(transition, "fade" | "dissolve") {
+        diagnostics.push(
+            Diagnostic::error(
+                "invalid-transition",
+                format!("cinematic transition '{transition}' is not supported"),
+            )
+            .at(Some(loc.clone()))
+            .suggest("use `with fade`, `with dissolve`, or omit the transition"),
+        );
+    }
+}
+
 fn collect_text_vars(text: &InterpolatedText, out: &mut Vec<(String, Location)>, loc: &Location) {
     for segment in &text.0 {
         if let TextSegment::Interp(expr) = segment {
@@ -1196,6 +1231,8 @@ fn locate_stmt(source: &SourceFile, stmt: &Statement) -> Location {
             format!("scene {background}"),
             format!("scene \"{background}\""),
         ],
+        Statement::CinematicShow { id, .. } => vec![format!("cinematic \"{id}\"")],
+        Statement::CinematicHide { .. } => vec!["cinematic hide".to_string()],
         Statement::Imagemap { .. } => vec!["imagemap".to_string()],
         Statement::CharacterCreate { id, .. } => vec![format!("character.create(\"{id}\"")],
         Statement::ShowSprite { character_id, .. } => vec![format!("{character_id}.show")],

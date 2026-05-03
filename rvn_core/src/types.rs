@@ -68,6 +68,14 @@ impl Default for TypewriterState {
     }
 }
 
+// ─── CINEMATIC ───────────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CinematicState {
+    pub current: Option<String>,
+    pub transition: Option<String>,
+}
+
 // ─── GAME STATE ──────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -79,6 +87,7 @@ pub struct GameState {
     pub call_stack: Vec<usize>,
     pub last_transition: Transition,
     pub sprites: HashMap<String, SpriteState>,
+    pub cinematic: CinematicState,
     pub music: MusicState,
     pub typewriter: TypewriterState,
 }

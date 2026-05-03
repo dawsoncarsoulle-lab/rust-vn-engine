@@ -212,6 +212,13 @@ pub enum Statement {
         background: String,
         transition: Transition,
     },
+    CinematicShow {
+        id: String,
+        transition: Option<String>,
+    },
+    CinematicHide {
+        transition: Option<String>,
+    },
 
     ShowSprite {
         character_id: String,
