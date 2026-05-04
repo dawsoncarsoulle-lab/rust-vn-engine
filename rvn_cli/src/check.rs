@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use rvn_core::parse_text_tags;
 use rvn_parser::{
-    parse, AnimationParam, AnimationValue, Expr, Hotspot, InterpolatedText, Rect, Script,
-    Statement, TextSegment,
+    parse_recovering, AnimationParam, AnimationValue, Expr, Hotspot, InterpolatedText, ParseError,
+    ParseErrorKind, Rect, Script, Statement, TextSegment,
 };
 
 use crate::load_project_config;
@@ -28,9 +28,12 @@ pub struct Diagnostic {
     pub file: Option<PathBuf>,
     pub line: Option<usize>,
     pub column: Option<usize>,
+    pub span_len: Option<usize>,
+    pub source_line: Option<String>,
     pub kind: &'static str,
     pub message: String,
     pub suggestion: Option<String>,
+    pub notes: Vec<String>,
 }
 
 impl Diagnostic {
@@ -40,9 +43,12 @@ impl Diagnostic {
             file: None,
             line: None,
             column: None,
+            span_len: None,
+            source_line: None,
             kind,
             message: message.into(),
             suggestion: None,
+            notes: Vec::new(),
         }
     }
 
@@ -52,9 +58,12 @@ impl Diagnostic {
             file: None,
             line: None,
             column: None,
+            span_len: None,
+            source_line: None,
             kind,
             message: message.into(),
             suggestion: None,
+            notes: Vec::new(),
         }
     }
 
@@ -63,12 +72,25 @@ impl Diagnostic {
             self.file = Some(loc.file);
             self.line = Some(loc.line);
             self.column = Some(loc.column);
+            self.source_line = loc.source_line;
+            self.span_len = loc.span_len;
         }
         self
     }
 
     fn suggest(mut self, suggestion: impl Into<String>) -> Self {
         self.suggestion = Some(suggestion.into());
+        self
+    }
+
+    fn with_source_line(mut self, source_line: impl Into<String>, span_len: usize) -> Self {
+        self.source_line = Some(source_line.into());
+        self.span_len = Some(span_len.max(1));
+        self
+    }
+
+    fn note(mut self, note: impl Into<String>) -> Self {
+        self.notes.push(note.into());
         self
     }
 }
@@ -79,18 +101,34 @@ impl fmt::Display for Diagnostic {
             Severity::Error => "error",
             Severity::Warning => "warning",
         };
-        write!(f, "{sev}[{}]: {}", self.kind, self.message)?;
+        writeln!(f, "{sev}[{}]: {}", self.kind, self.message)?;
         if let Some(file) = &self.file {
-            write!(f, " in {}", file.display())?;
+            write!(f, " --> {}", file.display())?;
             if let Some(line) = self.line {
                 write!(f, ":{line}")?;
                 if let Some(column) = self.column {
                     write!(f, ":{column}")?;
                 }
             }
+            writeln!(f)?;
+        }
+        if let (Some(line), Some(column), Some(source_line)) =
+            (self.line, self.column, &self.source_line)
+        {
+            let line_no = line.to_string();
+            let gutter = line_no.len();
+            let pad = " ".repeat(gutter);
+            let col0 = column.saturating_sub(1);
+            let carets = "^".repeat(self.span_len.unwrap_or(1).max(1));
+            writeln!(f, "{pad} |")?;
+            writeln!(f, "{line_no} | {source_line}")?;
+            writeln!(f, "{pad} | {}{carets}", " ".repeat(col0))?;
+        }
+        for note in &self.notes {
+            writeln!(f, "  = {note}")?;
         }
         if let Some(suggestion) = &self.suggestion {
-            write!(f, "\n  suggestion: {suggestion}")?;
+            writeln!(f, "  = suggestion: {suggestion}")?;
         }
         Ok(())
     }
@@ -129,6 +167,8 @@ struct Location {
     file: PathBuf,
     line: usize,
     column: usize,
+    source_line: Option<String>,
+    span_len: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -202,13 +242,15 @@ impl<'a> CheckContext<'a> {
                         file: project_dir.join("rvn.toml"),
                         line: 1,
                         column: 1,
+                        source_line: None,
+                        span_len: None,
                     })));
                 return;
             }
         };
 
         let main_script = project_dir.join(&cfg.project.main_script);
-        let scripts = match load_scripts(&main_script) {
+        let scripts = match load_scripts(&main_script, &mut self.diagnostics) {
             Ok(scripts) => scripts,
             Err(e) => {
                 self.diagnostics
@@ -216,6 +258,8 @@ impl<'a> CheckContext<'a> {
                         file: main_script,
                         line: 1,
                         column: 1,
+                        source_line: None,
+                        span_len: None,
                     })));
                 return;
             }
@@ -246,15 +290,26 @@ impl<'a> CheckContext<'a> {
             &scripts,
             &mut self.diagnostics,
         );
+        suppress_noisy_warnings(&mut self.diagnostics);
     }
 }
 
-fn load_scripts(main_script: &Path) -> Result<ProjectScripts, String> {
+fn load_scripts(
+    main_script: &Path,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<ProjectScripts, String> {
     let mut files = Vec::new();
     let mut units = Vec::new();
     let mut loaded = HashSet::new();
     let mut stack = Vec::new();
-    load_script_inner(main_script, &mut files, &mut units, &mut loaded, &mut stack)?;
+    load_script_inner(
+        main_script,
+        &mut files,
+        &mut units,
+        &mut loaded,
+        &mut stack,
+        diagnostics,
+    )?;
     Ok(ProjectScripts { files, units })
 }
 
@@ -264,6 +319,7 @@ fn load_script_inner(
     units: &mut Vec<ScriptUnit>,
     loaded: &mut HashSet<PathBuf>,
     stack: &mut Vec<PathBuf>,
+    diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), String> {
     let canonical = fs::canonicalize(path)
         .map_err(|e| format!("fichier RVN introuvable `{}`: {e}", path.display()))?;
@@ -282,8 +338,30 @@ fn load_script_inner(
     stack.push(canonical.clone());
     let source = fs::read_to_string(&canonical)
         .map_err(|e| format!("impossible de lire `{}`: {e}", canonical.display()))?;
-    let parsed = parse(&source)
-        .map_err(|e| format!("Erreur de parsing dans `{}`:\n{}", canonical.display(), e))?;
+    let recovered = match parse_recovering(&source) {
+        Ok(recovered) => recovered,
+        Err(error) => {
+            if let Some(diag) = parser_diagnostic(&canonical, &error) {
+                diagnostics.push(diag);
+            }
+            let file_index = files.len();
+            files.push(SourceFile {
+                path: canonical.clone(),
+                source,
+            });
+            units.push(ScriptUnit {
+                file_index,
+                script: Vec::new(),
+            });
+            stack.pop();
+            return Ok(());
+        }
+    };
+    for error in &recovered.errors {
+        if let Some(diag) = parser_diagnostic(&canonical, error) {
+            diagnostics.push(diag);
+        }
+    }
     let file_index = files.len();
     files.push(SourceFile {
         path: canonical.clone(),
@@ -291,12 +369,12 @@ fn load_script_inner(
     });
     let base_dir = canonical.parent().unwrap_or_else(|| Path::new("."));
     let mut own = Vec::new();
-    for stmt in parsed {
+    for stmt in recovered.script {
         match stmt {
             Statement::Use { paths } => {
                 for use_path in paths {
                     for target in expand_use_path(base_dir, &use_path)? {
-                        load_script_inner(&target, files, units, loaded, stack)?;
+                        load_script_inner(&target, files, units, loaded, stack, diagnostics)?;
                     }
                 }
             }
@@ -342,6 +420,43 @@ fn expand_use_path(base_dir: &Path, raw: &str) -> Result<Vec<PathBuf>, String> {
         return Ok(files);
     }
     Ok(vec![base_dir.join(raw)])
+}
+
+fn parser_diagnostic(path: &Path, error: &ParseError) -> Option<Diagnostic> {
+    let loc = Location {
+        file: path.to_path_buf(),
+        line: error.location.line.max(1),
+        column: error.location.col.max(1),
+        source_line: Some(error.source_line.clone()),
+        span_len: Some(error.location.len),
+    };
+    let diag = match &error.kind {
+        ParseErrorKind::InvalidAssignment { suggestion, .. } => {
+            Diagnostic::error("invalid-assignment", "affectation invalide")
+                .at(Some(loc))
+                .with_source_line(error.source_line.clone(), error.location.len)
+                .note("en RVN, les variables s'assignent avec `set`")
+                .suggest(format!("`{suggestion}`"))
+        }
+        ParseErrorKind::UnexpectedToken { got, expected } => Diagnostic::error(
+            "parse",
+            format!("syntaxe invalide: token inattendu `{got}`, attendu : {expected}"),
+        )
+        .at(Some(loc))
+        .with_source_line(error.source_line.clone(), error.location.len),
+        ParseErrorKind::UnexpectedEof { expected } => Diagnostic::error(
+            "parse-eof",
+            format!("fin de fichier inattendue, attendu : {expected}"),
+        )
+        .at(Some(loc))
+        .with_source_line(error.source_line.clone(), error.location.len),
+        ParseErrorKind::LexError { slice } => {
+            Diagnostic::error("lex", format!("caractère non reconnu : `{slice}`"))
+                .at(Some(loc))
+                .with_source_line(error.source_line.clone(), error.location.len)
+        }
+    };
+    Some(diag)
 }
 
 fn collect_symbols(scripts: &ProjectScripts, diagnostics: &mut Vec<Diagnostic>) -> Symbols {
@@ -558,11 +673,16 @@ fn validate_symbols(
         if !symbols.labels.contains_key(target) {
             let mut diag = Diagnostic::error(
                 "unknown-label-target",
-                format!("unknown {kind} target '{target}'"),
+                match *kind {
+                    "jump" => "label introuvable".to_string(),
+                    "call" => "label appelé introuvable".to_string(),
+                    _ => format!("cible de {kind} introuvable"),
+                },
             )
-            .at(Some(loc.clone()));
+            .at(Some(loc.clone()))
+            .note(format!("le label `{target}` n'existe pas dans le projet"));
             if let Some(suggestion) = nearest(target, symbols.labels.keys()) {
-                diag = diag.suggest(format!("did you mean '{suggestion}'?"));
+                diag = diag.suggest(format!("voulez-vous dire `{suggestion}` ?"));
             }
             diagnostics.push(diag);
         }
@@ -707,6 +827,38 @@ fn analyze_control_flow(
             );
         }
     }
+}
+
+fn suppress_noisy_warnings(diagnostics: &mut Vec<Diagnostic>) {
+    let has_structural_script_error = diagnostics.iter().any(|d| {
+        d.severity == Severity::Error
+            && matches!(
+                d.kind,
+                "invalid-assignment"
+                    | "parse"
+                    | "parse-eof"
+                    | "lex"
+                    | "unknown-label-target"
+                    | "duplicate-label"
+                    | "missing-start-label"
+            )
+    });
+    if !has_structural_script_error {
+        return;
+    }
+
+    diagnostics.retain(|d| {
+        !(d.severity == Severity::Warning
+            && matches!(
+                d.kind,
+                "dead-code"
+                    | "unreachable-label"
+                    | "unreferenced-label"
+                    | "missing-locale-key"
+                    | "unused-locale-key"
+                    | "orphan-script"
+            ))
+    });
 }
 
 fn collect_flow_targets(
@@ -1007,6 +1159,8 @@ fn validate_assets(
                 project_dir.join(&paths.theme).display()
             ),
         ));
+    } else {
+        validate_title_screen_theme_assets(project_dir, paths, diagnostics);
     }
     if !project_dir.join(&paths.locales).exists() {
         diagnostics.push(Diagnostic::error(
@@ -1017,6 +1171,569 @@ fn validate_assets(
             ),
         ));
     }
+}
+
+fn validate_title_screen_theme_assets(
+    project_dir: &Path,
+    paths: &crate::PathsSection,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let theme_path = project_dir.join(&paths.theme);
+    let Ok(source) = fs::read_to_string(&theme_path) else {
+        return;
+    };
+    let Ok(value) = source.parse::<toml::Value>() else {
+        return;
+    };
+    let Some(title_screen) = value.get("title_screen").and_then(|v| v.as_table()) else {
+        return;
+    };
+    let assets_dir = project_dir.join(&paths.assets);
+
+    if let Some(background) = title_screen.get("background") {
+        match background {
+            toml::Value::String(path) => {
+                push_theme_warning(
+                    diagnostics,
+                    &theme_path,
+                    &source,
+                    "legacy-title-config",
+                    "title_screen.background is legacy; prefer [title_screen.background].path",
+                    Some("background"),
+                    Some("use `[title_screen.background] path = \"...\" mode = \"cover\"`"),
+                );
+                validate_title_asset(
+                    diagnostics,
+                    &theme_path,
+                    &source,
+                    &assets_dir,
+                    "missing-title-background",
+                    "title_screen.background",
+                    path,
+                    &["png", "jpg", "jpeg", "webp"],
+                );
+            }
+            toml::Value::Table(table) => {
+                if let Some(path) = table.get("path").and_then(|v| v.as_str()) {
+                    validate_title_asset(
+                        diagnostics,
+                        &theme_path,
+                        &source,
+                        &assets_dir,
+                        "missing-title-background",
+                        "title_screen.background.path",
+                        path,
+                        &["png", "jpg", "jpeg", "webp"],
+                    );
+                }
+                if let Some(mode) = table.get("mode").and_then(|v| v.as_str()) {
+                    validate_one_of(
+                        diagnostics,
+                        &theme_path,
+                        &source,
+                        "invalid-title-background-mode",
+                        "title_screen.background.mode",
+                        mode,
+                        &["cover", "contain", "stretch"],
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(logo) = title_screen.get("logo") {
+        match logo {
+            toml::Value::String(path) => {
+                push_theme_warning(
+                    diagnostics,
+                    &theme_path,
+                    &source,
+                    "legacy-title-config",
+                    "title_screen.logo is legacy; prefer [title_screen.logo].path",
+                    Some("logo"),
+                    Some("use `[title_screen.logo] path = \"...\" anchor = \"top_center\"`"),
+                );
+                validate_title_asset(
+                    diagnostics,
+                    &theme_path,
+                    &source,
+                    &assets_dir,
+                    "missing-title-logo",
+                    "title_screen.logo",
+                    path,
+                    &["png", "jpg", "jpeg", "webp"],
+                );
+            }
+            toml::Value::Table(table) => {
+                if let Some(path) = table.get("path").and_then(|v| v.as_str()) {
+                    validate_title_asset(
+                        diagnostics,
+                        &theme_path,
+                        &source,
+                        &assets_dir,
+                        "missing-title-logo",
+                        "title_screen.logo.path",
+                        path,
+                        &["png", "jpg", "jpeg", "webp"],
+                    );
+                }
+                validate_anchor_field(
+                    diagnostics,
+                    &theme_path,
+                    &source,
+                    table,
+                    "title_screen.logo.anchor",
+                );
+                validate_positive_field(
+                    diagnostics,
+                    &theme_path,
+                    &source,
+                    table,
+                    "scale",
+                    "title_screen.logo.scale",
+                    false,
+                );
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(path) = title_screen.get("music").and_then(|v| v.as_str()) {
+        validate_title_asset(
+            diagnostics,
+            &theme_path,
+            &source,
+            &assets_dir,
+            "missing-title-music",
+            "title_screen.music",
+            path,
+            &["ogg", "mp3", "wav", "flac"],
+        );
+    }
+
+    if title_screen.contains_key("button_x")
+        || title_screen.contains_key("button_y")
+        || title_screen.contains_key("button_spacing")
+    {
+        push_theme_warning(
+            diagnostics,
+            &theme_path,
+            &source,
+            "legacy-title-config",
+            "title_screen.button_x/button_y/button_spacing are legacy; prefer [title_screen.buttons] anchor + offsets",
+            Some("button_"),
+            Some("use `[title_screen.buttons] anchor = \"center\" offset_x = 0.0 offset_y = 80.0 spacing = 12.0`"),
+        );
+    }
+    for key in [
+        "show_continue",
+        "show_new_game",
+        "show_load",
+        "show_gallery",
+        "show_settings",
+        "show_quit",
+    ] {
+        if title_screen.contains_key(key) {
+            push_theme_warning(
+                diagnostics,
+                &theme_path,
+                &source,
+                "legacy-title-config",
+                format!("title_screen.{key} is legacy; prefer [title_screen.buttons.visibility]")
+                    .as_str(),
+                Some(key),
+                Some("move visibility flags under `[title_screen.buttons.visibility]`"),
+            );
+        }
+    }
+
+    if let Some(title) = title_screen.get("title").and_then(|v| v.as_table()) {
+        if title.contains_key("x") || title.contains_key("y") {
+            push_theme_warning(
+                diagnostics,
+                &theme_path,
+                &source,
+                "legacy-title-config",
+                "title_screen.title.x/y are legacy; prefer anchor + offset_x/offset_y",
+                Some("title"),
+                Some("use `anchor = \"top_center\"`, `offset_x = 0.0`, `offset_y = 96.0`"),
+            );
+        }
+        validate_anchor_field(
+            diagnostics,
+            &theme_path,
+            &source,
+            title,
+            "title_screen.title.anchor",
+        );
+        validate_positive_field(
+            diagnostics,
+            &theme_path,
+            &source,
+            title,
+            "font_size",
+            "title_screen.title.font_size",
+            false,
+        );
+        validate_color_field(
+            diagnostics,
+            &theme_path,
+            &source,
+            title,
+            "color",
+            "title_screen.title.color",
+        );
+    }
+
+    if let Some(buttons) = title_screen.get("buttons").and_then(|v| v.as_table()) {
+        validate_anchor_field(
+            diagnostics,
+            &theme_path,
+            &source,
+            buttons,
+            "title_screen.buttons.anchor",
+        );
+        validate_positive_field(
+            diagnostics,
+            &theme_path,
+            &source,
+            buttons,
+            "width",
+            "title_screen.buttons.width",
+            false,
+        );
+        validate_positive_field(
+            diagnostics,
+            &theme_path,
+            &source,
+            buttons,
+            "height",
+            "title_screen.buttons.height",
+            false,
+        );
+        validate_positive_field(
+            diagnostics,
+            &theme_path,
+            &source,
+            buttons,
+            "font_size",
+            "title_screen.buttons.font_size",
+            false,
+        );
+        validate_positive_field(
+            diagnostics,
+            &theme_path,
+            &source,
+            buttons,
+            "spacing",
+            "title_screen.buttons.spacing",
+            true,
+        );
+        if let Some(style) = buttons.get("style").and_then(|v| v.as_table()) {
+            for key in [
+                "background_color",
+                "hover_color",
+                "pressed_color",
+                "text_color",
+            ] {
+                validate_color_field(
+                    diagnostics,
+                    &theme_path,
+                    &source,
+                    style,
+                    key,
+                    &format!("title_screen.buttons.style.{key}"),
+                );
+            }
+        }
+    }
+
+    if let Some(order) = title_screen.get("button_order").and_then(|v| v.as_array()) {
+        let mut seen = HashSet::new();
+        for item in order.iter().filter_map(|v| v.as_str()) {
+            if !matches!(
+                item,
+                "continue" | "new_game" | "load" | "gallery" | "settings" | "quit"
+            ) {
+                diagnostics.push(
+                    Diagnostic::warning(
+                        "unknown-title-button",
+                        format!("unknown title_screen.button_order entry '{item}'"),
+                    )
+                    .at(find_location(&theme_path, &source, item).or(Some(Location {
+                        file: theme_path.clone(),
+                        line: 1,
+                        column: 1,
+                        source_line: None,
+                        span_len: None,
+                    })))
+                    .suggest(
+                        "supported entries: continue, new_game, load, gallery, settings, quit",
+                    ),
+                );
+            } else if !seen.insert(item) {
+                diagnostics.push(
+                    Diagnostic::warning(
+                        "duplicate-title-button",
+                        format!("duplicate title_screen.button_order entry '{item}'"),
+                    )
+                    .at(find_location(&theme_path, &source, item).or(Some(Location {
+                        file: theme_path.clone(),
+                        line: 1,
+                        column: 1,
+                        source_line: None,
+                        span_len: None,
+                    })))
+                    .suggest("keep each button id at most once"),
+                );
+            }
+        }
+    }
+}
+
+fn validate_title_asset(
+    diagnostics: &mut Vec<Diagnostic>,
+    theme_path: &Path,
+    source: &str,
+    assets_dir: &Path,
+    kind: &'static str,
+    field: &str,
+    path: &str,
+    extensions: &[&str],
+) {
+    if asset_exists(assets_dir, path, extensions) {
+        return;
+    }
+    diagnostics.push(
+        Diagnostic::warning(
+            kind,
+            format!(
+                "{field} asset '{path}' not found under '{}'",
+                assets_dir.display()
+            ),
+        )
+        .at(find_location(theme_path, source, path).or(Some(Location {
+            file: theme_path.to_path_buf(),
+            line: 1,
+            column: 1,
+            source_line: None,
+            span_len: None,
+        }))),
+    );
+}
+
+fn validate_anchor_field(
+    diagnostics: &mut Vec<Diagnostic>,
+    theme_path: &Path,
+    source: &str,
+    table: &toml::map::Map<String, toml::Value>,
+    field: &str,
+) {
+    let key = field.rsplit('.').next().unwrap_or(field);
+    if let Some(anchor) = table.get(key).and_then(|v| v.as_str()) {
+        validate_one_of(
+            diagnostics,
+            theme_path,
+            source,
+            "invalid-title-anchor",
+            field,
+            anchor,
+            &[
+                "top_left",
+                "top_center",
+                "top_right",
+                "center_left",
+                "center",
+                "center_right",
+                "bottom_left",
+                "bottom_center",
+                "bottom_right",
+            ],
+        );
+    }
+}
+
+fn validate_one_of(
+    diagnostics: &mut Vec<Diagnostic>,
+    theme_path: &Path,
+    source: &str,
+    kind: &'static str,
+    field: &str,
+    value: &str,
+    allowed: &[&str],
+) {
+    if allowed.contains(&value) {
+        return;
+    }
+    diagnostics.push(
+        Diagnostic::warning(kind, format!("{field} has unsupported value '{value}'"))
+            .at(find_theme_key_location(
+                theme_path,
+                source,
+                field.rsplit('.').next().unwrap_or(field),
+                Some(value),
+            )
+            .or_else(|| find_location(theme_path, source, value))
+            .or(Some(Location {
+                file: theme_path.to_path_buf(),
+                line: 1,
+                column: 1,
+                source_line: None,
+                span_len: None,
+            })))
+            .suggest(format!("supported values: {}", allowed.join(", "))),
+    );
+}
+
+fn validate_positive_field(
+    diagnostics: &mut Vec<Diagnostic>,
+    theme_path: &Path,
+    source: &str,
+    table: &toml::map::Map<String, toml::Value>,
+    key: &str,
+    field: &str,
+    allow_zero: bool,
+) {
+    let Some(value) = table
+        .get(key)
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|n| n as f64)))
+    else {
+        return;
+    };
+    let valid = if allow_zero {
+        value >= 0.0
+    } else {
+        value > 0.0
+    };
+    if valid {
+        return;
+    }
+    diagnostics.push(
+        Diagnostic::warning(
+            "invalid-title-size",
+            format!(
+                "{field} must be {}",
+                if allow_zero { ">= 0" } else { "> 0" }
+            ),
+        )
+        .at(
+            find_theme_key_location(theme_path, source, key, Some(&format!("{value}"))).or(Some(
+                Location {
+                    file: theme_path.to_path_buf(),
+                    line: 1,
+                    column: 1,
+                    source_line: None,
+                    span_len: None,
+                },
+            )),
+        ),
+    );
+}
+
+fn validate_color_field(
+    diagnostics: &mut Vec<Diagnostic>,
+    theme_path: &Path,
+    source: &str,
+    table: &toml::map::Map<String, toml::Value>,
+    key: &str,
+    field: &str,
+) {
+    let Some(color) = table.get(key).and_then(|v| v.as_str()) else {
+        return;
+    };
+    if is_valid_hex_color(color) {
+        return;
+    }
+    diagnostics.push(
+        Diagnostic::warning(
+            "invalid-title-color",
+            format!("{field} must be #RRGGBB or #RRGGBBAA"),
+        )
+        .at(
+            find_theme_key_location(theme_path, source, key, Some(color)).or(Some(Location {
+                file: theme_path.to_path_buf(),
+                line: 1,
+                column: 1,
+                source_line: None,
+                span_len: None,
+            })),
+        ),
+    );
+}
+
+fn find_theme_key_location(
+    path: &Path,
+    source: &str,
+    key: &str,
+    value: Option<&str>,
+) -> Option<Location> {
+    for (line_idx, line) in source.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') {
+            continue;
+        }
+        let Some((lhs, rhs)) = trimmed.split_once('=') else {
+            continue;
+        };
+        if lhs.trim() != key {
+            continue;
+        }
+        if let Some(value) = value {
+            let rhs = rhs.trim_start();
+            let numeric = value
+                .chars()
+                .next()
+                .map(|c| c == '-' || c.is_ascii_digit())
+                .unwrap_or(false);
+            if !(rhs.starts_with(value) || (!numeric && rhs.contains(value))) {
+                continue;
+            }
+        }
+        let indent = line.len() - trimmed.len();
+        return Some(Location {
+            file: path.to_path_buf(),
+            line: line_idx + 1,
+            column: indent + 1,
+            source_line: Some(line.to_string()),
+            span_len: Some(key.chars().count().max(1)),
+        });
+    }
+    None
+}
+
+fn is_valid_hex_color(value: &str) -> bool {
+    let Some(hex) = value.strip_prefix('#') else {
+        return false;
+    };
+    matches!(hex.len(), 6 | 8) && hex.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn push_theme_warning(
+    diagnostics: &mut Vec<Diagnostic>,
+    theme_path: &Path,
+    source: &str,
+    kind: &'static str,
+    message: &str,
+    needle: Option<&str>,
+    suggestion: Option<&str>,
+) {
+    let mut diag = Diagnostic::warning(kind, message).at(needle
+        .and_then(|needle| {
+            find_theme_key_location(theme_path, source, needle, None)
+                .or_else(|| find_location(theme_path, source, needle))
+        })
+        .or(Some(Location {
+            file: theme_path.to_path_buf(),
+            line: 1,
+            column: 1,
+            source_line: None,
+            span_len: None,
+        })));
+    if let Some(suggestion) = suggestion {
+        diag = diag.suggest(suggestion);
+    }
+    diagnostics.push(diag);
 }
 
 fn validate_locales(
@@ -1052,6 +1769,8 @@ fn validate_locales(
                         file: path.clone(),
                         line: 1,
                         column: 1,
+                        source_line: None,
+                        span_len: None,
                     })),
                 );
             }
@@ -1070,6 +1789,8 @@ fn validate_locales(
                         file: path.clone(),
                         line: 1,
                         column: 1,
+                        source_line: None,
+                        span_len: None,
                     })),
                 );
             }
@@ -1117,6 +1838,8 @@ fn validate_orphan_scripts(
                         file,
                         line: 1,
                         column: 1,
+                        source_line: None,
+                        span_len: None,
                     })),
                 );
             }
@@ -1270,6 +1993,8 @@ fn locate_stmt(source: &SourceFile, stmt: &Statement) -> Location {
         file: source.path.clone(),
         line: 1,
         column: 1,
+        source_line: None,
+        span_len: None,
     }
 }
 
@@ -1282,6 +2007,11 @@ fn find_location(path: &Path, source: &str, needle: &str) -> Option<Location> {
         file: path.to_path_buf(),
         line,
         column,
+        source_line: source
+            .lines()
+            .nth(line.saturating_sub(1))
+            .map(str::to_string),
+        span_len: Some(needle.chars().count().max(1)),
     })
 }
 
@@ -1390,6 +2120,34 @@ mod tests {
         assert!(report.failed);
         assert_eq!(report.error_count(), 0);
         assert!(report.warning_count() > 0);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn recovers_after_invalid_assignment_and_reports_unknown_jump() {
+        let root = fixture("label start\n    varible = 5\n    jump ixi\n    \"Bonjour.\"\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        let kinds = kinds(&report);
+        assert!(kinds.contains(&"invalid-assignment"));
+        assert!(kinds.contains(&"unknown-label-target"));
+        let assignment = report
+            .diagnostics
+            .iter()
+            .find(|d| d.kind == "invalid-assignment")
+            .unwrap();
+        assert_eq!(assignment.suggestion.as_deref(), Some("`set varible = 5`"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unknown_jump_target_suppresses_flow_noise() {
+        let root = fixture("label start\n    jump ixi\n    \"dead\"\nlabel later\n    \"later\"\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        let kinds = kinds(&report);
+        assert!(kinds.contains(&"unknown-label-target"));
+        assert!(!kinds.contains(&"dead-code"));
+        assert!(!kinds.contains(&"unreachable-label"));
+        assert!(!kinds.contains(&"unreferenced-label"));
         let _ = fs::remove_dir_all(root);
     }
 }

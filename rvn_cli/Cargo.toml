@@ -13,6 +13,7 @@ rvn_bevy = { path = "../rvn_bevy" }
 rvn_core = { path = "../rvn_core" }
 rvn_parser = { path = "../rvn_parser" }
 notify = "6"
+owo-colors = "4.2"
 
 [[bin]]
 name = "rvn"

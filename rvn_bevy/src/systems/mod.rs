@@ -112,7 +112,10 @@ pub use sprite::{sprite_animation_system, sprite_system};
 pub use stepping::script_finished_system;
 pub use stepping::stepping_system;
 pub use theme::{apply_theme_system, theme_reload_system};
-pub use title::{despawn_title_screen, spawn_title_screen, title_interaction_system};
+pub use title::{
+    despawn_title_screen, spawn_title_screen, title_background_resize_system,
+    title_interaction_system,
+};
 pub use typewriter::{typewriter_config_system, typewriter_system};
 
 // Réexporte les composants et systèmes du menu de sauvegarde afin que

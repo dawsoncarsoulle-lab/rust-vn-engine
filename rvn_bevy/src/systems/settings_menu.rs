@@ -9,7 +9,8 @@ use bevy::prelude::*;
 
 use crate::components::DialogueText;
 use crate::resources::{
-    MusicVolume, PersistentDataResource, TypewriterConfig, TypewriterState, VnEngine,
+    MenuState, MusicVolume, PersistentDataResource, TypewriterConfig, TypewriterState, VnEngine,
+    VnState,
 };
 use crate::systems::typewriter::apply_visible_sections;
 
@@ -608,6 +609,9 @@ pub fn apply_settings_to_runtime_system(
 pub fn despawn_settings_menu_overlay(
     mut commands: Commands,
     settings_state: Res<SettingsMenuState>,
+    current_state: Res<State<VnState>>,
+    mut next_state: ResMut<NextState<VnState>>,
+    mut menu_state: ResMut<MenuState>,
     query: Query<Entity, With<SettingsMenuOverlay>>,
 ) {
     if settings_state.active {
@@ -615,5 +619,11 @@ pub fn despawn_settings_menu_overlay(
     }
     if let Ok(ent) = query.get_single() {
         commands.entity(ent).despawn_recursive();
+        if current_state.get() == &VnState::Menu
+            && menu_state.return_to == Some(VnState::TitleScreen)
+        {
+            menu_state.return_to = None;
+            next_state.set(VnState::TitleScreen);
+        }
     }
 }

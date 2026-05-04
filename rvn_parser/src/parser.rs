@@ -23,6 +23,12 @@ pub struct Parser<'a> {
     eof_location: SourceLocation,
 }
 
+#[derive(Debug, PartialEq)]
+pub struct RecoveredScript {
+    pub script: Script,
+    pub errors: Vec<ParseError>,
+}
+
 impl<'a> Parser<'a> {
     pub fn new(source: &'a str) -> ParseResult<Self> {
         let mut tokens = Vec::new();
@@ -71,6 +77,30 @@ impl<'a> Parser<'a> {
 
     fn err_eof(&self, loc: SourceLocation, expected: &'static str) -> ParseError {
         ParseError::build(ParseErrorKind::UnexpectedEof { expected }, loc, self.source)
+    }
+
+    fn err_invalid_assignment(&self, loc: SourceLocation, ident: &str) -> ParseError {
+        ParseError::build(
+            ParseErrorKind::InvalidAssignment {
+                ident: ident.to_string(),
+                suggestion: self.assignment_suggestion(loc.line),
+            },
+            loc,
+            self.source,
+        )
+    }
+
+    fn assignment_suggestion(&self, line: usize) -> String {
+        let line_source = self
+            .source
+            .lines()
+            .nth(line.saturating_sub(1))
+            .unwrap_or("")
+            .trim();
+        if line_source.is_empty() {
+            return "set <variable> = <valeur>".to_string();
+        }
+        format!("set {line_source}")
     }
 
     // ── Navigation ───────────────────────────────────────────────────────────
@@ -428,6 +458,34 @@ impl<'a> Parser<'a> {
         Ok(stmts)
     }
 
+    pub fn parse_script_recovering(&mut self) -> RecoveredScript {
+        let mut stmts = Vec::new();
+        let mut errors = Vec::new();
+        while self.peek().is_some() {
+            match self.parse_statement() {
+                Ok(stmt) => stmts.push(stmt),
+                Err(err) => {
+                    errors.push(err);
+                    self.synchronize_after_error();
+                }
+            }
+        }
+        RecoveredScript {
+            script: stmts,
+            errors,
+        }
+    }
+
+    fn synchronize_after_error(&mut self) {
+        while let Some((tok, _)) = self.tokens.get(self.pos) {
+            if matches!(tok, Token::Newline) {
+                self.pos += 1;
+                break;
+            }
+            self.pos += 1;
+        }
+    }
+
     // ── Dispatch ─────────────────────────────────────────────────────────────
 
     fn parse_statement(&mut self) -> ParseResult<Statement> {
@@ -760,6 +818,7 @@ impl<'a> Parser<'a> {
     // ── Identifiant ──────────────────────────────────────────────────────────
 
     fn parse_ident_statement(&mut self) -> ParseResult<Statement> {
+        let ident_loc = self.current_location();
         let ident = match self.advance().cloned() {
             Some(Token::Ident(s)) => s.to_string(),
             _ => unreachable!(),
@@ -784,6 +843,7 @@ impl<'a> Parser<'a> {
                 })
             }
             Some(Token::Dot) => self.parse_method_call(ident),
+            Some(Token::Assign) => Err(self.err_invalid_assignment(ident_loc, &ident)),
             Some(tok) => {
                 Err(self.err_token(loc, &tok, "`:`, `.` ou une string après l'identifiant"))
             }
@@ -1193,6 +1253,10 @@ impl<'a> Parser<'a> {
 
 pub fn parse(source: &str) -> ParseResult<Script> {
     Parser::new(source)?.parse_script()
+}
+
+pub fn parse_recovering(source: &str) -> ParseResult<RecoveredScript> {
+    Ok(Parser::new(source)?.parse_script_recovering())
 }
 
 /// Parse une string interpolée hors contexte script.

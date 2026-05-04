@@ -9,7 +9,7 @@ pub mod parser;
 pub use ast::*;
 pub use error::*;
 pub use expr::{BinOpKind, Expr, InterpolatedText, TextSegment};
-pub use parser::{parse, parse_interpolated_str};
+pub use parser::{RecoveredScript, parse, parse_interpolated_str, parse_recovering};
 
 use std::collections::HashSet;
 use std::fs;
@@ -409,6 +409,18 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("ligne 2"));
         assert!(msg.contains('@'));
+    }
+
+    #[test]
+    fn test_recovering_reports_invalid_assignment_and_keeps_parsing() {
+        let recovered = parse_recovering("label start\n    varible = 5\n    jump ixi\n").unwrap();
+        assert_eq!(recovered.errors.len(), 1);
+        assert!(matches!(
+            recovered.errors[0].kind,
+            ParseErrorKind::InvalidAssignment { .. }
+        ));
+        assert!(matches!(recovered.script[0], Statement::Label { .. }));
+        assert!(matches!(recovered.script[1], Statement::Jump { .. }));
     }
 
     #[test]

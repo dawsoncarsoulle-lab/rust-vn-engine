@@ -40,6 +40,7 @@ pub enum ParseErrorKind {
     UnexpectedToken { got: String, expected: &'static str },
     UnexpectedEof { expected: &'static str },
     LexError { slice: String },
+    InvalidAssignment { ident: String, suggestion: String },
 }
 
 /// Erreur de parsing avec contexte source.
@@ -87,6 +88,7 @@ impl std::fmt::Display for ParseError {
                 format!("fin de fichier inattendue, attendu : {}", expected)
             }
             ParseErrorKind::LexError { slice } => format!("caractère non reconnu : `{}`", slice),
+            ParseErrorKind::InvalidAssignment { .. } => "affectation invalide".to_string(),
         };
         writeln!(f, "{} : {}", self.location, msg)?;
 
@@ -103,7 +105,14 @@ impl std::fmt::Display for ParseError {
 
         let col0 = self.location.col.saturating_sub(1);
         let carets = "^".repeat(self.location.len.max(1));
-        write!(f, "{pad} | {}{}", " ".repeat(col0), carets)
+        write!(f, "{pad} | {}{}", " ".repeat(col0), carets)?;
+        if let ParseErrorKind::InvalidAssignment { suggestion, .. } = &self.kind {
+            write!(
+                f,
+                "\n{pad} |\n{pad} = en RVN, les variables s'assignent avec `set`\n{pad} = suggestion: `{suggestion}`"
+            )?;
+        }
+        Ok(())
     }
 }
 

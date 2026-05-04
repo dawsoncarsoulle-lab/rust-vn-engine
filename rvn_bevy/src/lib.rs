@@ -18,8 +18,9 @@ use crate::bevy_renderer::BevyRenderer;
 use crate::project_paths::ProjectPaths;
 use crate::resources::{
     CgAssetRegistry, CharacterRegistry, ChoiceFocus, DialogueHistory, GalleryState, ImagemapState,
-    LocaleConfig, MenuState, MusicEntity, MusicVolume, PersistentDataResource, ScriptErrorMessage,
-    Theme, ThemeWatcher, TypewriterConfig, TypewriterState, VnEngine, VnRenderState, VnState,
+    LocaleConfig, MenuState, MusicEntity, MusicVolume, PersistentDataResource, ProjectTitle,
+    ScriptErrorMessage, Theme, ThemeWatcher, TypewriterConfig, TypewriterState, VnEngine,
+    VnRenderState, VnState,
 };
 use crate::systems::save_menu::SaveMenuState;
 use crate::systems::settings_menu::{Settings, SettingsMenuState};
@@ -76,6 +77,7 @@ use crate::systems::{
     sprite_system,
     stepping_system,
     theme_reload_system,
+    title_background_resize_system,
     title_interaction_system,
     typewriter_config_system,
     typewriter_system,
@@ -383,6 +385,7 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
         )
         // Resources
         .insert_resource(theme)
+        .insert_resource(ProjectTitle(cfg.project.title.clone()))
         .insert_resource(theme_watcher)
         .insert_resource(VnEngine(engine))
         .insert_resource(VnRenderState::default())
@@ -435,6 +438,7 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
                 locale_reload_system,     // ← hot-reload locales
                 locale_lang_watch_system, // ← surveille __lang variable
                 title_interaction_system.run_if(in_state(VnState::TitleScreen)),
+                title_background_resize_system.run_if(in_state(VnState::TitleScreen)),
                 spawn_gallery_overlay.run_if(in_state(VnState::Gallery)),
                 gallery_interaction_system.run_if(in_state(VnState::Gallery)),
                 stepping_system.run_if(in_state(VnState::Stepping)),

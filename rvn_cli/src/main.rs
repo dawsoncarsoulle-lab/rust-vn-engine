@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::mpsc::{channel, RecvTimeoutError};
@@ -8,6 +9,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use include_dir::{include_dir, Dir};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use owo_colors::OwoColorize;
 use rvn_bevy::run_game;
 use serde::Deserialize;
 
@@ -73,7 +75,11 @@ fn main() -> Result<()> {
         Commands::Run { project } => {
             let report = check_project(&project, CheckOptions::default());
             if report.has_errors() {
-                print_project_diagnostics(&project, &report.diagnostics);
+                print_project_diagnostics(
+                    &project,
+                    &report.diagnostics,
+                    std::io::stderr().is_terminal(),
+                );
                 eprintln!(
                     "\nrvn run aborted: fix the project errors above before launching the runtime."
                 );
@@ -87,21 +93,30 @@ fn main() -> Result<()> {
         }
         Commands::Check { project, strict } => {
             let report = check_project(&project, CheckOptions { strict });
+            let use_color = std::io::stderr().is_terminal();
             if report.diagnostics.is_empty() {
-                println!("Check completed: 0 errors, 0 warnings");
+                print_success("Check completed: 0 errors, 0 warnings", use_color);
             } else {
-                print_project_diagnostics(&project, &report.diagnostics);
+                print_project_diagnostics(&project, &report.diagnostics, use_color);
                 if report.failed {
-                    eprintln!(
-                        "\nCheck failed: {} errors, {} warnings",
-                        report.error_count(),
-                        report.warning_count()
+                    eprintln!();
+                    print_error(
+                        &format!(
+                            "Check failed: {} errors, {} warnings",
+                            report.error_count(),
+                            report.warning_count()
+                        ),
+                        use_color,
                     );
                 } else {
-                    println!(
-                        "\nCheck completed: {} errors, {} warnings",
-                        report.error_count(),
-                        report.warning_count()
+                    println!();
+                    print_success(
+                        &format!(
+                            "Check completed: {} errors, {} warnings",
+                            report.error_count(),
+                            report.warning_count()
+                        ),
+                        use_color,
                     );
                 }
             }
@@ -123,10 +138,45 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn print_project_diagnostics(project: &str, diagnostics: &[check::Diagnostic]) {
+fn print_project_diagnostics(project: &str, diagnostics: &[check::Diagnostic], use_color: bool) {
     eprintln!("RVN project validation in {project}:");
     for diagnostic in diagnostics {
-        eprintln!("{diagnostic}");
+        let rendered = diagnostic.to_string();
+        if use_color {
+            print_colored_diagnostic(&rendered);
+        } else {
+            eprintln!("{rendered}");
+        }
+    }
+}
+
+fn print_colored_diagnostic(rendered: &str) {
+    for line in rendered.lines() {
+        if line.starts_with("error[") {
+            eprintln!("{}", line.red());
+        } else if line.starts_with("warning[") {
+            eprintln!("{}", line.yellow());
+        } else if line.starts_with("  = ") {
+            eprintln!("{}", line.cyan());
+        } else {
+            eprintln!("{line}");
+        }
+    }
+}
+
+fn print_success(message: &str, use_color: bool) {
+    if use_color {
+        println!("{}", message.green());
+    } else {
+        println!("{message}");
+    }
+}
+
+fn print_error(message: &str, use_color: bool) {
+    if use_color {
+        eprintln!("{}", message.red());
+    } else {
+        eprintln!("{message}");
     }
 }
 
@@ -272,7 +322,11 @@ fn build_project(project: &str) -> Result<()> {
     println!("Check en cours...");
     let report = check_project(project, CheckOptions::default());
     if report.has_errors() {
-        print_project_diagnostics(project, &report.diagnostics);
+        print_project_diagnostics(
+            project,
+            &report.diagnostics,
+            std::io::stderr().is_terminal(),
+        );
         anyhow::bail!("rvn build aborted: fix the project errors above before building.");
     }
 
