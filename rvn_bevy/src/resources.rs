@@ -37,8 +37,16 @@ pub enum VnState {
     Error,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GalleryView {
+    #[default]
+    Cg,
+    Endings,
+}
+
 #[derive(Resource, Default)]
 pub struct GalleryState {
+    pub view: GalleryView,
     pub selected_cg: Option<String>,
 }
 
