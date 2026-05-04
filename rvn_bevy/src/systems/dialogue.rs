@@ -1,7 +1,9 @@
 use bevy::prelude::*;
+use rvn_core::parse_text_tags;
 
 use crate::components::{CharacterNameText, ChoiceButton, DialogueBox, DialogueText};
 use crate::resources::{CharacterRegistry, DialogueHistory, TypewriterConfig, TypewriterState};
+use crate::systems::typewriter::apply_visible_sections;
 use crate::vn_command::VnCommand;
 
 pub fn dialogue_system(
@@ -41,15 +43,39 @@ pub fn dialogue_system(
             None => "".to_string(),
             Some(id) => registry.display_name(id).to_string(),
         };
-        history.add(display_name_for_history, text.clone());
+        let rich_text = match parse_text_tags(text) {
+            Ok(rich_text) => rich_text,
+            Err(e) => {
+                error!("[text_tags] {e}");
+                parse_text_tags(&escape_as_plain_text(text)).unwrap_or_else(|_| {
+                    rvn_core::RichText {
+                        segments: vec![rvn_core::RichTextSegment {
+                            text: text.clone(),
+                            color: None,
+                            speed: None,
+                            shake: false,
+                            pause_after: None,
+                        }],
+                    }
+                })
+            }
+        };
+        history.add(display_name_for_history, rich_text.plain_text());
 
         if tw_config.enabled && tw_config.chars_per_sec > 0.0 {
-            tw_state.start(text.clone(), tw_config.chars_per_sec);
-        } else {
-            tw_state.start(text.clone(), 0.0);
+            tw_state.start_segments(rich_text.segments, tw_config.chars_per_sec);
             if let Some(mut t) = text_query.iter_mut().next() {
-                t.sections[0].value = text.clone();
+                apply_visible_sections(&mut t, &tw_state);
+            }
+        } else {
+            tw_state.start_segments(rich_text.segments, 0.0);
+            if let Some(mut t) = text_query.iter_mut().next() {
+                apply_visible_sections(&mut t, &tw_state);
             }
         }
     }
+}
+
+fn escape_as_plain_text(text: &str) -> String {
+    text.replace('{', "{{").replace('}', "}}")
 }

@@ -83,6 +83,9 @@ pub enum VnCommand {
 
     // ── Meta ──────────────────────────────────────────────────────────────────
     ScriptFinished,
+    UnlockEnding {
+        id: String,
+    },
     SetTypewriterConfig {
         speed_cps: f32,
     },
@@ -96,4 +99,6 @@ pub enum PlayerInput {
     SkipTypewriter,
     ToggleMenu,
     OpenHistory,
+    QuickSave,
+    QuickLoad,
 }

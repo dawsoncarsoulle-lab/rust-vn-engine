@@ -10,6 +10,7 @@ anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 rvn_bevy = { path = "../rvn_bevy" }
+rvn_core = { path = "../rvn_core" }
 rvn_parser = { path = "../rvn_parser" }
 notify = "6"
 

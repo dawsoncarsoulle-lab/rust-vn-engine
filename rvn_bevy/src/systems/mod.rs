@@ -10,11 +10,13 @@ pub mod cinematic;
 pub mod dialogue;
 pub mod error_overlay;
 pub mod fade;
+pub mod gallery;
 pub mod history;
 pub mod imagemap;
 pub mod input;
 pub mod locale;
 pub mod menu;
+pub mod persistent;
 pub mod setup;
 pub mod sprite;
 pub mod stepping;
@@ -96,6 +98,7 @@ pub use cinematic::{cinematic_cover_resize_system, cinematic_system};
 pub use dialogue::dialogue_system;
 pub use error_overlay::{despawn_error_overlay, spawn_error_overlay};
 pub use fade::fade_system;
+pub use gallery::{despawn_gallery_overlay, gallery_interaction_system, spawn_gallery_overlay};
 pub use history::{despawn_history_overlay, history_input_system, spawn_history_overlay};
 pub use imagemap::{
     imagemap_cleanup_system, imagemap_dimensions_system, imagemap_hover_system, imagemap_system,
@@ -103,6 +106,7 @@ pub use imagemap::{
 pub use input::{input_system, menu_input_system, player_input_system};
 pub use locale::{locale_lang_watch_system, locale_reload_system};
 pub use menu::{despawn_menu_overlay, menu_interaction_system, spawn_menu_overlay};
+pub use persistent::persistent_unlock_system;
 pub use setup::{build_character_registry, setup_ui};
 pub use sprite::{sprite_animation_system, sprite_system};
 pub use stepping::script_finished_system;

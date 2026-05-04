@@ -447,6 +447,7 @@ impl<'a> Parser<'a> {
             }
             Some(Token::Scene) => self.parse_scene(),
             Some(Token::Cinematic) => self.parse_cinematic(),
+            Some(Token::UnlockEnding) => self.parse_unlock_ending(),
             Some(Token::Imagemap) => self.parse_imagemap(),
             Some(Token::Typewriter) => self.parse_typewriter(),
             Some(Token::String(_)) => self.parse_dialogue_text_only(),
@@ -741,6 +742,18 @@ impl<'a> Parser<'a> {
             }
             Some(tok) => Err(self.err_token(loc, &tok, "`\"id\"` ou `hide` après `cinematic`")),
             None => Err(self.err_eof(loc, "`\"id\"` ou `hide` après `cinematic`")),
+        }
+    }
+
+    fn parse_unlock_ending(&mut self) -> ParseResult<Statement> {
+        self.advance();
+        let loc = self.current_location();
+        match self.advance().cloned() {
+            Some(Token::String(raw)) => Ok(Statement::UnlockEnding {
+                id: raw[1..raw.len() - 1].to_string(),
+            }),
+            Some(tok) => Err(self.err_token(loc, &tok, "`\"id\"` après `unlock_ending`")),
+            None => Err(self.err_eof(loc, "`\"id\"` après `unlock_ending`")),
         }
     }
 

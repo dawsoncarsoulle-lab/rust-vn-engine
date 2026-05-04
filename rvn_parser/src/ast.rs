@@ -219,6 +219,9 @@ pub enum Statement {
     CinematicHide {
         transition: Option<String>,
     },
+    UnlockEnding {
+        id: String,
+    },
 
     ShowSprite {
         character_id: String,

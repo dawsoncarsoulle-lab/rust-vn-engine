@@ -8,7 +8,10 @@
 use bevy::prelude::*;
 
 use crate::components::DialogueText;
-use crate::resources::{MusicVolume, TypewriterConfig, TypewriterState};
+use crate::resources::{
+    MusicVolume, PersistentDataResource, TypewriterConfig, TypewriterState, VnEngine,
+};
+use crate::systems::typewriter::apply_visible_sections;
 
 /// Configuration for various runtime settings.  Values are normalised between
 /// sensible ranges (0.0‑1.0 for volumes, etc.).  The language string should
@@ -411,6 +414,7 @@ pub fn settings_menu_interaction_system(
     >,
     mut settings_state: ResMut<SettingsMenuState>,
     mut settings: ResMut<Settings>,
+    mut persistent: ResMut<PersistentDataResource>,
     mut windows: Query<&mut Window>,
 ) {
     for (interaction, button) in interaction_query.iter_mut() {
@@ -464,6 +468,18 @@ pub fn settings_menu_interaction_system(
                 }
                 SettingsButton::Close => {
                     settings_state.active = false;
+                }
+            }
+
+            if !matches!(button, SettingsButton::Close) {
+                persistent.data.language = Some(settings.language.clone());
+                persistent.data.music_volume = Some(settings.music_volume);
+                persistent.data.sfx_volume = Some(settings.sfx_volume);
+                persistent.data.text_speed = Some(settings.text_speed);
+                persistent.data.auto_speed = Some(settings.auto_speed);
+                persistent.data.fullscreen = Some(settings.fullscreen);
+                if let Err(e) = persistent.manager.save(&persistent.data) {
+                    error!("[settings] impossible de sauvegarder persistent.json : {e}");
                 }
             }
         }
@@ -538,6 +554,8 @@ pub fn apply_settings_to_runtime_system(
     mut music_volume: ResMut<MusicVolume>,
     mut tw_config: ResMut<TypewriterConfig>,
     mut tw_state: ResMut<TypewriterState>,
+    mut engine: ResMut<VnEngine>,
+    mut windows: Query<&mut Window>,
     mut dialogue_text_query: Query<&mut Text, With<DialogueText>>,
 ) {
     if !settings.is_changed() {
@@ -546,6 +564,25 @@ pub fn apply_settings_to_runtime_system(
 
     // Audio: music is driven through MusicVolume; SFX uses Settings directly when spawned.
     music_volume.0 = settings.music_volume.clamp(0.0, 1.0);
+
+    if let Some(locale) = &mut engine.0.locale {
+        if locale.current_lang() != settings.language {
+            if let Err(e) = locale.set_language(&settings.language) {
+                error!(
+                    "[settings] impossible de charger la langue `{}` : {}",
+                    settings.language, e
+                );
+            }
+        }
+    }
+
+    if let Ok(mut win) = windows.get_single_mut() {
+        win.mode = if settings.fullscreen {
+            bevy::window::WindowMode::BorderlessFullscreen
+        } else {
+            bevy::window::WindowMode::Windowed
+        };
+    }
 
     // Text: convert the UI multiplier into a chars-per-second value.
     let cps = if settings.typewriter {
@@ -560,7 +597,7 @@ pub fn apply_settings_to_runtime_system(
     if !settings.typewriter {
         tw_state.skip();
         if let Ok(mut text) = dialogue_text_query.get_single_mut() {
-            text.sections[0].value = tw_state.full_text.clone();
+            apply_visible_sections(&mut text, &tw_state);
         }
     } else if tw_state.typing {
         tw_state.chars_per_sec = cps;

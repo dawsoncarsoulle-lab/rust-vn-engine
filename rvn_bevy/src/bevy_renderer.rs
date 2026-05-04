@@ -44,6 +44,11 @@ impl Renderer for BevyRenderer {
         });
     }
 
+    fn unlock_ending(&mut self, id: &str) {
+        self.pending
+            .push(VnCommand::UnlockEnding { id: id.to_string() });
+    }
+
     fn show_sprite(
         &mut self,
         id: &str,

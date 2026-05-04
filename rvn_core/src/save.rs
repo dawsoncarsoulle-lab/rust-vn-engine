@@ -255,6 +255,14 @@ impl SaveManager {
         self.save_dir.join(format!("slot_{slot:02}.json"))
     }
 
+    fn autosave_path(&self) -> PathBuf {
+        self.save_dir.join("autosave.json")
+    }
+
+    fn quicksave_path(&self) -> PathBuf {
+        self.save_dir.join("quicksave.json")
+    }
+
     fn check_slot(&self, slot: u32) -> Result<(), SaveError> {
         if slot == 0 || slot > self.max_slots {
             return Err(SaveError::SlotHorsLimites {
@@ -281,6 +289,38 @@ impl SaveManager {
         Ok(())
     }
 
+    fn save_to_path(
+        &self,
+        path: PathBuf,
+        state: &GameState,
+        slot: u32,
+        label: String,
+        script_name: String,
+    ) -> Result<(), SaveError> {
+        let data = SaveData::from_state(state, slot, label, script_name);
+        let json = serde_json::to_string_pretty(&data)?;
+        fs::write(path, json)?;
+        Ok(())
+    }
+
+    pub fn save_autosave(
+        &self,
+        state: &GameState,
+        label: String,
+        script_name: String,
+    ) -> Result<(), SaveError> {
+        self.save_to_path(self.autosave_path(), state, 0, label, script_name)
+    }
+
+    pub fn save_quicksave(
+        &self,
+        state: &GameState,
+        label: String,
+        script_name: String,
+    ) -> Result<(), SaveError> {
+        self.save_to_path(self.quicksave_path(), state, 0, label, script_name)
+    }
+
     // ── Lecture
 
     pub fn load(&self, slot: u32) -> Result<SaveData, SaveError> {
@@ -294,10 +334,33 @@ impl SaveManager {
         Ok(data)
     }
 
+    fn load_from_path(&self, path: PathBuf) -> Result<SaveData, SaveError> {
+        if !path.exists() {
+            return Err(SaveError::SlotVide(0));
+        }
+        let json = fs::read_to_string(&path)?;
+        let data = serde_json::from_str(&json)?;
+        Ok(data)
+    }
+
+    pub fn load_autosave(&self) -> Result<SaveData, SaveError> {
+        self.load_from_path(self.autosave_path())
+    }
+
+    pub fn load_quicksave(&self) -> Result<SaveData, SaveError> {
+        self.load_from_path(self.quicksave_path())
+    }
+
     pub fn list_saves(&self) -> Vec<SaveData> {
         (1..=self.max_slots)
             .filter_map(|slot| self.load(slot).ok())
             .collect()
+    }
+
+    pub fn latest_manual_save(&self) -> Option<SaveData> {
+        self.list_saves()
+            .into_iter()
+            .max_by_key(|save| (save.timestamp, save.slot))
     }
 
     pub fn delete(&self, slot: u32) -> Result<(), SaveError> {
@@ -313,6 +376,14 @@ impl SaveManager {
 
     pub fn slot_occupied(&self, slot: u32) -> bool {
         self.check_slot(slot).is_ok() && self.slot_path(slot).exists()
+    }
+
+    pub fn autosave_exists(&self) -> bool {
+        self.autosave_path().exists()
+    }
+
+    pub fn quicksave_exists(&self) -> bool {
+        self.quicksave_path().exists()
     }
 
     pub fn max_slots(&self) -> u32 {
@@ -430,6 +501,47 @@ mod tests {
     }
 
     #[test]
+    fn test_autosave_write_exists_load() {
+        let dir = std::env::temp_dir().join(format!("rvn_autosave_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mgr = SaveManager::new(&dir, 10).unwrap();
+        let state = sample_state();
+
+        assert!(!mgr.autosave_exists());
+        mgr.save_autosave(&state, "Auto".into(), "test.rvn".into())
+            .unwrap();
+
+        assert!(mgr.autosave_exists());
+        let loaded = mgr.load_autosave().unwrap();
+        assert_eq!(loaded.label, "Auto");
+        assert_eq!(loaded.pc, state.current_interactive_pc);
+        assert_eq!(loaded.background_image, state.background_image);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_quicksave_write_exists_load() {
+        let dir = std::env::temp_dir().join(format!("rvn_quicksave_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mgr = SaveManager::new(&dir, 10).unwrap();
+        let state = sample_state();
+
+        assert!(!mgr.quicksave_exists());
+        assert!(matches!(mgr.load_quicksave(), Err(SaveError::SlotVide(0))));
+
+        mgr.save_quicksave(&state, "Quick".into(), "test.rvn".into())
+            .unwrap();
+
+        assert!(mgr.quicksave_exists());
+        let loaded = mgr.load_quicksave().unwrap();
+        assert_eq!(loaded.label, "Quick");
+        assert_eq!(loaded.pc, state.current_interactive_pc);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn test_slot_hors_limites() {
         let dir = std::env::temp_dir().join("rvn_save_test_limits");
         let mgr = SaveManager::new(&dir, 5).unwrap();
@@ -462,6 +574,35 @@ mod tests {
         assert_eq!(saves.len(), 2);
         assert_eq!(saves[0].slot, 3);
         assert_eq!(saves[1].slot, 7);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_latest_manual_save_ignores_special_saves() {
+        let dir = std::env::temp_dir().join(format!("rvn_latest_save_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mgr = SaveManager::new(&dir, 10).unwrap();
+
+        let mut state = sample_state();
+        state.pc = 3;
+        state.current_interactive_pc = 3;
+        mgr.save(&state, 1, "Slot 1".into(), "s.rvn".into())
+            .unwrap();
+
+        state.pc = 8;
+        state.current_interactive_pc = 8;
+        mgr.save_autosave(&state, "Auto".into(), "s.rvn".into())
+            .unwrap();
+
+        state.pc = 9;
+        state.current_interactive_pc = 9;
+        mgr.save(&state, 2, "Slot 2".into(), "s.rvn".into())
+            .unwrap();
+
+        let latest = mgr.latest_manual_save().unwrap();
+        assert_eq!(latest.slot, 2);
+        assert_eq!(latest.label, "Slot 2");
 
         let _ = fs::remove_dir_all(&dir);
     }

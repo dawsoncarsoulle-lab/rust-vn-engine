@@ -1,11 +1,16 @@
 use bevy::prelude::*;
+use rvn_core::save::SaveManager;
 use rvn_parser::Transition;
 
-use super::{CHOICE_MARGIN_ABOVE_BOX, TEXTBOX_H, WIN_H, WIN_W};
+use super::{CHOICE_MARGIN_ABOVE_BOX, TEXTBOX_H, WIN_H};
+use crate::components::DialogueText;
+use crate::project_paths::ProjectPaths;
 use crate::resources::{
-    ChoiceFocus, ImagemapState, MenuState, ScriptErrorMessage, TypewriterState, VnEngine,
-    VnRenderState, VnState,
+    ChoiceFocus, DialogueHistory, ImagemapState, MenuState, ScriptErrorMessage, TypewriterState,
+    VnEngine, VnRenderState, VnState,
 };
+use crate::systems::save_menu::{apply_loaded_game, MAX_SLOTS};
+use crate::systems::typewriter::apply_visible_sections;
 use crate::vn_command::{PlayerInput, VnCommand};
 use rvn_core::error::ScriptError;
 
@@ -23,6 +28,16 @@ pub fn input_system(
     // ── Escape → menu ────────────────────────────────────────────────────────
     if keys.just_pressed(KeyCode::Escape) {
         player_events.send(PlayerInput::ToggleMenu);
+        return;
+    }
+
+    if keys.just_pressed(KeyCode::F5) {
+        player_events.send(PlayerInput::QuickSave);
+        return;
+    }
+
+    if keys.just_pressed(KeyCode::F6) {
+        player_events.send(PlayerInput::QuickLoad);
         return;
     }
 
@@ -176,8 +191,11 @@ pub fn player_input_system(
     mut imagemap_state: ResMut<ImagemapState>,
     mut tw_state: ResMut<TypewriterState>,
     mut choice_focus: ResMut<ChoiceFocus>,
+    mut history: ResMut<DialogueHistory>,
     mut vn_events: EventWriter<VnCommand>,
     mut error_msg: ResMut<ScriptErrorMessage>,
+    project_paths: Res<ProjectPaths>,
+    mut dialogue_text_query: Query<&mut Text, With<DialogueText>>,
 ) {
     for input in events.read() {
         match input {
@@ -210,6 +228,9 @@ pub fn player_input_system(
 
             PlayerInput::SkipTypewriter => {
                 tw_state.skip();
+                if let Ok(mut text) = dialogue_text_query.get_single_mut() {
+                    apply_visible_sections(&mut text, &tw_state);
+                }
             }
 
             PlayerInput::Rollback => {
@@ -258,6 +279,46 @@ pub fn player_input_system(
             PlayerInput::OpenHistory => {
                 if *current_state.get() == VnState::Waiting {
                     next_state.set(VnState::History);
+                }
+            }
+
+            PlayerInput::QuickSave => {
+                match SaveManager::new(&project_paths.saves, MAX_SLOTS as u32) {
+                    Ok(mgr) => {
+                        if let Err(e) = mgr.save_quicksave(
+                            &engine.0.state,
+                            "Quicksave".to_string(),
+                            "script.rvn".to_string(),
+                        ) {
+                            error!("[quick_save] échec: {e}");
+                        } else {
+                            info!("[quick_save] sauvegarde rapide écrite");
+                        }
+                    }
+                    Err(e) => error!("[quick_save] SaveManager indisponible: {e}"),
+                }
+            }
+
+            PlayerInput::QuickLoad => {
+                match SaveManager::new(&project_paths.saves, MAX_SLOTS as u32) {
+                    Ok(mgr) => match mgr.load_quicksave() {
+                        Ok(data) => {
+                            engine.0.load_data(data);
+                            apply_loaded_game(
+                                &mut engine,
+                                &mut render_state,
+                                &mut imagemap_state,
+                                &mut tw_state,
+                                &mut history,
+                                &mut vn_events,
+                            );
+                            choice_focus.clear();
+                            next_state.set(VnState::Waiting);
+                            info!("[quick_load] sauvegarde rapide chargée");
+                        }
+                        Err(e) => info!("[quick_load] aucune quicksave chargeable: {e}"),
+                    },
+                    Err(e) => error!("[quick_load] SaveManager indisponible: {e}"),
                 }
             }
         }

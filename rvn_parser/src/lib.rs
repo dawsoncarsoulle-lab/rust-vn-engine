@@ -453,6 +453,15 @@ mod tests {
     }
 
     #[test]
+    fn test_unlock_ending() {
+        let s = parse(r#"unlock_ending "demo_end""#).unwrap();
+        assert!(matches!(
+            &s[0],
+            Statement::UnlockEnding { id } if id == "demo_end"
+        ));
+    }
+
+    #[test]
     fn test_byte_offset_to_location_basics() {
         let src = "hello\nworld\nfoo";
         assert_eq!(

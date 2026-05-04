@@ -41,6 +41,8 @@ pub enum Token<'a> {
     Scene,
     #[token("cinematic")]
     Cinematic,
+    #[token("unlock_ending")]
+    UnlockEnding,
     #[token("with")]
     With,
     #[token("fade")]

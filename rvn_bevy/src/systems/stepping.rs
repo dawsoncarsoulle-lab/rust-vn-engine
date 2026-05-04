@@ -1,7 +1,10 @@
 use bevy::prelude::*;
+use rvn_core::save::SaveManager;
 use rvn_parser::Transition;
 
+use crate::project_paths::ProjectPaths;
 use crate::resources::{ScriptErrorMessage, VnEngine, VnRenderState, VnState};
+use crate::systems::save_menu::MAX_SLOTS;
 use crate::vn_command::VnCommand;
 use rvn_core::{error::ScriptError, Interaction};
 
@@ -15,6 +18,7 @@ pub fn stepping_system(
     mut error_msg: ResMut<ScriptErrorMessage>,
     debug_state: Res<DebugOverlayState>,
     mut step_req: ResMut<DebugStepRequest>,
+    project_paths: Res<ProjectPaths>,
 ) {
     // En mode debug, on ne progresse que si un step a été demandé (touche F10).
     if debug_state.visible {
@@ -45,6 +49,25 @@ pub fn stepping_system(
 
     let mut pending = engine.0.renderer.take_pending();
     let wants_to_wait = interaction.is_some();
+    let should_autosave = pending
+        .iter()
+        .any(|cmd| matches!(cmd, VnCommand::SetBackground { .. }))
+        || matches!(interaction, Some(Interaction::Choice { .. }));
+
+    if should_autosave {
+        match SaveManager::new(&project_paths.saves, MAX_SLOTS as u32) {
+            Ok(mgr) => {
+                if let Err(e) = mgr.save_autosave(
+                    &engine.0.state,
+                    "Autosave".to_string(),
+                    "script.rvn".to_string(),
+                ) {
+                    error!("[autosave] échec: {e}");
+                }
+            }
+            Err(e) => error!("[autosave] SaveManager indisponible: {e}"),
+        }
+    }
 
     if let Some(interaction) = interaction {
         match interaction {

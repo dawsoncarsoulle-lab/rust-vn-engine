@@ -55,7 +55,35 @@ pub struct SaveSlotButton(pub usize);
 pub struct SaveMenuCancelButton;
 
 /// Maximum number of save slots to display.
-const MAX_SLOTS: usize = 5;
+pub const MAX_SLOTS: usize = 5;
+
+pub fn apply_loaded_game(
+    engine: &mut VnEngine,
+    render_state: &mut VnRenderState,
+    imagemap_state: &mut ImagemapState,
+    tw_state: &mut TypewriterState,
+    history: &mut DialogueHistory,
+    vn_events: &mut EventWriter<VnCommand>,
+) {
+    render_state.choice_options.clear();
+    imagemap_state.clear();
+    tw_state.skip();
+    history.clear();
+
+    let mut pending = engine.0.renderer.take_pending();
+    for cmd in pending.iter_mut() {
+        match cmd {
+            VnCommand::SetBackground { transition, .. } => *transition = Transition::None,
+            VnCommand::ShowSprite { transition, .. } => *transition = Transition::None,
+            VnCommand::HideSprite { transition, .. } => *transition = Transition::None,
+            VnCommand::MoveSprite { transition, .. } => *transition = Transition::None,
+            _ => {}
+        }
+    }
+    for cmd in pending {
+        vn_events.send(cmd);
+    }
+}
 
 /// Spawn the save menu overlay when becoming active.
 pub fn spawn_save_menu_overlay(
@@ -213,11 +241,9 @@ pub fn spawn_save_menu_overlay(
 
 /// Handle interactions with the save menu overlay.
 pub fn save_menu_interaction_system(
-    mut commands: Commands,
     mut interaction_query: Query<
         (
             &Interaction,
-            Entity,
             Option<&SaveSlotButton>,
             Option<&SaveMenuCancelButton>,
             &mut BackgroundColor,
@@ -239,8 +265,7 @@ pub fn save_menu_interaction_system(
         return;
     }
 
-    for (interaction, entity, slot_comp, cancel_comp, mut bg_color) in interaction_query.iter_mut()
-    {
+    for (interaction, slot_comp, cancel_comp, mut bg_color) in interaction_query.iter_mut() {
         match interaction {
             Interaction::Hovered => {
                 *bg_color = Color::srgba(0.20, 0.20, 0.40, 0.95).into();
@@ -253,69 +278,52 @@ pub fn save_menu_interaction_system(
                 if let Some(_) = cancel_comp {
                     // Cancel: close menu
                     save_state.active = false;
+                    if menu_state.return_to == Some(VnState::TitleScreen) {
+                        menu_state.return_to = None;
+                        next_state.set(VnState::TitleScreen);
+                    }
                     return;
                 }
                 if let Some(slot) = slot_comp {
                     let slot_index = slot.0;
                     // Create SaveManager
                     match SaveManager::new(&project_paths.saves, MAX_SLOTS as u32) {
-                        Ok(mgr) => {
-                            match save_state.mode {
-                                SaveMenuMode::Save => {
-                                    let label = format!("Sauvegarde {}", slot_index);
-                                    let script_name = "script.rvn".to_string();
-                                    match engine.0.save(&mgr, slot_index as u32, label, script_name)
-                                    {
-                                        Ok(_) => info!("[save_menu] saved slot {}", slot_index),
-                                        Err(e) => error!(
-                                            "[save_menu] error saving slot {}: {}",
-                                            slot_index, e
-                                        ),
-                                    }
-                                    save_state.active = false;
+                        Ok(mgr) => match save_state.mode {
+                            SaveMenuMode::Save => {
+                                let label = format!("Sauvegarde {}", slot_index);
+                                let script_name = "script.rvn".to_string();
+                                match engine.0.save(&mgr, slot_index as u32, label, script_name) {
+                                    Ok(_) => info!("[save_menu] saved slot {}", slot_index),
+                                    Err(e) => error!(
+                                        "[save_menu] error saving slot {}: {}",
+                                        slot_index, e
+                                    ),
                                 }
-                                SaveMenuMode::Load => {
-                                    match engine.0.load(&mgr, slot_index as u32) {
-                                        Ok(_) => {
-                                            info!("[save_menu] loaded slot {}", slot_index);
-                                            render_state.choice_options.clear();
-                                            imagemap_state.clear();
-                                            tw_state.skip();
-                                            history.clear();
-                                            // Flush pending commands
-                                            let mut pending = engine.0.renderer.take_pending();
-                                            for cmd in pending.iter_mut() {
-                                                match cmd {
-                                                    VnCommand::SetBackground {
-                                                        transition, ..
-                                                    } => *transition = Transition::None,
-                                                    VnCommand::ShowSprite {
-                                                        transition, ..
-                                                    } => *transition = Transition::None,
-                                                    VnCommand::HideSprite {
-                                                        transition, ..
-                                                    } => *transition = Transition::None,
-                                                    VnCommand::MoveSprite {
-                                                        transition, ..
-                                                    } => *transition = Transition::None,
-                                                    _ => {}
-                                                }
-                                            }
-                                            for cmd in pending {
-                                                vn_events.send(cmd);
-                                            }
-                                            menu_state.return_to = None;
-                                            next_state.set(VnState::Waiting);
-                                        }
-                                        Err(e) => error!(
-                                            "[save_menu] error loading slot {}: {}",
-                                            slot_index, e
-                                        ),
-                                    }
-                                    save_state.active = false;
-                                }
+                                save_state.active = false;
                             }
-                        }
+                            SaveMenuMode::Load => {
+                                match engine.0.load(&mgr, slot_index as u32) {
+                                    Ok(_) => {
+                                        info!("[save_menu] loaded slot {}", slot_index);
+                                        apply_loaded_game(
+                                            &mut engine,
+                                            &mut render_state,
+                                            &mut imagemap_state,
+                                            &mut tw_state,
+                                            &mut history,
+                                            &mut vn_events,
+                                        );
+                                        menu_state.return_to = None;
+                                        next_state.set(VnState::Waiting);
+                                    }
+                                    Err(e) => error!(
+                                        "[save_menu] error loading slot {}: {}",
+                                        slot_index, e
+                                    ),
+                                }
+                                save_state.active = false;
+                            }
+                        },
                         Err(e) => error!("[save_menu] failed to create SaveManager: {}", e),
                     }
                 }

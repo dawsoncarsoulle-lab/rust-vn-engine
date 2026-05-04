@@ -1,11 +1,12 @@
 use bevy::prelude::*;
 use rvn_core::save::SaveManager;
-use rvn_parser::Transition;
 
 use crate::project_paths::ProjectPaths;
 use crate::resources::{
-    DialogueHistory, ImagemapState, Theme, TypewriterState, VnEngine, VnRenderState, VnState,
+    DialogueHistory, ImagemapState, MenuState, Theme, TypewriterState, VnEngine, VnRenderState,
+    VnState,
 };
+use crate::systems::save_menu::{apply_loaded_game, SaveMenuMode, SaveMenuState, MAX_SLOTS};
 use crate::vn_command::VnCommand;
 
 // ─── Composants locaux ───────────────────────────────────────────────────────
@@ -15,8 +16,10 @@ pub struct TitleOverlay;
 
 #[derive(Component, Clone, PartialEq)]
 pub enum TitleButton {
+    Continue,
     NewGame,
     LoadGame,
+    Gallery,
     Quit,
 }
 
@@ -26,6 +29,7 @@ pub fn spawn_title_screen(
     mut commands: Commands,
     theme: Res<Theme>,
     asset_server: Res<AssetServer>,
+    project_paths: Res<ProjectPaths>,
 ) {
     let title_font: Handle<Font> = theme
         .text
@@ -71,6 +75,14 @@ pub fn spawn_title_screen(
                 }),
             );
 
+            if title_continue_available(&project_paths) {
+                spawn_title_button(
+                    parent,
+                    "Continuer",
+                    TitleButton::Continue,
+                    title_font.clone(),
+                );
+            }
             spawn_title_button(
                 parent,
                 "Nouvelle Partie",
@@ -83,8 +95,15 @@ pub fn spawn_title_screen(
                 TitleButton::LoadGame,
                 title_font.clone(),
             );
+            spawn_title_button(parent, "Galerie", TitleButton::Gallery, title_font.clone());
             spawn_title_button(parent, "Quitter", TitleButton::Quit, title_font);
         });
+}
+
+fn title_continue_available(project_paths: &ProjectPaths) -> bool {
+    SaveManager::new(&project_paths.saves, MAX_SLOTS as u32)
+        .map(|mgr| mgr.autosave_exists() || mgr.latest_manual_save().is_some())
+        .unwrap_or(false)
 }
 
 fn spawn_title_button(
@@ -143,6 +162,8 @@ pub fn title_interaction_system(
     mut tw_state: ResMut<TypewriterState>,
     mut history: ResMut<DialogueHistory>,
     project_paths: Res<ProjectPaths>,
+    mut menu_state: ResMut<MenuState>,
+    mut save_menu_state: ResMut<SaveMenuState>,
     mut vn_events: EventWriter<VnCommand>,
     mut exit: EventWriter<AppExit>,
 ) {
@@ -158,47 +179,50 @@ pub fn title_interaction_system(
                 *bg_color = Color::srgba(0.35, 0.35, 0.65, 1.0).into();
 
                 match button {
+                    TitleButton::Continue => {
+                        match SaveManager::new(&project_paths.saves, MAX_SLOTS as u32) {
+                            Ok(mgr) => {
+                                let data = if mgr.autosave_exists() {
+                                    mgr.load_autosave()
+                                } else {
+                                    mgr.latest_manual_save()
+                                        .ok_or(rvn_core::save::SaveError::SlotVide(0))
+                                };
+
+                                match data {
+                                    Ok(data) => {
+                                        engine.0.load_data(data);
+                                        apply_loaded_game(
+                                            &mut engine,
+                                            &mut render_state,
+                                            &mut imagemap_state,
+                                            &mut tw_state,
+                                            &mut history,
+                                            &mut vn_events,
+                                        );
+                                        next_state.set(VnState::Waiting);
+                                    }
+                                    Err(e) => error!("[titre] reprise impossible: {e}"),
+                                }
+                            }
+                            Err(e) => error!("[titre] SaveManager indisponible: {e}"),
+                        }
+                    }
+
                     TitleButton::NewGame => {
                         info!("[titre] nouvelle partie");
                         next_state.set(VnState::Stepping);
                     }
 
                     TitleButton::LoadGame => {
-                        if let Ok(mgr) = SaveManager::new(&project_paths.saves, 5) {
-                            if engine.0.load(&mgr, 1).is_ok() {
-                                info!("[titre] partie chargée depuis slot 1");
-                                render_state.choice_options.clear();
-                                imagemap_state.clear();
-                                tw_state.skip();
-                                history.clear();
+                        menu_state.return_to = Some(VnState::TitleScreen);
+                        save_menu_state.mode = SaveMenuMode::Load;
+                        save_menu_state.active = true;
+                        next_state.set(VnState::Menu);
+                    }
 
-                                let mut pending = engine.0.renderer.take_pending();
-                                for cmd in pending.iter_mut() {
-                                    match cmd {
-                                        VnCommand::SetBackground { transition, .. } => {
-                                            *transition = Transition::None
-                                        }
-                                        VnCommand::ShowSprite { transition, .. } => {
-                                            *transition = Transition::None
-                                        }
-                                        VnCommand::HideSprite { transition, .. } => {
-                                            *transition = Transition::None
-                                        }
-                                        VnCommand::MoveSprite { transition, .. } => {
-                                            *transition = Transition::None
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                for cmd in pending {
-                                    vn_events.send(cmd);
-                                }
-
-                                next_state.set(VnState::Waiting);
-                            } else {
-                                error!("[titre] aucune sauvegarde en slot 1");
-                            }
-                        }
+                    TitleButton::Gallery => {
+                        next_state.set(VnState::Gallery);
                     }
 
                     TitleButton::Quit => {

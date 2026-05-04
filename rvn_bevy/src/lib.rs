@@ -17,11 +17,11 @@ mod vn_command;
 use crate::bevy_renderer::BevyRenderer;
 use crate::project_paths::ProjectPaths;
 use crate::resources::{
-    CgAssetRegistry, CharacterRegistry, ChoiceFocus, DialogueHistory, ImagemapState, LocaleConfig,
-    MenuState, MusicEntity, MusicVolume, ScriptErrorMessage, Theme, ThemeWatcher, TypewriterConfig,
-    TypewriterState, VnEngine, VnRenderState, VnState,
+    CgAssetRegistry, CharacterRegistry, ChoiceFocus, DialogueHistory, GalleryState, ImagemapState,
+    LocaleConfig, MenuState, MusicEntity, MusicVolume, PersistentDataResource, ScriptErrorMessage,
+    Theme, ThemeWatcher, TypewriterConfig, TypewriterState, VnEngine, VnRenderState, VnState,
 };
-use crate::systems::save_menu::{SaveMenuMode, SaveMenuState};
+use crate::systems::save_menu::SaveMenuState;
 use crate::systems::settings_menu::{Settings, SettingsMenuState};
 use crate::systems::{
     apply_settings_to_runtime_system,
@@ -37,6 +37,7 @@ use crate::systems::{
     debug_step_input_system,
     debug_toggle_system,
     despawn_error_overlay,
+    despawn_gallery_overlay,
     despawn_history_overlay,
     despawn_menu_overlay,
     despawn_save_menu_overlay,
@@ -44,6 +45,7 @@ use crate::systems::{
     despawn_title_screen,
     dialogue_system,
     fade_system,
+    gallery_interaction_system,
     history_input_system,
     imagemap_cleanup_system,
     imagemap_dimensions_system,
@@ -54,12 +56,14 @@ use crate::systems::{
     locale_reload_system,
     menu_input_system,
     menu_interaction_system,
+    persistent_unlock_system,
     player_input_system,
     save_menu_interaction_system,
     script_finished_system,
     settings_menu_interaction_system,
     setup_ui,
     spawn_error_overlay,
+    spawn_gallery_overlay,
     spawn_history_overlay,
     spawn_menu_overlay,
     spawn_or_despawn_debug_overlay_system,
@@ -86,7 +90,7 @@ use crate::vn_command::{PlayerInput, VnCommand};
 use bevy::prelude::*;
 use rvn_core::{
     locale::{collect_strings_from_flat_script, LocaleManager},
-    Engine,
+    Engine, PersistentData, PersistentDataManager,
 };
 use rvn_parser::{parse_file_with_uses, Statement};
 use serde::Deserialize;
@@ -246,7 +250,16 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
         .ok()
         .and_then(|s| toml::from_str(&s).ok())
         .unwrap_or_default();
-    let locale_cfg = app_config.locale;
+    let mut locale_cfg = app_config.locale;
+
+    let persistent_manager = PersistentDataManager::new(&saves_dir)
+        .map_err(|e| format!("[persistent] erreur initialisation : {e}"))?;
+    let persistent_data = persistent_manager
+        .load()
+        .map_err(|e| format!("[persistent] erreur chargement : {e}"))?;
+    if let Some(language) = &persistent_data.language {
+        locale_cfg.current = language.clone();
+    }
 
     // 5. Initialise the LocaleManager.
     let mut locale_mgr = LocaleManager::new(
@@ -343,6 +356,11 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
         project_dir.join(&cfg.paths.saves),
     );
     let cg_registry = build_cg_asset_registry(&assets_dir);
+    let settings = settings_from_persistent(&persistent_data);
+    let persistent_resource = PersistentDataResource {
+        manager: persistent_manager,
+        data: persistent_data,
+    };
 
     // 12. Build and run the Bevy application.
     App::new()
@@ -374,6 +392,7 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
         .insert_resource(TypewriterConfig::default())
         .insert_resource(TypewriterState::default())
         .insert_resource(MenuState::default())
+        .insert_resource(GalleryState::default())
         .insert_resource(CharacterRegistry::default())
         .insert_resource(cg_registry)
         .insert_resource(DialogueHistory::default())
@@ -382,9 +401,10 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
         .insert_resource(locale_config_res)
         // Insert project path resource for save/load operations
         // Insert settings resource and UI states
-        .insert_resource(Settings::default())
+        .insert_resource(settings)
         .insert_resource(SettingsMenuState::default())
         .insert_resource(SaveMenuState::default())
+        .insert_resource(persistent_resource)
         // Save menu and project paths
         .insert_resource(project_paths)
         // Ressources de debug : état (visible / caché) et requête de pas-à-pas
@@ -399,6 +419,7 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
         // State transition systems
         .add_systems(OnEnter(VnState::TitleScreen), spawn_title_screen)
         .add_systems(OnExit(VnState::TitleScreen), despawn_title_screen)
+        .add_systems(OnExit(VnState::Gallery), despawn_gallery_overlay)
         .add_systems(OnEnter(VnState::Menu), spawn_menu_overlay)
         .add_systems(OnExit(VnState::Menu), despawn_menu_overlay)
         .add_systems(OnEnter(VnState::History), spawn_history_overlay)
@@ -414,6 +435,8 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
                 locale_reload_system,     // ← hot-reload locales
                 locale_lang_watch_system, // ← surveille __lang variable
                 title_interaction_system.run_if(in_state(VnState::TitleScreen)),
+                spawn_gallery_overlay.run_if(in_state(VnState::Gallery)),
+                gallery_interaction_system.run_if(in_state(VnState::Gallery)),
                 stepping_system.run_if(in_state(VnState::Stepping)),
                 (
                     background_system,
@@ -436,6 +459,7 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
                 update_choice_buttons,
                 fade_system.run_if(in_state(VnState::Animating)),
                 audio_fade_system,
+                persistent_unlock_system,
             ),
         )
         .add_systems(
@@ -488,6 +512,29 @@ pub fn run_game_from_path<P: AsRef<Path>>(path: P) -> Result<(), String> {
 /// that the library does not depend on the old binary entry point.
 fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
+}
+
+fn settings_from_persistent(data: &PersistentData) -> Settings {
+    let mut settings = Settings::default();
+    if let Some(language) = &data.language {
+        settings.language = language.clone();
+    }
+    if let Some(volume) = data.music_volume {
+        settings.music_volume = volume.clamp(0.0, 1.0);
+    }
+    if let Some(volume) = data.sfx_volume {
+        settings.sfx_volume = volume.clamp(0.0, 1.0);
+    }
+    if let Some(speed) = data.text_speed {
+        settings.text_speed = speed.clamp(0.1, 5.0);
+    }
+    if let Some(speed) = data.auto_speed {
+        settings.auto_speed = speed.clamp(0.1, 5.0);
+    }
+    if let Some(fullscreen) = data.fullscreen {
+        settings.fullscreen = fullscreen;
+    }
+    settings
 }
 
 fn build_cg_asset_registry(assets_dir: &Path) -> CgAssetRegistry {

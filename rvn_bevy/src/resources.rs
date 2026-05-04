@@ -5,7 +5,7 @@
 
 use crate::bevy_renderer::BevyRenderer;
 use bevy::prelude::*;
-use rvn_core::Engine;
+use rvn_core::{Engine, PersistentData, PersistentDataManager, RichTextSegment};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -14,6 +14,12 @@ pub struct VnEngine(pub Engine<BevyRenderer>);
 
 #[derive(Resource, Default)]
 pub struct CgAssetRegistry(pub HashMap<String, String>);
+
+#[derive(Resource)]
+pub struct PersistentDataResource {
+    pub manager: PersistentDataManager,
+    pub data: PersistentData,
+}
 
 // ─── Machine à états ─────────────────────────────────────────────────────────
 
@@ -26,8 +32,14 @@ pub enum VnState {
     Animating,
     Menu,
     History,
+    Gallery,
     Finished,
     Error,
+}
+
+#[derive(Resource, Default)]
+pub struct GalleryState {
+    pub selected_cg: Option<String>,
 }
 
 // ─── Menu State ───────────────────────────────────────────────────────────────
@@ -175,30 +187,39 @@ impl Default for TypewriterConfig {
 #[derive(Resource)]
 pub struct TypewriterState {
     pub full_text: String,
+    pub segments: Vec<RichTextSegment>,
     pub visible_chars: usize,
-    pub elapsed: f32,
     pub chars_per_sec: f32,
     pub typing: bool,
+    pub pause_remaining: f32,
+    pub char_progress: f32,
 }
 
 impl Default for TypewriterState {
     fn default() -> Self {
         Self {
             full_text: String::new(),
+            segments: Vec::new(),
             visible_chars: 0,
-            elapsed: 0.0,
             chars_per_sec: 40.0,
             typing: false,
+            pause_remaining: 0.0,
+            char_progress: 0.0,
         }
     }
 }
 
 impl TypewriterState {
-    pub fn start(&mut self, text: String, speed: f32) {
-        self.full_text = text;
+    pub fn start_segments(&mut self, segments: Vec<RichTextSegment>, speed: f32) {
+        self.full_text = segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect();
+        self.segments = segments;
         self.visible_chars = 0;
-        self.elapsed = 0.0;
         self.chars_per_sec = speed;
+        self.pause_remaining = 0.0;
+        self.char_progress = 0.0;
         if self.chars_per_sec > 0.0 {
             self.typing = true;
         } else {
@@ -208,26 +229,39 @@ impl TypewriterState {
     }
 
     pub fn skip(&mut self) {
-        if self.chars_per_sec > 0.0 {
-            self.elapsed = (self.full_text.chars().count() as f32 / self.chars_per_sec) + 1.0;
-        } else {
-            self.visible_chars = self.full_text.chars().count();
-            self.typing = false;
-        }
+        self.visible_chars = self.full_text.chars().count();
+        self.pause_remaining = 0.0;
+        self.typing = false;
     }
 
     pub fn is_done(&self) -> bool {
         !self.typing || self.visible_chars >= self.full_text.chars().count()
     }
 
-    pub fn current_slice(&self) -> &str {
-        let byte_idx = self
-            .full_text
-            .char_indices()
-            .nth(self.visible_chars)
-            .map(|(i, _)| i)
-            .unwrap_or(self.full_text.len());
-        &self.full_text[..byte_idx]
+    pub fn speed_for_next_char(&self) -> f32 {
+        let mut seen = 0;
+        for segment in &self.segments {
+            let len = segment.text.chars().count();
+            if self.visible_chars < seen + len {
+                return self.chars_per_sec * segment.speed.unwrap_or(1.0).max(0.01);
+            }
+            seen += len;
+        }
+        self.chars_per_sec
+    }
+
+    pub fn pause_after_visible_char(&self) -> Option<f32> {
+        if self.visible_chars == 0 {
+            return None;
+        }
+        let mut seen = 0;
+        for segment in &self.segments {
+            seen += segment.text.chars().count();
+            if self.visible_chars == seen {
+                return segment.pause_after;
+            }
+        }
+        None
     }
 }
 

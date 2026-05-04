@@ -6,7 +6,7 @@ use crate::eval::{EvalError, eval_bool, eval_expr, eval_interpolated};
 use crate::locale::LocaleManager;
 use crate::renderer::Renderer;
 use crate::rollback::{HistoryDisplay, RollbackHistory};
-use crate::save::SaveManager;
+use crate::save::{SaveData, SaveManager};
 use crate::types::{CinematicState, GameState, MusicState, SpriteState, TypewriterState};
 
 /// Interaction actuellement proposée par le moteur.
@@ -636,6 +636,10 @@ impl<R: Renderer> Engine<R> {
                 self.renderer.hide_cinematic(transition.as_deref());
                 self.state.pc += 1;
             }
+            Statement::UnlockEnding { id } => {
+                self.renderer.unlock_ending(&id);
+                self.state.pc += 1;
+            }
             Statement::ShowSprite {
                 character_id,
                 emotion,
@@ -935,13 +939,17 @@ impl<R: Renderer> Engine<R> {
 
     pub fn load(&mut self, manager: &SaveManager, slot: u32) -> Result<(), crate::save::SaveError> {
         let data = manager.load(slot)?;
+        self.load_data(data);
+        Ok(())
+    }
+
+    pub fn load_data(&mut self, data: SaveData) {
         self.state = data.into_game_state();
         self.history.clear();
         self.renderer.restore_screen(&self.state);
         if let Ok(Some(interaction)) = self.current_interaction() {
             self.render_interaction(interaction);
         }
-        Ok(())
     }
 
     pub fn is_finished(&self) -> bool {

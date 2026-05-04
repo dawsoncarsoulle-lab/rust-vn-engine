@@ -3459,6 +3459,7 @@ dependencies = [
  "include_dir",
  "notify",
  "rvn_bevy",
+ "rvn_core",
  "rvn_parser",
  "serde",
  "toml",

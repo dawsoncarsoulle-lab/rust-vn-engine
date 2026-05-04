@@ -3,6 +3,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use rvn_core::parse_text_tags;
 use rvn_parser::{
     parse, AnimationParam, AnimationValue, Expr, Hotspot, InterpolatedText, Rect, Script,
     Statement, TextSegment,
@@ -384,13 +385,17 @@ fn collect_block(
                     symbols.used_characters.push((id.clone(), loc.clone()));
                 }
                 collect_text_vars(text, &mut symbols.used_vars, &loc);
-                symbols.locale_keys.insert(text_to_locale_key(text));
+                let locale_key = text_to_locale_key(text);
+                validate_text_tags(&locale_key, &loc, diagnostics);
+                symbols.locale_keys.insert(locale_key);
             }
             Statement::Choice { options } => {
                 validate_duplicate_choice_text(options, &loc, diagnostics);
                 for (label, body) in options {
                     collect_text_vars(label, &mut symbols.used_vars, &loc);
-                    symbols.locale_keys.insert(text_to_locale_key(label));
+                    let locale_key = text_to_locale_key(label);
+                    validate_text_tags(&locale_key, &loc, diagnostics);
+                    symbols.locale_keys.insert(locale_key);
                     collect_block(body, source, symbols, diagnostics);
                 }
             }
@@ -438,6 +443,7 @@ fn collect_block(
             Statement::CinematicHide { transition } => {
                 validate_cinematic_transition(transition.as_deref(), &loc, diagnostics);
             }
+            Statement::UnlockEnding { .. } => {}
             Statement::ShowSprite {
                 character_id,
                 emotion,
@@ -1172,6 +1178,12 @@ fn collect_text_vars(text: &InterpolatedText, out: &mut Vec<(String, Location)>,
     }
 }
 
+fn validate_text_tags(text: &str, loc: &Location, diagnostics: &mut Vec<Diagnostic>) {
+    if let Err(e) = parse_text_tags(text) {
+        diagnostics.push(Diagnostic::error("invalid-text-tag", e.message).at(Some(loc.clone())));
+    }
+}
+
 fn collect_expr_vars(expr: &Expr, out: &mut Vec<(String, Location)>, loc: &Location) {
     match expr {
         Expr::Var(name) => out.push((name.clone(), loc.clone())),
@@ -1233,6 +1245,7 @@ fn locate_stmt(source: &SourceFile, stmt: &Statement) -> Location {
         ],
         Statement::CinematicShow { id, .. } => vec![format!("cinematic \"{id}\"")],
         Statement::CinematicHide { .. } => vec!["cinematic hide".to_string()],
+        Statement::UnlockEnding { id } => vec![format!("unlock_ending \"{id}\"")],
         Statement::Imagemap { .. } => vec!["imagemap".to_string()],
         Statement::CharacterCreate { id, .. } => vec![format!("character.create(\"{id}\"")],
         Statement::ShowSprite { character_id, .. } => vec![format!("{character_id}.show")],
@@ -1350,6 +1363,14 @@ mod tests {
             fixture("label start\nchoice { \"Open\" => { return } \"Open\" => { return } }\n");
         let report = check_project(root.to_str().unwrap(), CheckOptions::default());
         assert!(kinds(&report).contains(&"duplicate-choice-text"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_invalid_text_tags() {
+        let root = fixture("label start\n    \"{color=red}bad{/color}\"\n    return\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"invalid-text-tag"));
         let _ = fs::remove_dir_all(root);
     }
 

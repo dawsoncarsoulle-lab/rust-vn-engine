@@ -2,17 +2,21 @@ pub mod engine;
 pub mod error;
 pub mod eval;
 pub mod locale;
+pub mod persistent;
 pub mod renderer;
 pub mod rollback;
 pub mod save;
+pub mod text_tags;
 pub mod types;
 
 pub use engine::{Engine, Interaction};
 pub use error::RuntimeError;
 pub use eval::{EvalError, eval_bool, eval_expr, eval_interpolated};
 pub use locale::{LocaleManager, collect_strings_from_flat_script, collect_strings_from_script};
+pub use persistent::{PersistentData, PersistentDataError, PersistentDataManager};
 pub use renderer::{Renderer, TerminalRenderer};
 pub use rollback::{HistoryDisplay, RollbackHistory};
+pub use text_tags::{RichText, RichTextSegment, TextTagError, parse_text_tags};
 pub use types::{CinematicState, GameState, MusicState, SpriteState, TypewriterState};
 
 // ─── TESTS ───────────────────────────────────────────────────────────────────

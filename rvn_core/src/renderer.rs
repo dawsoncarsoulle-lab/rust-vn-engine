@@ -8,6 +8,7 @@ pub trait Renderer {
     fn set_background(&mut self, path: &str, transition: &Transition);
     fn show_cinematic(&mut self, _id: &str, _transition: Option<&str>) {}
     fn hide_cinematic(&mut self, _transition: Option<&str>) {}
+    fn unlock_ending(&mut self, _id: &str) {}
     fn show_sprite(
         &mut self,
         id: &str,
