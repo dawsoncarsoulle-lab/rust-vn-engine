@@ -647,7 +647,9 @@ fn write_web_asset_manifest(
     cfg: &ProjectConfig,
 ) -> Result<()> {
     let cgs_dir = project_dir.join(&cfg.paths.assets).join("cgs");
-    let mut entries = Vec::new();
+    let music_dir = project_dir.join(&cfg.paths.assets).join("music");
+    let locales_dir = project_dir.join(&cfg.paths.locales);
+    let mut cg_entries = Vec::new();
     if cgs_dir.exists() {
         for entry in fs::read_dir(&cgs_dir)
             .with_context(|| format!("unable to read CG directory '{}'", cgs_dir.display()))?
@@ -669,17 +671,88 @@ fn write_web_asset_manifest(
             let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
-            entries.push((stem.to_string(), format!("cgs/{file_name}")));
+            cg_entries.push((stem.to_string(), format!("cgs/{file_name}")));
         }
     }
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    cg_entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut music_entries = Vec::new();
+    if music_dir.exists() {
+        for entry in fs::read_dir(&music_dir)
+            .with_context(|| format!("unable to read music directory '{}'", music_dir.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
+                continue;
+            };
+            if !matches!(ext, "ogg" | "mp3" | "wav" | "flac") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            music_entries.push((stem.to_string(), format!("music/{file_name}")));
+        }
+    }
+    music_entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut locale_entries = Vec::new();
+    if locales_dir.exists() {
+        for entry in fs::read_dir(&locales_dir).with_context(|| {
+            format!(
+                "unable to read locales directory '{}'",
+                locales_dir.display()
+            )
+        })? {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            if path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            locale_entries.push((
+                stem.to_string(),
+                format!("{}/{file_name}", cfg.paths.locales),
+            ));
+        }
+    }
+    locale_entries.sort_by(|a, b| a.0.cmp(&b.0));
 
     let has_config_toml = project_dir
         .join(&cfg.paths.assets)
         .join("config.toml")
         .exists();
     let mut manifest = format!("has_config_toml = {has_config_toml}\n\n[cgs]\n");
-    for (id, path) in entries {
+    for (id, path) in cg_entries {
+        manifest.push_str(&toml_string(&id));
+        manifest.push_str(" = ");
+        manifest.push_str(&toml_string(&path));
+        manifest.push('\n');
+    }
+    manifest.push_str("\n[music]\n");
+    for (id, path) in music_entries {
+        manifest.push_str(&toml_string(&id));
+        manifest.push_str(" = ");
+        manifest.push_str(&toml_string(&path));
+        manifest.push('\n');
+    }
+    manifest.push_str("\n[locales]\n");
+    for (id, path) in locale_entries {
         manifest.push_str(&toml_string(&id));
         manifest.push_str(" = ");
         manifest.push_str(&toml_string(&path));

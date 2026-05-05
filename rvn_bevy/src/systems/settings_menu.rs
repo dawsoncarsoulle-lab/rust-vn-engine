@@ -9,10 +9,11 @@ use bevy::prelude::*;
 
 use crate::components::DialogueText;
 use crate::resources::{
-    MenuState, MusicVolume, PersistentDataResource, TypewriterConfig, TypewriterState, VnEngine,
-    VnState,
+    LocaleConfig, MenuState, MusicVolume, PersistentDataResource, TypewriterConfig,
+    TypewriterState, VnEngine, VnState,
 };
 use crate::systems::typewriter::apply_visible_sections;
+use crate::vn_command::VnCommand;
 
 /// Configuration for various runtime settings.  Values are normalised between
 /// sensible ranges (0.0‑1.0 for volumes, etc.).  The language string should
@@ -415,6 +416,7 @@ pub fn settings_menu_interaction_system(
     >,
     mut settings_state: ResMut<SettingsMenuState>,
     mut settings: ResMut<Settings>,
+    locale_cfg: Res<LocaleConfig>,
     mut persistent: ResMut<PersistentDataResource>,
     mut windows: Query<&mut Window>,
 ) {
@@ -449,12 +451,7 @@ pub fn settings_menu_interaction_system(
                     settings.typewriter = !settings.typewriter;
                 }
                 SettingsButton::LangNext => {
-                    // Very simple language toggle: fr <-> en
-                    if settings.language == "fr" {
-                        settings.language = "en".to_string();
-                    } else {
-                        settings.language = "fr".to_string();
-                    }
+                    settings.language = next_language(&settings.language, &locale_cfg);
                 }
                 SettingsButton::FullscreenToggle => {
                     settings.fullscreen = !settings.fullscreen;
@@ -556,6 +553,7 @@ pub fn apply_settings_to_runtime_system(
     mut tw_config: ResMut<TypewriterConfig>,
     mut tw_state: ResMut<TypewriterState>,
     mut engine: ResMut<VnEngine>,
+    mut vn_events: EventWriter<VnCommand>,
     mut windows: Query<&mut Window>,
     mut dialogue_text_query: Query<&mut Text, With<DialogueText>>,
 ) {
@@ -568,11 +566,14 @@ pub fn apply_settings_to_runtime_system(
 
     if let Some(locale) = &mut engine.0.locale {
         if locale.current_lang() != settings.language {
-            if let Err(e) = locale.set_language(&settings.language) {
-                error!(
-                    "[settings] impossible de charger la langue `{}` : {}",
-                    settings.language, e
-                );
+            match locale.set_language(&settings.language) {
+                Ok(()) => refresh_current_interaction(&mut engine, &mut vn_events),
+                Err(e) => {
+                    error!(
+                        "[settings] impossible de charger la langue `{}` : {}",
+                        settings.language, e
+                    );
+                }
             }
         }
     }
@@ -602,6 +603,33 @@ pub fn apply_settings_to_runtime_system(
         }
     } else if tw_state.typing {
         tw_state.chars_per_sec = cps;
+    }
+}
+
+fn next_language(current: &str, locale_cfg: &LocaleConfig) -> String {
+    if locale_cfg.available_langs.is_empty() {
+        return current.to_string();
+    }
+
+    let next_idx = locale_cfg
+        .available_langs
+        .iter()
+        .position(|lang| lang == current)
+        .map(|idx| (idx + 1) % locale_cfg.available_langs.len())
+        .unwrap_or(0);
+    locale_cfg.available_langs[next_idx].clone()
+}
+
+fn refresh_current_interaction(engine: &mut VnEngine, vn_events: &mut EventWriter<VnCommand>) {
+    match engine.0.current_interaction() {
+        Ok(Some(rvn_core::Interaction::Dialogue { character, text })) => {
+            vn_events.send(VnCommand::ShowDialogue { character, text });
+        }
+        Ok(Some(rvn_core::Interaction::Choice { options })) => {
+            vn_events.send(VnCommand::ShowChoice { options });
+        }
+        Ok(Some(rvn_core::Interaction::Imagemap { .. })) | Ok(None) => {}
+        Err(e) => error!("[settings] impossible de rafraîchir la langue affichée : {e}"),
     }
 }
 

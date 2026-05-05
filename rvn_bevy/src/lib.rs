@@ -18,9 +18,9 @@ use crate::bevy_renderer::BevyRenderer;
 use crate::project_paths::ProjectPaths;
 use crate::resources::{
     CgAssetRegistry, CharacterRegistry, ChoiceFocus, DialogueHistory, GalleryState, ImagemapState,
-    LocaleConfig, MenuState, MusicEntity, MusicPlaybackState, MusicVolume, PersistentDataResource,
-    ProjectTitle, ScriptErrorMessage, Theme, ThemeWatcher, TypewriterConfig, TypewriterState,
-    VnEngine, VnRenderState, VnState,
+    LocaleConfig, MenuState, MusicAssetRegistry, MusicEntity, MusicPlaybackState, MusicVolume,
+    PersistentDataResource, ProjectTitle, ScriptErrorMessage, Theme, ThemeWatcher,
+    TypewriterConfig, TypewriterState, VnEngine, VnRenderState, VnState,
 };
 use crate::systems::save_menu::SaveMenuState;
 use crate::systems::settings_menu::{Settings, SettingsMenuState};
@@ -219,6 +219,7 @@ struct RuntimeLaunch {
     asset_root: String,
     project_paths: ProjectPaths,
     cg_registry: CgAssetRegistry,
+    music_registry: MusicAssetRegistry,
     persistent_manager: PersistentDataManager,
     persistent_data: PersistentData,
 }
@@ -268,6 +269,15 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
         .and_then(|s| toml::from_str(&s).ok())
         .unwrap_or_default();
     let mut locale_cfg = app_config.locale;
+    for lang in discover_locale_langs(&locales_dir) {
+        if !locale_cfg
+            .available
+            .iter()
+            .any(|available| available == &lang)
+        {
+            locale_cfg.available.push(lang);
+        }
+    }
 
     let persistent_manager = PersistentDataManager::new(&saves_dir)
         .map_err(|e| format!("[persistent] erreur initialisation : {e}"))?;
@@ -314,6 +324,7 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
         project_dir.join(&cfg.paths.saves),
     );
     let cg_registry = build_cg_asset_registry(&assets_dir);
+    let music_registry = build_music_asset_registry(&assets_dir);
 
     run_loaded_game(RuntimeLaunch {
         cfg,
@@ -324,6 +335,7 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
         asset_root: bevy_asset_path,
         project_paths,
         cg_registry,
+        music_registry,
         persistent_manager,
         persistent_data,
     })
@@ -339,6 +351,7 @@ fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
         asset_root,
         project_paths,
         cg_registry,
+        music_registry,
         persistent_manager,
         persistent_data,
     } = launch;
@@ -368,7 +381,7 @@ fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
         last_modified_current: ts_current,
         last_modified_default: ts_default,
     };
-    let settings = settings_from_persistent(&persistent_data);
+    let settings = settings_from_persistent(&persistent_data, &locale_cfg.current);
     let persistent_resource = PersistentDataResource {
         manager: persistent_manager,
         data: persistent_data,
@@ -408,6 +421,7 @@ fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
         .insert_resource(GalleryState::default())
         .insert_resource(CharacterRegistry::default())
         .insert_resource(cg_registry)
+        .insert_resource(music_registry)
         .insert_resource(DialogueHistory::default())
         .insert_resource(ChoiceFocus::default())
         .insert_resource(ScriptErrorMessage::default())
@@ -573,6 +587,10 @@ struct WebAssetManifest {
     has_config_toml: bool,
     #[serde(default)]
     cgs: HashMap<String, String>,
+    #[serde(default)]
+    music: HashMap<String, String>,
+    #[serde(default)]
+    locales: HashMap<String, String>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -608,6 +626,17 @@ pub async fn run_game_web(project_root: &str) -> Result<(), String> {
         AppConfig::default()
     };
     let mut locale_cfg = app_config.locale;
+    let mut manifest_locales: Vec<String> = asset_manifest.locales.keys().cloned().collect();
+    manifest_locales.sort();
+    for lang in manifest_locales {
+        if !locale_cfg
+            .available
+            .iter()
+            .any(|available| available == &lang)
+        {
+            locale_cfg.available.push(lang);
+        }
+    }
 
     let persistent_manager = PersistentDataManager::new(&saves_dir)
         .map_err(|e| format!("[persistent] erreur initialisation : {e}"))?;
@@ -620,7 +649,12 @@ pub async fn run_game_web(project_root: &str) -> Result<(), String> {
 
     let mut locale_tables = HashMap::new();
     for lang in &locale_cfg.available {
-        let path = format!("{root}/{}/{}.toml", cfg.paths.locales, lang);
+        let locale_path = asset_manifest
+            .locales
+            .get(lang)
+            .cloned()
+            .unwrap_or_else(|| format!("{}/{}.toml", cfg.paths.locales, lang));
+        let path = format!("{root}/{locale_path}");
         if let Some(content) = fetch_optional_text(&path).await {
             match rvn_core::locale::LocaleTable::parse(lang, &content) {
                 Ok(table) => {
@@ -645,6 +679,8 @@ pub async fn run_game_web(project_root: &str) -> Result<(), String> {
     let theme: Theme = toml::from_str(&theme_content).unwrap_or_default();
     let theme_watcher = ThemeWatcher::new(cfg.paths.theme.clone());
     let cg_registry = CgAssetRegistry(asset_manifest.cgs);
+    prefetch_audio_files(root, &asset_manifest.music).await;
+    let music_registry = MusicAssetRegistry(asset_manifest.music);
 
     let project_paths = ProjectPaths::new(
         PathBuf::from("."),
@@ -663,6 +699,7 @@ pub async fn run_game_web(project_root: &str) -> Result<(), String> {
         asset_root: "assets".to_string(),
         project_paths,
         cg_registry,
+        music_registry,
         persistent_manager,
         persistent_data,
     })
@@ -806,6 +843,44 @@ async fn fetch_optional_text(url: &str) -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
+async fn prefetch_audio_files(root: &str, music: &HashMap<String, String>) {
+    let mut paths: Vec<&String> = music.values().collect();
+    paths.sort();
+    paths.dedup();
+
+    for path in paths {
+        let url = format!("{root}/assets/{path}");
+        if let Err(e) = fetch_bytes_for_cache(&url).await {
+            bevy::log::warn!("[music] prefetch ignoré pour {url}: {e}");
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_bytes_for_cache(url: &str) -> Result<(), String> {
+    use wasm_bindgen::JsCast;
+
+    let window = web_sys::window().ok_or_else(|| "window indisponible".to_string())?;
+    let response_value = wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(url))
+        .await
+        .map_err(|_| format!("impossible de charger `{url}`"))?;
+    let response: web_sys::Response = response_value
+        .dyn_into()
+        .map_err(|_| format!("réponse HTTP invalide pour `{url}`"))?;
+    if !response.ok() {
+        return Err(format!("HTTP {}", response.status()));
+    }
+    let _ = wasm_bindgen_futures::JsFuture::from(
+        response
+            .array_buffer()
+            .map_err(|_| format!("réponse binaire invalide pour `{url}`"))?,
+    )
+    .await
+    .map_err(|_| format!("lecture binaire impossible pour `{url}`"))?;
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
 async fn fetch_text(url: &str) -> Result<String, String> {
     use wasm_bindgen::JsCast;
 
@@ -839,8 +914,9 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
 }
 
-fn settings_from_persistent(data: &PersistentData) -> Settings {
+fn settings_from_persistent(data: &PersistentData, current_lang: &str) -> Settings {
     let mut settings = Settings::default();
+    settings.language = current_lang.to_string();
     if let Some(language) = &data.language {
         settings.language = language.clone();
     }
@@ -860,6 +936,25 @@ fn settings_from_persistent(data: &PersistentData) -> Settings {
         settings.fullscreen = fullscreen;
     }
     settings
+}
+
+fn discover_locale_langs(locales_dir: &Path) -> Vec<String> {
+    let mut langs = Vec::new();
+    let Ok(entries) = fs::read_dir(locales_dir) else {
+        return langs;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
+            continue;
+        }
+        if let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) {
+            langs.push(stem.to_string());
+        }
+    }
+    langs.sort();
+    langs
 }
 
 fn build_cg_asset_registry(assets_dir: &Path) -> CgAssetRegistry {
@@ -898,5 +993,44 @@ fn build_cg_asset_registry(assets_dir: &Path) -> CgAssetRegistry {
         }
 
         CgAssetRegistry(registry)
+    }
+}
+
+fn build_music_asset_registry(assets_dir: &Path) -> MusicAssetRegistry {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = assets_dir;
+        return MusicAssetRegistry::default();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut registry = HashMap::new();
+        let music_dir = assets_dir.join("music");
+        let Ok(entries) = fs::read_dir(music_dir) else {
+            return MusicAssetRegistry(registry);
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
+                continue;
+            };
+            if !matches!(ext, "ogg" | "mp3" | "wav" | "flac") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            registry.insert(stem.to_string(), format!("music/{file_name}"));
+        }
+
+        MusicAssetRegistry(registry)
     }
 }

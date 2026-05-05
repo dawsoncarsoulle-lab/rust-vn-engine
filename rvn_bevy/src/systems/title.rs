@@ -3,8 +3,8 @@ use rvn_core::save::SaveManager;
 
 use crate::project_paths::ProjectPaths;
 use crate::resources::{
-    DialogueHistory, ImagemapState, MenuState, MusicEntity, MusicPlaybackState, MusicVolume,
-    PendingMusicPlayback, PersistentDataResource, ProjectTitle, Theme, TitleAnchor,
+    DialogueHistory, ImagemapState, MenuState, MusicAssetRegistry, MusicEntity, MusicPlaybackState,
+    MusicVolume, PendingMusicPlayback, PersistentDataResource, ProjectTitle, Theme, TitleAnchor,
     TitleBackgroundMode, TitleButtonAlign, TitleButtonStyle, TitleScreenTheme, TypewriterState,
     VnEngine, VnRenderState, VnState,
 };
@@ -55,6 +55,7 @@ pub fn spawn_title_screen(
     persistent: Res<PersistentDataResource>,
     mut music_entity: ResMut<MusicEntity>,
     mut music_playback: ResMut<MusicPlaybackState>,
+    music_registry: Res<MusicAssetRegistry>,
     music_volume: Res<MusicVolume>,
     mut next_state: ResMut<NextState<VnState>>,
 ) {
@@ -89,6 +90,7 @@ pub fn spawn_title_screen(
         &project_paths,
         &mut music_entity,
         &mut music_playback,
+        &music_registry,
         &music_volume,
         title_theme.music.as_deref(),
     );
@@ -474,6 +476,7 @@ fn play_title_music(
     project_paths: &ProjectPaths,
     music_entity: &mut MusicEntity,
     music_playback: &mut MusicPlaybackState,
+    music_registry: &MusicAssetRegistry,
     music_volume: &MusicVolume,
     music: Option<&str>,
 ) {
@@ -501,6 +504,7 @@ fn play_title_music(
     spawn_music(
         commands,
         asset_server,
+        music_registry,
         music_entity,
         music_volume,
         music,

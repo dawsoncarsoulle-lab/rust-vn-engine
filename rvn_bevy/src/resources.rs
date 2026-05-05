@@ -15,6 +15,40 @@ pub struct VnEngine(pub Engine<BevyRenderer>);
 #[derive(Resource, Default)]
 pub struct CgAssetRegistry(pub HashMap<String, String>);
 
+#[derive(Resource, Default)]
+pub struct MusicAssetRegistry(pub HashMap<String, String>);
+
+impl MusicAssetRegistry {
+    pub fn resolve(&self, file: &str) -> String {
+        let normalized = file.replace('\\', "/");
+        let normalized = normalized.strip_prefix("assets/").unwrap_or(&normalized);
+
+        if let Some(path) = self.0.get(normalized) {
+            return path.clone();
+        }
+
+        let music_path = if normalized.starts_with("music/") {
+            normalized.to_string()
+        } else {
+            format!("music/{normalized}")
+        };
+        if self.0.values().any(|path| path == &music_path) {
+            return music_path;
+        }
+
+        let Some(file_name) = normalized.rsplit('/').next() else {
+            return music_path;
+        };
+        if let Some(stem) = file_name.rsplit_once('.').map(|(stem, _)| stem) {
+            if let Some(path) = self.0.get(stem) {
+                return path.clone();
+            }
+        }
+
+        music_path
+    }
+}
+
 #[derive(Resource)]
 pub struct PersistentDataResource {
     pub manager: PersistentDataManager,
