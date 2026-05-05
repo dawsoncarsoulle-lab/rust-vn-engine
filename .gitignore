@@ -9,6 +9,3 @@ dist-web/
 # OS
 .DS_Store
 Thumbs.db
-
-.codex
-.agents
