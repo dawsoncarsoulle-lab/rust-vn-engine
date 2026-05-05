@@ -18,9 +18,9 @@ use crate::bevy_renderer::BevyRenderer;
 use crate::project_paths::ProjectPaths;
 use crate::resources::{
     CgAssetRegistry, CharacterRegistry, ChoiceFocus, DialogueHistory, GalleryState, ImagemapState,
-    LocaleConfig, MenuState, MusicEntity, MusicVolume, PersistentDataResource, ProjectTitle,
-    ScriptErrorMessage, Theme, ThemeWatcher, TypewriterConfig, TypewriterState, VnEngine,
-    VnRenderState, VnState,
+    LocaleConfig, MenuState, MusicEntity, MusicPlaybackState, MusicVolume, PersistentDataResource,
+    ProjectTitle, ScriptErrorMessage, Theme, ThemeWatcher, TypewriterConfig, TypewriterState,
+    VnEngine, VnRenderState, VnState,
 };
 use crate::systems::save_menu::SaveMenuState;
 use crate::systems::settings_menu::{Settings, SettingsMenuState};
@@ -29,9 +29,11 @@ use crate::systems::{
     apply_theme_system,
     audio_fade_system,
     audio_system,
+    audio_unlock_system,
     background_cover_resize_system,
     background_system,
     build_character_registry,
+    choice_interaction_system,
     choice_system,
     cinematic_cover_resize_system,
     cinematic_system,
@@ -94,7 +96,7 @@ use rvn_core::{
     locale::{collect_strings_from_flat_script, LocaleManager},
     Engine, PersistentData, PersistentDataManager,
 };
-use rvn_parser::{parse_file_with_uses, Statement};
+use rvn_parser::{parse_file_with_uses, Script, Statement};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::{collections::HashMap, fs};
@@ -208,6 +210,19 @@ impl Default for LocaleConfigFile {
     }
 }
 
+struct RuntimeLaunch {
+    cfg: RvnToml,
+    engine: Engine<BevyRenderer>,
+    locale_cfg: LocaleConfigFile,
+    theme: Theme,
+    theme_watcher: ThemeWatcher,
+    asset_root: String,
+    project_paths: ProjectPaths,
+    cg_registry: CgAssetRegistry,
+    persistent_manager: PersistentDataManager,
+    persistent_data: PersistentData,
+}
+
 /// Run a visual novel located in a project directory.
 ///
 /// This function loads the configuration from `rvn.toml`, reads the script and
@@ -264,45 +279,71 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
     }
 
     // 5. Initialise the LocaleManager.
-    let mut locale_mgr = LocaleManager::new(
+    let locale_mgr = LocaleManager::new(
         &locales_dir,
         &locale_cfg.default,
         &locale_cfg.current,
         locale_cfg.available.clone(),
     )
     .map_err(|e| format!("[locale] erreur initialisation : {e}"))?;
+    let engine = build_engine(script, &cfg, &script_path.display().to_string(), locale_mgr)?;
 
-    // 6. Initialise the engine with the script and renderer.
-    let renderer = BevyRenderer::new();
-    let mut engine = Engine::new(script, renderer, 64)
-        .map_err(|e| format!("Erreur d'initialisation du moteur: {e}"))?;
-    engine.locale = Some(locale_mgr);
-    // If a start label is specified in the configuration, jump to that label in
-    // the script after initialisation.  This allows the author to control
-    // where execution begins (for example, skipping an optional prologue).
-    if let Some(ref start_label) = cfg.project.start_label {
-        // Find the position of the label in the script and update the program counter.
-        if let Some(pos) = engine
-            .script
-            .iter()
-            .position(|stmt| matches!(stmt, Statement::Label { name } if name == start_label))
-        {
-            engine.state.pc = pos;
-        } else {
-            return Err(format!(
-                "start_label `{start_label}` introuvable dans `{}`",
-                script_path.display()
-            ));
-        }
-    }
+    // 9. Load the UI theme and set up the watcher.
+    let theme_content = std::fs::read_to_string(&theme_path).unwrap_or_default();
+    let theme: Theme = toml::from_str(&theme_content).unwrap_or_default();
+    let theme_watcher = ThemeWatcher::new(theme_path.to_string_lossy().to_string());
 
-    // 7. Collect strings from the flat script and update default locale.
-    let strings = collect_strings_from_flat_script(&engine.script);
-    if let Some(locale) = &mut engine.locale {
-        let _ = locale.update_default_locale(&strings);
-    }
+    // 11. Set the Bevy asset root to the configured assets directory.
+    let bevy_asset_path = fs::canonicalize(&assets_dir)
+        .map_err(|e| {
+            format!(
+                "Impossible de résoudre le dossier d'assets `{}`: {}",
+                assets_dir.display(),
+                e
+            )
+        })?
+        .to_string_lossy()
+        .to_string();
 
-    // 8. Compute last modification timestamps for locale files.
+    // 11a. Build a ProjectPaths resource to make paths accessible to systems.
+    let project_paths = ProjectPaths::new(
+        project_dir.to_path_buf(),
+        project_dir.join(&cfg.paths.assets),
+        project_dir.join(&cfg.paths.locales),
+        theme_path.clone(),
+        project_dir.join(&cfg.paths.saves),
+    );
+    let cg_registry = build_cg_asset_registry(&assets_dir);
+
+    run_loaded_game(RuntimeLaunch {
+        cfg,
+        engine,
+        locale_cfg,
+        theme,
+        theme_watcher,
+        asset_root: bevy_asset_path,
+        project_paths,
+        cg_registry,
+        persistent_manager,
+        persistent_data,
+    })
+}
+
+fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
+    let RuntimeLaunch {
+        cfg,
+        engine,
+        locale_cfg,
+        theme,
+        theme_watcher,
+        asset_root,
+        project_paths,
+        cg_registry,
+        persistent_manager,
+        persistent_data,
+    } = launch;
+    let window_width = cfg.window.width.unwrap_or(1280) as f32;
+    let window_height = cfg.window.height.unwrap_or(720) as f32;
     let ts_current = if let Some(locale) = &engine.locale {
         locale
             .locale_path(&locale_cfg.current)
@@ -327,49 +368,17 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
         last_modified_current: ts_current,
         last_modified_default: ts_default,
     };
-
-    // 9. Load the UI theme and set up the watcher.
-    let theme_content = std::fs::read_to_string(&theme_path).unwrap_or_default();
-    let theme: Theme = toml::from_str(&theme_content).unwrap_or_default();
-    let theme_watcher = ThemeWatcher::new(theme_path.to_string_lossy().to_string());
-
-    // 10. Configure the window resolution.
-    let window_width = cfg.window.width.unwrap_or(1280) as f32;
-    let window_height = cfg.window.height.unwrap_or(720) as f32;
-
-    // 11. Set the Bevy asset root to the configured assets directory.
-    let bevy_asset_path = fs::canonicalize(&assets_dir)
-        .map_err(|e| {
-            format!(
-                "Impossible de résoudre le dossier d'assets `{}`: {}",
-                assets_dir.display(),
-                e
-            )
-        })?
-        .to_string_lossy()
-        .to_string();
-
-    // 11a. Build a ProjectPaths resource to make paths accessible to systems.
-    let project_paths = ProjectPaths::new(
-        project_dir.to_path_buf(),
-        project_dir.join(&cfg.paths.assets),
-        project_dir.join(&cfg.paths.locales),
-        theme_path.clone(),
-        project_dir.join(&cfg.paths.saves),
-    );
-    let cg_registry = build_cg_asset_registry(&assets_dir);
     let settings = settings_from_persistent(&persistent_data);
     let persistent_resource = PersistentDataResource {
         manager: persistent_manager,
         data: persistent_data,
     };
 
-    // 12. Build and run the Bevy application.
     App::new()
         .add_plugins(
             DefaultPlugins
                 .set(AssetPlugin {
-                    file_path: bevy_asset_path,
+                    file_path: asset_root,
                     watch_for_changes_override: Some(true),
                     ..default()
                 })
@@ -391,6 +400,7 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
         .insert_resource(VnRenderState::default())
         .insert_resource(ImagemapState::default())
         .insert_resource(MusicEntity::default())
+        .insert_resource(MusicPlaybackState::default())
         .insert_resource(MusicVolume::default())
         .insert_resource(TypewriterConfig::default())
         .insert_resource(TypewriterState::default())
@@ -453,6 +463,9 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
                     choice_system,
                     imagemap_system,
                     audio_system,
+                    audio_unlock_system
+                        .after(audio_system)
+                        .after(title_interaction_system),
                     typewriter_config_system,
                     script_finished_system,
                 )
@@ -471,11 +484,13 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
             (
                 typewriter_system.run_if(in_state(VnState::Waiting)),
                 input_system.run_if(in_state(VnState::Waiting)),
+                choice_interaction_system.run_if(in_state(VnState::Waiting)),
                 menu_input_system.run_if(in_state(VnState::Menu)),
                 menu_interaction_system.run_if(in_state(VnState::Menu)),
                 history_input_system.run_if(in_state(VnState::History)),
                 player_input_system
                     .after(input_system)
+                    .after(choice_interaction_system)
                     .after(menu_input_system)
                     .after(history_input_system),
             ),
@@ -508,8 +523,314 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
     Ok(())
 }
 
+fn build_engine(
+    script: Script,
+    cfg: &RvnToml,
+    script_label: &str,
+    locale_mgr: LocaleManager,
+) -> Result<Engine<BevyRenderer>, String> {
+    let renderer = BevyRenderer::new();
+    let mut engine = Engine::new(script, renderer, 64)
+        .map_err(|e| format!("Erreur d'initialisation du moteur: {e}"))?;
+    engine.locale = Some(locale_mgr);
+
+    if let Some(ref start_label) = cfg.project.start_label {
+        if let Some(pos) = engine
+            .script
+            .iter()
+            .position(|stmt| matches!(stmt, Statement::Label { name } if name == start_label))
+        {
+            engine.state.pc = pos;
+        } else {
+            return Err(format!(
+                "start_label `{start_label}` introuvable dans `{script_label}`"
+            ));
+        }
+    }
+
+    let strings = collect_strings_from_flat_script(&engine.script);
+    if let Some(locale) = &mut engine.locale {
+        let _ = locale.update_default_locale(&strings);
+    }
+
+    Ok(engine)
+}
+
 pub fn run_game_from_path<P: AsRef<Path>>(path: P) -> Result<(), String> {
     run_game(path)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Deserialize)]
+struct WebScriptManifest {
+    scripts: Vec<String>,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Deserialize, Default)]
+struct WebAssetManifest {
+    #[serde(default)]
+    has_config_toml: bool,
+    #[serde(default)]
+    cgs: HashMap<String, String>,
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn run_game_web(project_root: &str) -> Result<(), String> {
+    let root = project_root.trim_end_matches('/').trim_end_matches('.');
+    let root = if root.is_empty() { "." } else { root };
+    let rvn_toml_content = fetch_text(&format!("{root}/rvn.toml")).await?;
+    let cfg: RvnToml = toml::from_str(&rvn_toml_content)
+        .map_err(|e| format!("Impossible de parser rvn.toml: {e}"))?;
+
+    let manifest = fetch_optional_text(&format!("{root}/rvn_web_manifest.toml"))
+        .await
+        .and_then(|content| toml::from_str::<WebScriptManifest>(&content).ok())
+        .map(|manifest| manifest.scripts)
+        .unwrap_or_else(|| vec![cfg.project.main_script.clone()]);
+    let script = load_web_scripts(root, &cfg.project.main_script, &manifest).await?;
+
+    let assets_dir = PathBuf::from(&cfg.paths.assets);
+    let locales_dir = PathBuf::from(&cfg.paths.locales);
+    let saves_dir = PathBuf::from(&cfg.paths.saves);
+    let theme_path = PathBuf::from(&cfg.paths.theme);
+    let asset_manifest = fetch_optional_text(&format!("{root}/rvn_web_assets.toml"))
+        .await
+        .and_then(|content| toml::from_str::<WebAssetManifest>(&content).ok())
+        .unwrap_or_default();
+
+    let app_config = if asset_manifest.has_config_toml {
+        fetch_optional_text(&format!("{root}/{}/config.toml", cfg.paths.assets))
+            .await
+            .and_then(|s| toml::from_str::<AppConfig>(&s).ok())
+            .unwrap_or_default()
+    } else {
+        AppConfig::default()
+    };
+    let mut locale_cfg = app_config.locale;
+
+    let persistent_manager = PersistentDataManager::new(&saves_dir)
+        .map_err(|e| format!("[persistent] erreur initialisation : {e}"))?;
+    let persistent_data = persistent_manager
+        .load()
+        .map_err(|e| format!("[persistent] erreur chargement : {e}"))?;
+    if let Some(language) = &persistent_data.language {
+        locale_cfg.current = language.clone();
+    }
+
+    let mut locale_tables = HashMap::new();
+    for lang in &locale_cfg.available {
+        let path = format!("{root}/{}/{}.toml", cfg.paths.locales, lang);
+        if let Some(content) = fetch_optional_text(&path).await {
+            match rvn_core::locale::LocaleTable::parse(lang, &content) {
+                Ok(table) => {
+                    locale_tables.insert(lang.clone(), table);
+                }
+                Err(e) => bevy::log::warn!("[locale] {path} ignoré: {e}"),
+            }
+        }
+    }
+    let locale_mgr = LocaleManager::from_tables(
+        &locales_dir,
+        &locale_cfg.default,
+        &locale_cfg.current,
+        locale_cfg.available.clone(),
+        locale_tables,
+    );
+    let engine = build_engine(script, &cfg, &cfg.project.main_script, locale_mgr)?;
+
+    let theme_content = fetch_optional_text(&format!("{root}/{}", cfg.paths.theme))
+        .await
+        .unwrap_or_default();
+    let theme: Theme = toml::from_str(&theme_content).unwrap_or_default();
+    let theme_watcher = ThemeWatcher::new(cfg.paths.theme.clone());
+    let cg_registry = CgAssetRegistry(asset_manifest.cgs);
+
+    let project_paths = ProjectPaths::new(
+        PathBuf::from("."),
+        assets_dir,
+        locales_dir,
+        theme_path,
+        saves_dir,
+    );
+
+    run_loaded_game(RuntimeLaunch {
+        cfg,
+        engine,
+        locale_cfg,
+        theme,
+        theme_watcher,
+        asset_root: "assets".to_string(),
+        project_paths,
+        cg_registry,
+        persistent_manager,
+        persistent_data,
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn load_web_scripts(
+    root: &str,
+    main_script: &str,
+    manifest: &[String],
+) -> Result<Script, String> {
+    let mut sources = HashMap::new();
+    let mut files = manifest.to_vec();
+    if !files.iter().any(|path| path == main_script) {
+        files.push(main_script.to_string());
+    }
+    files.sort();
+    files.dedup();
+
+    for path in &files {
+        let content = fetch_text(&format!("{root}/{path}")).await?;
+        sources.insert(normalize_web_path(path), content);
+    }
+
+    let mut loaded = std::collections::HashSet::new();
+    let mut stack = Vec::new();
+    parse_web_script(
+        &normalize_web_path(main_script),
+        &sources,
+        &files,
+        &mut loaded,
+        &mut stack,
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn parse_web_script(
+    path: &str,
+    sources: &HashMap<String, String>,
+    manifest: &[String],
+    loaded: &mut std::collections::HashSet<String>,
+    stack: &mut Vec<String>,
+) -> Result<Script, String> {
+    let path = normalize_web_path(path);
+    if let Some(pos) = stack.iter().position(|p| p == &path) {
+        let mut cycle = stack[pos..].to_vec();
+        cycle.push(path);
+        return Err(format!("cycle de `use` détecté: {}", cycle.join(" -> ")));
+    }
+    if !loaded.insert(path.clone()) {
+        return Ok(Vec::new());
+    }
+
+    let source = sources
+        .get(&path)
+        .ok_or_else(|| format!("fichier RVN web introuvable `{path}`"))?;
+    stack.push(path.clone());
+    let script =
+        rvn_parser::parse(source).map_err(|e| format!("Erreur de parsing dans `{path}`:\n{e}"))?;
+    let base_dir = path.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("");
+
+    let mut resolved = Vec::new();
+    for stmt in script {
+        match stmt {
+            Statement::Use { paths } => {
+                for use_path in paths {
+                    for target in expand_web_use(base_dir, &use_path, manifest)? {
+                        let mut nested =
+                            parse_web_script(&target, sources, manifest, loaded, stack)?;
+                        resolved.append(&mut nested);
+                    }
+                }
+            }
+            other => resolved.push(other),
+        }
+    }
+
+    stack.pop();
+    Ok(resolved)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn expand_web_use(base_dir: &str, raw: &str, manifest: &[String]) -> Result<Vec<String>, String> {
+    if raw.ends_with("/*") || raw.ends_with("/*.rvn") {
+        let dir_part = raw
+            .strip_suffix("/*.rvn")
+            .or_else(|| raw.strip_suffix("/*"))
+            .unwrap_or(raw);
+        let dir = join_web_path(base_dir, dir_part);
+        let prefix = if dir.is_empty() {
+            String::new()
+        } else {
+            format!("{dir}/")
+        };
+        let mut files: Vec<String> = manifest
+            .iter()
+            .map(|path| normalize_web_path(path))
+            .filter(|path| path.starts_with(&prefix) && path.ends_with(".rvn"))
+            .collect();
+        files.sort();
+        if files.is_empty() {
+            return Err(format!(
+                "aucun fichier `.rvn` trouvé pour le `use` wildcard `{dir}`"
+            ));
+        }
+        return Ok(files);
+    }
+
+    Ok(vec![join_web_path(base_dir, raw)])
+}
+
+#[cfg(target_arch = "wasm32")]
+fn join_web_path(base_dir: &str, raw: &str) -> String {
+    let joined = if base_dir.is_empty() {
+        raw.to_string()
+    } else {
+        format!("{base_dir}/{raw}")
+    };
+    normalize_web_path(&joined)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn normalize_web_path(path: &str) -> String {
+    let mut parts = Vec::new();
+    let normalized = path.replace('\\', "/");
+    for part in normalized.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            part => parts.push(part),
+        }
+    }
+    parts.join("/")
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_optional_text(url: &str) -> Option<String> {
+    fetch_text(url).await.ok()
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_text(url: &str) -> Result<String, String> {
+    use wasm_bindgen::JsCast;
+
+    let window = web_sys::window().ok_or_else(|| "window indisponible".to_string())?;
+    let response_value = wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(url))
+        .await
+        .map_err(|_| format!("impossible de charger `{url}`"))?;
+    let response: web_sys::Response = response_value
+        .dyn_into()
+        .map_err(|_| format!("réponse HTTP invalide pour `{url}`"))?;
+    if !response.ok() {
+        return Err(format!(
+            "impossible de charger `{url}`: HTTP {}",
+            response.status()
+        ));
+    }
+    let text = wasm_bindgen_futures::JsFuture::from(
+        response
+            .text()
+            .map_err(|_| format!("réponse texte invalide pour `{url}`"))?,
+    )
+    .await
+    .map_err(|_| format!("lecture texte impossible pour `{url}`"))?;
+    text.as_string()
+        .ok_or_else(|| format!("réponse non UTF-8 pour `{url}`"))
 }
 
 /// Spawns the 2D camera.  This duplicates the definition from the original main.rs so
@@ -542,31 +863,40 @@ fn settings_from_persistent(data: &PersistentData) -> Settings {
 }
 
 fn build_cg_asset_registry(assets_dir: &Path) -> CgAssetRegistry {
-    let mut registry = HashMap::new();
-    let cgs_dir = assets_dir.join("cgs");
-    let Ok(entries) = fs::read_dir(cgs_dir) else {
-        return CgAssetRegistry(registry);
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
-            continue;
-        };
-        if !matches!(ext, "png" | "jpg" | "jpeg" | "webp") {
-            continue;
-        }
-        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
-            continue;
-        };
-        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        registry.insert(stem.to_string(), format!("cgs/{file_name}"));
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = assets_dir;
+        return CgAssetRegistry::default();
     }
 
-    CgAssetRegistry(registry)
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut registry = HashMap::new();
+        let cgs_dir = assets_dir.join("cgs");
+        let Ok(entries) = fs::read_dir(cgs_dir) else {
+            return CgAssetRegistry(registry);
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
+                continue;
+            };
+            if !matches!(ext, "png" | "jpg" | "jpeg" | "webp") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            registry.insert(stem.to_string(), format!("cgs/{file_name}"));
+        }
+
+        CgAssetRegistry(registry)
+    }
 }

@@ -2,16 +2,32 @@ use bevy::audio::Volume;
 use bevy::prelude::*;
 
 use crate::components::{AudioFade, MusicMarker, SfxSource};
-use crate::resources::{MusicEntity, MusicVolume};
+use crate::resources::{MusicEntity, MusicPlaybackState, MusicVolume, PendingMusicPlayback};
 use crate::systems::settings_menu::Settings;
 use crate::vn_command::VnCommand;
 use rvn_parser::Transition;
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(inline_js = r#"
+export function resume_all_audio_contexts() {
+    if (globalThis.__rvnResumeAllAudioContexts) {
+        globalThis.__rvnResumeAllAudioContexts();
+    }
+}
+"#)]
+extern "C" {
+    fn resume_all_audio_contexts();
+}
 
 pub fn audio_system(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut vn_events: EventReader<VnCommand>,
     mut music_entity: ResMut<MusicEntity>,
+    mut music_playback: ResMut<MusicPlaybackState>,
     music_volume: Res<MusicVolume>,
     settings: Res<Settings>,
     sfx_query: Query<(Entity, &SfxSource)>,
@@ -40,65 +56,32 @@ pub fn audio_system(
                     }
                     Transition::None => None,
                 };
-
-                if let Some(ms) = fade_ms {
-                    // ── Crossfade ─────────────────────────────────────────────
-                    let duration = ms as f32 / 1000.0;
-
-                    // La piste sortante : fade-out puis despawn
-                    if let Some(old_entity) = music_entity.0.take() {
-                        commands.entity(old_entity).insert(AudioFade {
-                            from_vol: music_volume.0,
-                            to_vol: 0.0,
-                            duration_secs: duration,
-                            elapsed_secs: 0.0,
-                            despawn_on_done: true,
-                        });
-                        info!("[music] fade-out {:.1}s", duration);
-                    }
-
-                    let source: Handle<AudioSource> = asset_server.load(file.clone());
-                    let new_entity = commands
-                        .spawn((
-                            AudioBundle {
-                                source,
-                                settings: PlaybackSettings::LOOP.with_volume(Volume::new(0.0)),
-                            },
-                            MusicMarker,
-                            AudioFade {
-                                from_vol: 0.0,
-                                to_vol: music_volume.0,
-                                duration_secs: duration,
-                                elapsed_secs: 0.0,
-                                despawn_on_done: false,
-                            },
-                        ))
-                        .id();
-                    music_entity.0 = Some(new_entity);
-                    info!("[music] fade-in {} ({:.1}s)", file, duration);
-                } else {
-                    if let Some(entity) = music_entity.0.take() {
-                        commands.entity(entity).despawn();
-                    }
-                    let source: Handle<AudioSource> = asset_server.load(file.clone());
-                    let entity = commands
-                        .spawn((
-                            AudioBundle {
-                                source,
-                                settings: PlaybackSettings::LOOP
-                                    .with_volume(Volume::new(music_volume.0)),
-                            },
-                            MusicMarker,
-                        ))
-                        .id();
-                    music_entity.0 = Some(entity);
-                    info!("[music] play {}", file);
+                music_playback.last_request = Some(PendingMusicPlayback {
+                    file: file.clone(),
+                    fade_ms,
+                });
+                #[cfg(target_arch = "wasm32")]
+                {
+                    music_playback.web_music_replay_pending = true;
                 }
+                spawn_music(
+                    &mut commands,
+                    &asset_server,
+                    &mut music_entity,
+                    &music_volume,
+                    &file,
+                    fade_ms,
+                );
             }
 
             VnCommand::MusicStop => {
                 if let Some(entity) = music_entity.0.take() {
                     commands.entity(entity).despawn();
+                }
+                music_playback.last_request = None;
+                #[cfg(target_arch = "wasm32")]
+                {
+                    music_playback.web_music_replay_pending = false;
                 }
                 info!("[music] stop");
             }
@@ -122,6 +105,7 @@ pub fn audio_system(
                     },
                     SfxSource { file: file.clone() },
                 ));
+                resume_audio_contexts_after_spawn();
                 info!("[sfx] play {}", file);
             }
 
@@ -136,6 +120,136 @@ pub fn audio_system(
 
             _ => {}
         }
+    }
+}
+
+pub fn audio_unlock_system(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    touches: Res<Touches>,
+    mut music_entity: ResMut<MusicEntity>,
+    mut music_playback: ResMut<MusicPlaybackState>,
+    music_volume: Res<MusicVolume>,
+) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (
+            &mut commands,
+            &asset_server,
+            &mouse,
+            &keys,
+            &touches,
+            &mut music_entity,
+            &mut music_playback,
+            &music_volume,
+        );
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let input_seen = mouse.get_just_pressed().next().is_some()
+            || keys.get_just_pressed().next().is_some()
+            || touches.iter_just_pressed().next().is_some();
+        if !input_seen {
+            return;
+        }
+
+        resume_all_audio_contexts();
+        music_playback.web_resume_attempts = music_playback.web_resume_attempts.saturating_add(1);
+
+        if music_playback.web_music_replay_pending {
+            if let Some(request) = music_playback.last_request.clone() {
+                spawn_music(
+                    &mut commands,
+                    &asset_server,
+                    &mut music_entity,
+                    &music_volume,
+                    &request.file,
+                    request.fade_ms,
+                );
+                info!(
+                    "[audio] reprise web demandée, musique relancée ({})",
+                    request.file
+                );
+            } else {
+                info!("[audio] reprise web demandée");
+            }
+            music_playback.web_music_replay_pending = false;
+        } else {
+            info!("[audio] reprise web demandée");
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn resume_audio_contexts_after_spawn() {
+    resume_all_audio_contexts();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn resume_audio_contexts_after_spawn() {}
+
+pub fn spawn_music(
+    commands: &mut Commands,
+    asset_server: &AssetServer,
+    music_entity: &mut MusicEntity,
+    music_volume: &MusicVolume,
+    file: &str,
+    fade_ms: Option<u32>,
+) {
+    if let Some(ms) = fade_ms {
+        let duration = ms as f32 / 1000.0;
+
+        if let Some(old_entity) = music_entity.0.take() {
+            commands.entity(old_entity).insert(AudioFade {
+                from_vol: music_volume.0,
+                to_vol: 0.0,
+                duration_secs: duration,
+                elapsed_secs: 0.0,
+                despawn_on_done: true,
+            });
+            info!("[music] fade-out {:.1}s", duration);
+        }
+
+        let source: Handle<AudioSource> = asset_server.load(file.to_string());
+        let new_entity = commands
+            .spawn((
+                AudioBundle {
+                    source,
+                    settings: PlaybackSettings::LOOP.with_volume(Volume::new(0.0)),
+                },
+                MusicMarker,
+                AudioFade {
+                    from_vol: 0.0,
+                    to_vol: music_volume.0,
+                    duration_secs: duration,
+                    elapsed_secs: 0.0,
+                    despawn_on_done: false,
+                },
+            ))
+            .id();
+        music_entity.0 = Some(new_entity);
+        resume_audio_contexts_after_spawn();
+        info!("[music] fade-in {} ({:.1}s)", file, duration);
+    } else {
+        if let Some(entity) = music_entity.0.take() {
+            commands.entity(entity).despawn();
+        }
+        let source: Handle<AudioSource> = asset_server.load(file.to_string());
+        let entity = commands
+            .spawn((
+                AudioBundle {
+                    source,
+                    settings: PlaybackSettings::LOOP.with_volume(Volume::new(music_volume.0)),
+                },
+                MusicMarker,
+            ))
+            .id();
+        music_entity.0 = Some(entity);
+        resume_audio_contexts_after_spawn();
+        info!("[music] play {}", file);
     }
 }
 

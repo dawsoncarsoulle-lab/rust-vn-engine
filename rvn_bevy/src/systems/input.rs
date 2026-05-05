@@ -2,17 +2,19 @@ use bevy::prelude::*;
 use rvn_core::save::SaveManager;
 use rvn_parser::Transition;
 
-use super::{CHOICE_MARGIN_ABOVE_BOX, TEXTBOX_H, WIN_H};
 use crate::components::DialogueText;
 use crate::project_paths::ProjectPaths;
 use crate::resources::{
-    ChoiceFocus, DialogueHistory, ImagemapState, MenuState, ScriptErrorMessage, TypewriterState,
-    VnEngine, VnRenderState, VnState,
+    ChoiceFocus, DialogueHistory, ImagemapState, MenuState, PersistentDataResource,
+    ScriptErrorMessage, TypewriterState, VnEngine, VnRenderState, VnState,
 };
-use crate::systems::save_menu::{apply_loaded_game, SaveMenuState, MAX_SLOTS};
+use crate::systems::save_menu::{
+    apply_loaded_game, record_resume_target, SaveMenuState, MAX_SLOTS,
+};
 use crate::systems::typewriter::apply_visible_sections;
 use crate::vn_command::{PlayerInput, VnCommand};
 use rvn_core::error::ScriptError;
+use rvn_core::persistent::LastResumeTarget;
 
 pub fn input_system(
     keys: Res<ButtonInput<KeyCode>>,
@@ -114,39 +116,6 @@ pub fn input_system(
             return;
         }
 
-        // Clic gauche → hit-test sur les boutons (dimensions réelles)
-        if mouse.just_pressed(MouseButton::Left) {
-            if let Ok(win) = windows.get_single() {
-                let win_w = win.width();
-                let win_h = win.height();
-                if let Some(pos) = win.cursor_position() {
-                    let cursor_x = pos.x;
-                    let cursor_y_ui = win_h - pos.y;
-                    let btn_w = (win_w * 0.5).min(640.0);
-                    let btn_h = 52.0_f32;
-                    let gap = 10.0_f32;
-                    // La textbox est positionnée en bas ; on scale sa hauteur
-                    // proportionnellement si la fenêtre est redimensionnée.
-                    let textbox_h = TEXTBOX_H * (win_h / WIN_H);
-                    let base_bottom = textbox_h + CHOICE_MARGIN_ABOVE_BOX;
-                    let btn_left = (win_w - btn_w) / 2.0;
-
-                    for i in 0..n {
-                        let btn_bottom = base_bottom + i as f32 * (btn_h + gap);
-                        if cursor_x >= btn_left
-                            && cursor_x <= btn_left + btn_w
-                            && cursor_y_ui >= btn_bottom
-                            && cursor_y_ui <= btn_bottom + btn_h
-                        {
-                            choice_focus.clear();
-                            player_events.send(PlayerInput::Choose(i));
-                            return;
-                        }
-                    }
-                }
-            }
-        }
-
         return;
     }
 
@@ -193,6 +162,7 @@ pub fn player_input_system(
     mut tw_state: ResMut<TypewriterState>,
     mut choice_focus: ResMut<ChoiceFocus>,
     mut history: ResMut<DialogueHistory>,
+    mut persistent: ResMut<PersistentDataResource>,
     mut vn_events: EventWriter<VnCommand>,
     mut error_msg: ResMut<ScriptErrorMessage>,
     project_paths: Res<ProjectPaths>,
@@ -296,6 +266,12 @@ pub fn player_input_system(
                         ) {
                             error!("[quick_save] échec: {e}");
                         } else {
+                            if let Ok(data) = mgr.load_quicksave() {
+                                record_resume_target(
+                                    &mut persistent,
+                                    LastResumeTarget::quicksave(data.timestamp),
+                                );
+                            }
                             info!("[quick_save] sauvegarde rapide écrite");
                         }
                     }
@@ -317,6 +293,12 @@ pub fn player_input_system(
                                 &mut vn_events,
                             );
                             choice_focus.clear();
+                            if let Ok(data) = mgr.load_quicksave() {
+                                record_resume_target(
+                                    &mut persistent,
+                                    LastResumeTarget::quicksave(data.timestamp),
+                                );
+                            }
                             next_state.set(VnState::Waiting);
                             info!("[quick_load] sauvegarde rapide chargée");
                         }

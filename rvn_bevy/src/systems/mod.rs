@@ -44,8 +44,6 @@ use rvn_parser::Transition;
 pub const WIN_W: f32 = 1280.0;
 /// Hauteur de la fenêtre de rendu (pixels logiques).
 pub const WIN_H: f32 = 720.0;
-/// Hauteur de la boîte de dialogue (doit rester cohérent avec le thème par défaut).
-pub const TEXTBOX_H: f32 = 170.0;
 /// Marge entre le haut de la textbox et le bas des boutons de choix.
 pub const CHOICE_MARGIN_ABOVE_BOX: f32 = 12.0;
 
@@ -91,9 +89,9 @@ pub fn ensure_extension(path: &str) -> String {
     }
 }
 
-pub use audio::{audio_fade_system, audio_system};
+pub use audio::{audio_fade_system, audio_system, audio_unlock_system};
 pub use background::{background_cover_resize_system, background_system};
-pub use choice::{choice_system, update_choice_buttons};
+pub use choice::{choice_interaction_system, choice_system, update_choice_buttons};
 pub use cinematic::{cinematic_cover_resize_system, cinematic_system};
 pub use dialogue::dialogue_system;
 pub use error_overlay::{despawn_error_overlay, spawn_error_overlay};

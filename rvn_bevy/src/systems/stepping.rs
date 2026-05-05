@@ -3,9 +3,12 @@ use rvn_core::save::SaveManager;
 use rvn_parser::Transition;
 
 use crate::project_paths::ProjectPaths;
-use crate::resources::{ScriptErrorMessage, VnEngine, VnRenderState, VnState};
-use crate::systems::save_menu::MAX_SLOTS;
+use crate::resources::{
+    PersistentDataResource, ScriptErrorMessage, VnEngine, VnRenderState, VnState,
+};
+use crate::systems::save_menu::{record_resume_target, MAX_SLOTS};
 use crate::vn_command::VnCommand;
+use rvn_core::persistent::LastResumeTarget;
 use rvn_core::{error::ScriptError, Interaction};
 
 use crate::systems::debug_overlay::{DebugOverlayState, DebugStepRequest};
@@ -19,6 +22,7 @@ pub fn stepping_system(
     debug_state: Res<DebugOverlayState>,
     mut step_req: ResMut<DebugStepRequest>,
     project_paths: Res<ProjectPaths>,
+    mut persistent: ResMut<PersistentDataResource>,
 ) {
     // En mode debug, on ne progresse que si un step a été demandé (touche F10).
     if debug_state.visible {
@@ -63,6 +67,11 @@ pub fn stepping_system(
                     "script.rvn".to_string(),
                 ) {
                     error!("[autosave] échec: {e}");
+                } else if let Ok(data) = mgr.load_autosave() {
+                    record_resume_target(
+                        &mut persistent,
+                        LastResumeTarget::autosave(data.timestamp),
+                    );
                 }
             }
             Err(e) => error!("[autosave] SaveManager indisponible: {e}"),

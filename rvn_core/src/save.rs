@@ -3,8 +3,10 @@ use rvn_parser::{Position, Transition, Value};
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // ─── ERREURS
@@ -180,15 +182,10 @@ pub struct SaveData {
 
 impl SaveData {
     pub fn from_state(state: &GameState, slot: u32, label: String, script_name: String) -> Self {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-
         Self {
             slot,
             label,
-            timestamp,
+            timestamp: current_unix_timestamp_secs(),
             script_name,
             pc: state.current_interactive_pc,
             background_image: state.background_image.clone(),
@@ -234,6 +231,21 @@ impl SaveData {
     }
 }
 
+fn current_unix_timestamp_secs() -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        (js_sys::Date::now() / 1000.0).max(0.0) as u64
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+}
+
 // ─── SAVE MANAGER
 
 pub struct SaveManager {
@@ -244,6 +256,7 @@ pub struct SaveManager {
 impl SaveManager {
     pub fn new(save_dir: impl AsRef<Path>, max_slots: u32) -> Result<Self, SaveError> {
         let dir = save_dir.as_ref().to_path_buf();
+        #[cfg(not(target_arch = "wasm32"))]
         fs::create_dir_all(&dir)?;
         Ok(Self {
             save_dir: dir,
@@ -251,6 +264,7 @@ impl SaveManager {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn slot_path(&self, slot: u32) -> PathBuf {
         self.save_dir.join(format!("slot_{slot:02}.json"))
     }
@@ -273,8 +287,26 @@ impl SaveManager {
         Ok(())
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn storage_key(&self, name: &str) -> String {
+        format!("rvn:{}:{name}", self.save_dir.display())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn local_storage() -> Result<web_sys::Storage, SaveError> {
+        web_sys::window()
+            .and_then(|window| window.local_storage().ok().flatten())
+            .ok_or_else(|| {
+                SaveError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "localStorage indisponible",
+                ))
+            })
+    }
+
     // ── Écriture
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save(
         &self,
         state: &GameState,
@@ -289,6 +321,29 @@ impl SaveManager {
         Ok(())
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn save(
+        &self,
+        state: &GameState,
+        slot: u32,
+        label: String,
+        script_name: String,
+    ) -> Result<(), SaveError> {
+        self.check_slot(slot)?;
+        let data = SaveData::from_state(state, slot, label, script_name);
+        let json = serde_json::to_string_pretty(&data)?;
+        Self::local_storage()?
+            .set_item(&self.storage_key(&format!("slot_{slot:02}")), &json)
+            .map_err(|_| {
+                SaveError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "écriture localStorage impossible",
+                ))
+            })?;
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn save_to_path(
         &self,
         path: PathBuf,
@@ -300,6 +355,32 @@ impl SaveManager {
         let data = SaveData::from_state(state, slot, label, script_name);
         let json = serde_json::to_string_pretty(&data)?;
         fs::write(path, json)?;
+        Ok(())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn save_to_path(
+        &self,
+        path: PathBuf,
+        state: &GameState,
+        slot: u32,
+        label: String,
+        script_name: String,
+    ) -> Result<(), SaveError> {
+        let data = SaveData::from_state(state, slot, label, script_name);
+        let json = serde_json::to_string_pretty(&data)?;
+        let name = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("save");
+        Self::local_storage()?
+            .set_item(&self.storage_key(name), &json)
+            .map_err(|_| {
+                SaveError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "écriture localStorage impossible",
+                ))
+            })?;
         Ok(())
     }
 
@@ -323,6 +404,7 @@ impl SaveManager {
 
     // ── Lecture
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load(&self, slot: u32) -> Result<SaveData, SaveError> {
         self.check_slot(slot)?;
         let path = self.slot_path(slot);
@@ -334,6 +416,24 @@ impl SaveManager {
         Ok(data)
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn load(&self, slot: u32) -> Result<SaveData, SaveError> {
+        self.check_slot(slot)?;
+        let Some(json) = Self::local_storage()?
+            .get_item(&self.storage_key(&format!("slot_{slot:02}")))
+            .map_err(|_| {
+                SaveError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "lecture localStorage impossible",
+                ))
+            })?
+        else {
+            return Err(SaveError::SlotVide(slot));
+        };
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn load_from_path(&self, path: PathBuf) -> Result<SaveData, SaveError> {
         if !path.exists() {
             return Err(SaveError::SlotVide(0));
@@ -341,6 +441,26 @@ impl SaveManager {
         let json = fs::read_to_string(&path)?;
         let data = serde_json::from_str(&json)?;
         Ok(data)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_from_path(&self, path: PathBuf) -> Result<SaveData, SaveError> {
+        let name = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("save");
+        let Some(json) = Self::local_storage()?
+            .get_item(&self.storage_key(name))
+            .map_err(|_| {
+                SaveError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "lecture localStorage impossible",
+                ))
+            })?
+        else {
+            return Err(SaveError::SlotVide(0));
+        };
+        Ok(serde_json::from_str(&json)?)
     }
 
     pub fn load_autosave(&self) -> Result<SaveData, SaveError> {
@@ -363,6 +483,7 @@ impl SaveManager {
             .max_by_key(|save| (save.timestamp, save.slot))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn delete(&self, slot: u32) -> Result<(), SaveError> {
         self.check_slot(slot)?;
 
@@ -374,16 +495,88 @@ impl SaveManager {
         Ok(())
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn delete(&self, slot: u32) -> Result<(), SaveError> {
+        self.check_slot(slot)?;
+        Self::local_storage()?
+            .remove_item(&self.storage_key(&format!("slot_{slot:02}")))
+            .map_err(|_| {
+                SaveError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "suppression localStorage impossible",
+                ))
+            })?;
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn slot_occupied(&self, slot: u32) -> bool {
         self.check_slot(slot).is_ok() && self.slot_path(slot).exists()
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn slot_occupied(&self, slot: u32) -> bool {
+        self.check_slot(slot).is_ok()
+            && Self::local_storage()
+                .and_then(|storage| {
+                    storage
+                        .get_item(&self.storage_key(&format!("slot_{slot:02}")))
+                        .map_err(|_| {
+                            SaveError::Io(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                "lecture localStorage impossible",
+                            ))
+                        })
+                })
+                .ok()
+                .flatten()
+                .is_some()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn autosave_exists(&self) -> bool {
         self.autosave_path().exists()
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn autosave_exists(&self) -> bool {
+        Self::local_storage()
+            .and_then(|storage| {
+                storage
+                    .get_item(&self.storage_key("autosave"))
+                    .map_err(|_| {
+                        SaveError::Io(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "lecture localStorage impossible",
+                        ))
+                    })
+            })
+            .ok()
+            .flatten()
+            .is_some()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn quicksave_exists(&self) -> bool {
         self.quicksave_path().exists()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn quicksave_exists(&self) -> bool {
+        Self::local_storage()
+            .and_then(|storage| {
+                storage
+                    .get_item(&self.storage_key("quicksave"))
+                    .map_err(|_| {
+                        SaveError::Io(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "lecture localStorage impossible",
+                        ))
+                    })
+            })
+            .ok()
+            .flatten()
+            .is_some()
     }
 
     pub fn max_slots(&self) -> u32 {

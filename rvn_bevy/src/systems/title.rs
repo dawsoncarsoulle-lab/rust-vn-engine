@@ -3,15 +3,19 @@ use rvn_core::save::SaveManager;
 
 use crate::project_paths::ProjectPaths;
 use crate::resources::{
-    DialogueHistory, ImagemapState, MenuState, MusicEntity, MusicVolume, ProjectTitle, Theme,
-    TitleAnchor, TitleBackgroundMode, TitleButtonAlign, TitleButtonStyle, TitleScreenTheme,
-    TypewriterState, VnEngine, VnRenderState, VnState,
+    DialogueHistory, ImagemapState, MenuState, MusicEntity, MusicPlaybackState, MusicVolume,
+    PendingMusicPlayback, PersistentDataResource, ProjectTitle, Theme, TitleAnchor,
+    TitleBackgroundMode, TitleButtonAlign, TitleButtonStyle, TitleScreenTheme, TypewriterState,
+    VnEngine, VnRenderState, VnState,
 };
+use crate::systems::audio::spawn_music;
 use crate::systems::save_menu::{
-    apply_loaded_game, SaveMenuMode, SaveMenuOrigin, SaveMenuState, MAX_SLOTS,
+    apply_loaded_game, record_resume_target, SaveMenuMode, SaveMenuOrigin, SaveMenuState, MAX_SLOTS,
 };
 use crate::systems::settings_menu::SettingsMenuState;
 use crate::vn_command::VnCommand;
+use rvn_core::persistent::{LastResumeTarget, ResumeSaveKind};
+use rvn_core::save::{SaveData, SaveError};
 
 // ─── Composants locaux ───────────────────────────────────────────────────────
 
@@ -48,7 +52,9 @@ pub fn spawn_title_screen(
     asset_server: Res<AssetServer>,
     project_paths: Res<ProjectPaths>,
     project_title: Res<ProjectTitle>,
+    persistent: Res<PersistentDataResource>,
     mut music_entity: ResMut<MusicEntity>,
+    mut music_playback: ResMut<MusicPlaybackState>,
     music_volume: Res<MusicVolume>,
     mut next_state: ResMut<NextState<VnState>>,
 ) {
@@ -82,6 +88,7 @@ pub fn spawn_title_screen(
         &asset_server,
         &project_paths,
         &mut music_entity,
+        &mut music_playback,
         &music_volume,
         title_theme.music.as_deref(),
     );
@@ -126,7 +133,7 @@ pub fn spawn_title_screen(
         .with_children(|parent| {
             if let Some(logo_config) = title_theme.logo.as_ref() {
                 if let Some(logo_path) = logo_config.path() {
-                    if project_paths.assets.join(logo_path).exists() {
+                    if existing_asset_path(&project_paths, Some(logo_path)).is_some() {
                         let logo_size =
                             Vec2::new(420.0 * logo_config.scale(), 160.0 * logo_config.scale());
                         parent.spawn(ImageBundle {
@@ -202,7 +209,7 @@ pub fn spawn_title_screen(
                 .with_children(|buttons| {
                     let labels = &title_theme.buttons.labels;
                     let visibility = &title_theme.buttons.visibility;
-                    let continue_available = title_continue_available(&project_paths);
+                    let continue_available = title_continue_available(&project_paths, &persistent);
                     for button_id in &title_theme.button_order {
                         match button_id.as_str() {
                             "continue"
@@ -290,6 +297,13 @@ pub fn spawn_title_screen(
 
 fn existing_asset_path(project_paths: &ProjectPaths, path: Option<&str>) -> Option<String> {
     let path = path?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = project_paths;
+        return Some(path.to_string());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     if project_paths.assets.join(path).exists() {
         Some(path.to_string())
     } else {
@@ -459,12 +473,16 @@ fn play_title_music(
     asset_server: &AssetServer,
     project_paths: &ProjectPaths,
     music_entity: &mut MusicEntity,
+    music_playback: &mut MusicPlaybackState,
     music_volume: &MusicVolume,
     music: Option<&str>,
 ) {
     let Some(music) = music.filter(|m| !m.trim().is_empty()) else {
         return;
     };
+    #[cfg(target_arch = "wasm32")]
+    let _ = project_paths;
+    #[cfg(not(target_arch = "wasm32"))]
     if !project_paths.assets.join(music).exists() {
         warn!(
             "[titre] musique introuvable: {}",
@@ -472,21 +490,22 @@ fn play_title_music(
         );
         return;
     }
-    if let Some(entity) = music_entity.0.take() {
-        commands.entity(entity).despawn();
+    music_playback.last_request = Some(PendingMusicPlayback {
+        file: music.to_string(),
+        fade_ms: None,
+    });
+    #[cfg(target_arch = "wasm32")]
+    {
+        music_playback.web_music_replay_pending = true;
     }
-    let source: Handle<AudioSource> = asset_server.load(music.to_string());
-    let entity = commands
-        .spawn((
-            AudioBundle {
-                source,
-                settings: PlaybackSettings::LOOP
-                    .with_volume(bevy::audio::Volume::new(music_volume.0)),
-            },
-            crate::components::MusicMarker,
-        ))
-        .id();
-    music_entity.0 = Some(entity);
+    spawn_music(
+        commands,
+        asset_server,
+        music_entity,
+        music_volume,
+        music,
+        None,
+    );
     info!("[titre] musique {}", music);
 }
 
@@ -498,10 +517,54 @@ fn title_align_items(align: TitleButtonAlign) -> AlignItems {
     }
 }
 
-fn title_continue_available(project_paths: &ProjectPaths) -> bool {
+fn title_continue_available(
+    project_paths: &ProjectPaths,
+    persistent: &PersistentDataResource,
+) -> bool {
     SaveManager::new(&project_paths.saves, MAX_SLOTS as u32)
-        .map(|mgr| mgr.autosave_exists() || mgr.latest_manual_save().is_some())
+        .map(|mgr| resolve_continue_data(&mgr, persistent).is_ok())
         .unwrap_or(false)
+}
+
+fn resolve_continue_data(
+    mgr: &SaveManager,
+    persistent: &PersistentDataResource,
+) -> Result<(SaveData, Option<LastResumeTarget>), SaveError> {
+    if let Some(target) = persistent.data.last_resume_target.as_ref() {
+        match load_resume_target(mgr, target) {
+            Ok(data) => return Ok((data, Some(target.clone()))),
+            Err(e) => {
+                warn!("[titre] point de reprise ignoré: {e}");
+            }
+        }
+    }
+
+    if mgr.autosave_exists() {
+        let data = mgr.load_autosave()?;
+        let target = LastResumeTarget::autosave(data.timestamp);
+        return Ok((data, Some(target)));
+    }
+
+    if let Some(data) = mgr.latest_manual_save() {
+        let target = LastResumeTarget::manual(data.slot, data.timestamp);
+        return Ok((data, Some(target)));
+    }
+
+    Err(SaveError::SlotVide(0))
+}
+
+fn load_resume_target(mgr: &SaveManager, target: &LastResumeTarget) -> Result<SaveData, SaveError> {
+    let data = match target.kind {
+        ResumeSaveKind::Autosave => mgr.load_autosave()?,
+        ResumeSaveKind::Manual => mgr.load(target.slot.unwrap_or(0))?,
+        ResumeSaveKind::Quicksave => mgr.load_quicksave()?,
+    };
+
+    if data.timestamp == target.timestamp {
+        Ok(data)
+    } else {
+        Err(SaveError::SlotVide(target.slot.unwrap_or(0)))
+    }
 }
 
 fn spawn_title_button(
@@ -630,6 +693,7 @@ pub fn title_interaction_system(
     mut menu_state: ResMut<MenuState>,
     mut save_menu_state: ResMut<SaveMenuState>,
     mut settings_menu_state: ResMut<SettingsMenuState>,
+    mut persistent: ResMut<PersistentDataResource>,
     mut vn_events: EventWriter<VnCommand>,
     mut exit: EventWriter<AppExit>,
 ) {
@@ -647,30 +711,24 @@ pub fn title_interaction_system(
                 match button {
                     TitleButton::Continue => {
                         match SaveManager::new(&project_paths.saves, MAX_SLOTS as u32) {
-                            Ok(mgr) => {
-                                let data = if mgr.autosave_exists() {
-                                    mgr.load_autosave()
-                                } else {
-                                    mgr.latest_manual_save()
-                                        .ok_or(rvn_core::save::SaveError::SlotVide(0))
-                                };
-
-                                match data {
-                                    Ok(data) => {
-                                        engine.0.load_data(data);
-                                        apply_loaded_game(
-                                            &mut engine,
-                                            &mut render_state,
-                                            &mut imagemap_state,
-                                            &mut tw_state,
-                                            &mut history,
-                                            &mut vn_events,
-                                        );
-                                        next_state.set(VnState::Waiting);
+                            Ok(mgr) => match resolve_continue_data(&mgr, &persistent) {
+                                Ok((data, target)) => {
+                                    if let Some(target) = target {
+                                        record_resume_target(&mut persistent, target);
                                     }
-                                    Err(e) => error!("[titre] reprise impossible: {e}"),
+                                    engine.0.load_data(data);
+                                    apply_loaded_game(
+                                        &mut engine,
+                                        &mut render_state,
+                                        &mut imagemap_state,
+                                        &mut tw_state,
+                                        &mut history,
+                                        &mut vn_events,
+                                    );
+                                    next_state.set(VnState::Waiting);
                                 }
-                            }
+                                Err(e) => error!("[titre] reprise impossible: {e}"),
+                            },
                             Err(e) => error!("[titre] SaveManager indisponible: {e}"),
                         }
                     }

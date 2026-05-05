@@ -6,7 +6,7 @@ use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use include_dir::{include_dir, Dir};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use owo_colors::OwoColorize;
@@ -54,6 +54,9 @@ enum Commands {
 
     /// Build a validated, distributable data package for an RVN project.
     Build {
+        /// Build target to produce.
+        #[arg(long, value_enum, default_value_t = BuildTarget::Desktop)]
+        target: BuildTarget,
         /// Path to the project directory.
         #[arg(value_name = "PROJECT_DIR", default_value = ".")]
         project: String,
@@ -124,8 +127,8 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
-        Commands::Build { project } => {
-            build_project(&project)?;
+        Commands::Build { target, project } => {
+            build_project(&project, target)?;
         }
         Commands::Dev { project } => {
             if let Err(e) = dev_project(&project) {
@@ -136,6 +139,12 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum BuildTarget {
+    Desktop,
+    Web,
 }
 
 fn print_project_diagnostics(project: &str, diagnostics: &[check::Diagnostic], use_color: bool) {
@@ -316,7 +325,7 @@ fn load_project_config(project_dir: &Path) -> std::result::Result<ProjectConfig,
     toml::from_str(&content).map_err(|e| format!("Failed to parse {}: {e}", path.display()))
 }
 
-fn build_project(project: &str) -> Result<()> {
+fn build_project(project: &str, target: BuildTarget) -> Result<()> {
     let project_dir = Path::new(project);
 
     println!("Check en cours...");
@@ -344,8 +353,15 @@ fn build_project(project: &str) -> Result<()> {
                 .map(sanitize_game_name)
                 .unwrap_or_else(|| "Game".to_string())
         });
+    match target {
+        BuildTarget::Desktop => build_desktop_project(project_dir, &cfg, &game_name),
+        BuildTarget::Web => build_web_project(project_dir, &cfg, &game_name),
+    }
+}
+
+fn build_desktop_project(project_dir: &Path, cfg: &ProjectConfig, game_name: &str) -> Result<()> {
     let platform = detect_platform()?;
-    let dist_dir = create_dist_structure(project_dir, &game_name, &platform)?;
+    let dist_dir = create_dist_structure(project_dir, game_name, &platform)?;
 
     println!("Build runtime...");
     let runtime_binary = build_runtime()?;
@@ -439,6 +455,309 @@ fn build_runtime() -> Result<PathBuf> {
         .join("target")
         .join("release")
         .join(binary_name))
+}
+
+fn build_web_project(project_dir: &Path, cfg: &ProjectConfig, game_name: &str) -> Result<()> {
+    let dist_dir = create_web_dist_structure(project_dir, game_name)?;
+
+    println!("Build web runtime...");
+    let wasm_input = build_web_runtime()?;
+
+    println!("Génération JS/WASM...");
+    run_wasm_bindgen(&wasm_input, &dist_dir)?;
+
+    println!("Copie fichiers...");
+    copy_web_project_files(project_dir, &dist_dir, cfg)?;
+
+    println!("Génération index.html...");
+    write_web_index(&dist_dir, game_name)?;
+
+    println!("Build web terminé : {}/", dist_dir.display());
+    println!("Pour tester localement :");
+    println!("  cd {}", dist_dir.display());
+    println!("  python3 -m http.server 8000");
+    println!("Puis ouvrez http://localhost:8000/");
+    Ok(())
+}
+
+fn create_web_dist_structure(project_dir: &Path, game_name: &str) -> Result<PathBuf> {
+    let dist_dir = project_dir.join("dist-web").join(game_name);
+    if dist_dir.exists() {
+        fs::remove_dir_all(&dist_dir).with_context(|| {
+            format!(
+                "unable to remove previous web build directory '{}'",
+                dist_dir.display()
+            )
+        })?;
+    }
+    fs::create_dir_all(&dist_dir).with_context(|| {
+        format!(
+            "unable to create web build directory '{}'",
+            dist_dir.display()
+        )
+    })?;
+    Ok(dist_dir)
+}
+
+fn build_web_runtime() -> Result<PathBuf> {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .context("unable to resolve RVN workspace root")?;
+    let manifest_path = workspace_root.join("Cargo.toml");
+    let status = Command::new("cargo")
+        .args([
+            "build",
+            "--release",
+            "-p",
+            "rvn_bevy",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--manifest-path",
+        ])
+        .arg(&manifest_path)
+        .status()
+        .context("unable to invoke cargo build for rvn_bevy web runtime")?;
+
+    if !status.success() {
+        anyhow::bail!(
+            "web runtime build failed with status {status}. Ensure the target is installed: rustup target add wasm32-unknown-unknown"
+        );
+    }
+
+    Ok(workspace_root
+        .join("target")
+        .join("wasm32-unknown-unknown")
+        .join("release")
+        .join("rvn_bevy.wasm"))
+}
+
+fn run_wasm_bindgen(wasm_input: &Path, dist_dir: &Path) -> Result<()> {
+    let available = Command::new("wasm-bindgen")
+        .arg("--version")
+        .status()
+        .context("unable to invoke wasm-bindgen. Install wasm-bindgen-cli with `cargo install wasm-bindgen-cli`.")?;
+    if !available.success() {
+        anyhow::bail!(
+            "wasm-bindgen is installed but returned a non-zero status. Reinstall wasm-bindgen-cli."
+        );
+    }
+
+    let status = Command::new("wasm-bindgen")
+        .arg(wasm_input)
+        .args(["--out-dir"])
+        .arg(dist_dir)
+        .args(["--out-name", "game", "--target", "web"])
+        .status()
+        .context("unable to run wasm-bindgen for web runtime")?;
+
+    if !status.success() {
+        anyhow::bail!("wasm-bindgen failed with status {status}");
+    }
+
+    Ok(())
+}
+
+fn copy_web_project_files(project_dir: &Path, dist_dir: &Path, cfg: &ProjectConfig) -> Result<()> {
+    copy_file_relative(project_dir, dist_dir, Path::new("rvn.toml"))?;
+    copy_optional_file_relative(project_dir, dist_dir, Path::new(&cfg.paths.theme))?;
+    copy_dir_relative(project_dir, dist_dir, Path::new(&cfg.paths.assets))?;
+    copy_dir_relative(project_dir, dist_dir, Path::new(&cfg.paths.locales))?;
+
+    let main_script = Path::new(&cfg.project.main_script);
+    if let Some(script_dir) = main_script.parent().filter(|p| !p.as_os_str().is_empty()) {
+        copy_dir_relative(project_dir, dist_dir, script_dir)?;
+    } else {
+        copy_file_relative(project_dir, dist_dir, main_script)?;
+    }
+
+    write_web_script_manifest(project_dir, dist_dir, main_script)?;
+    write_web_asset_manifest(project_dir, dist_dir, cfg)?;
+    Ok(())
+}
+
+fn write_web_script_manifest(
+    project_dir: &Path,
+    dist_dir: &Path,
+    main_script: &Path,
+) -> Result<()> {
+    let scripts_dir = main_script
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("scripts"));
+    let mut scripts = Vec::new();
+    collect_rvn_files_relative(project_dir, scripts_dir, &mut scripts)?;
+    scripts.sort();
+    scripts.dedup();
+
+    let mut manifest = String::from("scripts = [\n");
+    for script in scripts {
+        manifest.push_str("  ");
+        manifest.push_str(&toml_string(&script));
+        manifest.push_str(",\n");
+    }
+    manifest.push_str("]\n");
+
+    fs::write(dist_dir.join("rvn_web_manifest.toml"), manifest).with_context(|| {
+        format!(
+            "unable to write web script manifest '{}'",
+            dist_dir.join("rvn_web_manifest.toml").display()
+        )
+    })?;
+    Ok(())
+}
+
+fn collect_rvn_files_relative(
+    project_dir: &Path,
+    relative_dir: &Path,
+    out: &mut Vec<String>,
+) -> Result<()> {
+    let dir = project_dir.join(relative_dir);
+    for entry in
+        fs::read_dir(&dir).with_context(|| format!("unable to read '{}'", dir.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        let relative = relative_dir.join(entry.file_name());
+        if path.is_dir() {
+            collect_rvn_files_relative(project_dir, &relative, out)?;
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("rvn") {
+            out.push(path_to_web_string(&relative));
+        }
+    }
+    Ok(())
+}
+
+fn path_to_web_string(path: &Path) -> String {
+    path.components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(part) => part.to_str(),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn toml_string(value: &str) -> String {
+    format!("{value:?}")
+}
+
+fn write_web_asset_manifest(
+    project_dir: &Path,
+    dist_dir: &Path,
+    cfg: &ProjectConfig,
+) -> Result<()> {
+    let cgs_dir = project_dir.join(&cfg.paths.assets).join("cgs");
+    let mut entries = Vec::new();
+    if cgs_dir.exists() {
+        for entry in fs::read_dir(&cgs_dir)
+            .with_context(|| format!("unable to read CG directory '{}'", cgs_dir.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
+                continue;
+            };
+            if !matches!(ext, "png" | "jpg" | "jpeg" | "webp") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            entries.push((stem.to_string(), format!("cgs/{file_name}")));
+        }
+    }
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let has_config_toml = project_dir
+        .join(&cfg.paths.assets)
+        .join("config.toml")
+        .exists();
+    let mut manifest = format!("has_config_toml = {has_config_toml}\n\n[cgs]\n");
+    for (id, path) in entries {
+        manifest.push_str(&toml_string(&id));
+        manifest.push_str(" = ");
+        manifest.push_str(&toml_string(&path));
+        manifest.push('\n');
+    }
+
+    fs::write(dist_dir.join("rvn_web_assets.toml"), manifest).with_context(|| {
+        format!(
+            "unable to write web asset manifest '{}'",
+            dist_dir.join("rvn_web_assets.toml").display()
+        )
+    })?;
+    Ok(())
+}
+
+fn write_web_index(dist_dir: &Path, game_name: &str) -> Result<()> {
+    let title = html_escape(game_name);
+    let html = format!(
+        r#"<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title}</title>
+  <style>
+    html, body {{
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #050509;
+    }}
+    canvas {{
+      display: block;
+      width: 100vw !important;
+      height: 100vh !important;
+    }}
+    #fallback {{
+      position: fixed;
+      left: 16px;
+      bottom: 16px;
+      color: #d8d8e8;
+      font: 14px system-ui, sans-serif;
+    }}
+  </style>
+</head>
+<body>
+  <div id="fallback">Chargement... Ce jeu doit être servi via un serveur web local ou distant.</div>
+  <script type="module">
+    import init from './game.js';
+    init().then(() => {{
+      document.getElementById('fallback')?.remove();
+    }}).catch((error) => {{
+      const fallback = document.getElementById('fallback');
+      if (fallback) fallback.textContent = 'Erreur de chargement du jeu. Vérifiez que le dossier est servi par un serveur web.';
+      console.error(error);
+    }});
+  </script>
+</body>
+</html>
+"#
+    );
+
+    fs::write(dist_dir.join("index.html"), html).with_context(|| {
+        format!(
+            "unable to write web index '{}'",
+            dist_dir.join("index.html").display()
+        )
+    })?;
+    Ok(())
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 fn copy_project_files(project_dir: &Path, dist_dir: &Path, cfg: &ProjectConfig) -> Result<()> {

@@ -131,6 +131,8 @@ pub struct LocaleManager {
     current_table: LocaleTable,
     /// Table de fallback (langue par défaut).
     fallback_table: LocaleTable,
+    /// Tables préchargées, utilisées par le runtime web sans accès disque.
+    table_cache: HashMap<String, LocaleTable>,
 }
 
 impl LocaleManager {
@@ -158,7 +160,45 @@ impl LocaleManager {
             available_langs,
             current_table,
             fallback_table,
+            table_cache: HashMap::new(),
         })
+    }
+
+    pub fn from_tables(
+        locale_dir: impl AsRef<Path>,
+        default_lang: &str,
+        current_lang: &str,
+        available_langs: Vec<String>,
+        mut table_cache: HashMap<String, LocaleTable>,
+    ) -> Self {
+        let fallback_table = table_cache
+            .remove(default_lang)
+            .unwrap_or_else(|| LocaleTable {
+                lang: default_lang.to_string(),
+                strings: HashMap::new(),
+            });
+        let current_table = if current_lang == default_lang {
+            fallback_table.clone()
+        } else {
+            table_cache
+                .remove(current_lang)
+                .unwrap_or_else(|| LocaleTable {
+                    lang: current_lang.to_string(),
+                    strings: HashMap::new(),
+                })
+        };
+        table_cache.insert(default_lang.to_string(), fallback_table.clone());
+        table_cache.insert(current_lang.to_string(), current_table.clone());
+
+        Self {
+            locale_dir: locale_dir.as_ref().to_path_buf(),
+            default_lang: default_lang.to_string(),
+            current_lang: current_lang.to_string(),
+            available_langs,
+            current_table,
+            fallback_table,
+            table_cache,
+        }
     }
 
     /// Charge un fichier de locale ou retourne une table vide si absent.
@@ -204,13 +244,20 @@ impl LocaleManager {
             return Ok(());
         }
         self.current_lang = lang.to_string();
-        self.current_table = Self::load_or_empty(lang, &self.locale_dir);
+        self.current_table = self
+            .table_cache
+            .get(lang)
+            .cloned()
+            .unwrap_or_else(|| Self::load_or_empty(lang, &self.locale_dir));
         Ok(())
     }
 
     /// Recharge la table de la langue courante depuis le disque.
     /// Utilisé par le hot-reload.
     pub fn reload_current(&mut self) {
+        if !self.table_cache.is_empty() {
+            return;
+        }
         self.current_table = Self::load_or_empty(&self.current_lang.clone(), &self.locale_dir);
         if self.current_lang != self.default_lang {
             self.fallback_table = Self::load_or_empty(&self.default_lang.clone(), &self.locale_dir);
@@ -230,13 +277,20 @@ impl LocaleManager {
         }
 
         if changed {
-            let path = self.locale_dir.join(format!("{}.toml", self.default_lang));
-            std::fs::write(&path, self.fallback_table.to_toml())?;
-            eprintln!(
-                "[locale] {} mis à jour avec {} nouvelles clés",
-                path.display(),
-                strings.len()
-            );
+            #[cfg(target_arch = "wasm32")]
+            {
+                return Ok(true);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let path = self.locale_dir.join(format!("{}.toml", self.default_lang));
+                std::fs::write(&path, self.fallback_table.to_toml())?;
+                eprintln!(
+                    "[locale] {} mis à jour avec {} nouvelles clés",
+                    path.display(),
+                    strings.len()
+                );
+            }
         }
 
         Ok(changed)

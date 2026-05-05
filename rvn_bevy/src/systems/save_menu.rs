@@ -14,9 +14,11 @@ use rvn_core::save::{SaveData, SaveManager};
 
 use crate::project_paths::ProjectPaths;
 use crate::resources::{
-    DialogueHistory, ImagemapState, MenuState, TypewriterState, VnEngine, VnRenderState, VnState,
+    DialogueHistory, ImagemapState, MenuState, PersistentDataResource, TypewriterState, VnEngine,
+    VnRenderState, VnState,
 };
 use crate::vn_command::VnCommand;
+use rvn_core::persistent::LastResumeTarget;
 use rvn_parser::Transition;
 
 /// Mode of the save menu: Save or Load.
@@ -105,6 +107,13 @@ pub fn apply_loaded_game(
     }
     for cmd in pending {
         vn_events.send(cmd);
+    }
+}
+
+pub fn record_resume_target(persistent: &mut PersistentDataResource, target: LastResumeTarget) {
+    persistent.data.last_resume_target = Some(target);
+    if let Err(e) = persistent.manager.save(&persistent.data) {
+        error!("[persistent] impossible d'enregistrer le point de reprise: {e}");
     }
 }
 
@@ -282,6 +291,7 @@ pub fn save_menu_interaction_system(
     mut imagemap_state: ResMut<ImagemapState>,
     mut tw_state: ResMut<TypewriterState>,
     mut history: ResMut<DialogueHistory>,
+    mut persistent: ResMut<PersistentDataResource>,
     mut vn_events: EventWriter<VnCommand>,
 ) {
     if !save_state.active {
@@ -316,7 +326,18 @@ pub fn save_menu_interaction_system(
                                 let label = format!("Sauvegarde {}", slot_index);
                                 let script_name = "script.rvn".to_string();
                                 match engine.0.save(&mgr, slot_index as u32, label, script_name) {
-                                    Ok(_) => info!("[save_menu] saved slot {}", slot_index),
+                                    Ok(_) => {
+                                        if let Ok(data) = mgr.load(slot_index as u32) {
+                                            record_resume_target(
+                                                &mut persistent,
+                                                LastResumeTarget::manual(
+                                                    slot_index as u32,
+                                                    data.timestamp,
+                                                ),
+                                            );
+                                        }
+                                        info!("[save_menu] saved slot {}", slot_index);
+                                    }
                                     Err(e) => error!(
                                         "[save_menu] error saving slot {}: {}",
                                         slot_index, e
@@ -335,6 +356,15 @@ pub fn save_menu_interaction_system(
                                         &mut history,
                                         &mut vn_events,
                                     );
+                                    if let Ok(data) = mgr.load(slot_index as u32) {
+                                        record_resume_target(
+                                            &mut persistent,
+                                            LastResumeTarget::manual(
+                                                slot_index as u32,
+                                                data.timestamp,
+                                            ),
+                                        );
+                                    }
                                     menu_state.return_to = None;
                                     next_state.set(VnState::Waiting);
                                     save_state.close();

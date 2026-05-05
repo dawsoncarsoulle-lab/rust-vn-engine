@@ -1,10 +1,10 @@
 use bevy::color::Srgba;
 use bevy::prelude::*;
 
-use super::{CHOICE_MARGIN_ABOVE_BOX, TEXTBOX_H, WIN_W};
+use super::CHOICE_MARGIN_ABOVE_BOX;
 use crate::components::{ChoiceButton, ChoiceContainer, DialogueBox};
 use crate::resources::{ChoiceFocus, Theme, VnRenderState};
-use crate::vn_command::VnCommand;
+use crate::vn_command::{PlayerInput, VnCommand};
 
 pub fn choice_system(
     mut vn_events: EventReader<VnCommand>,
@@ -76,16 +76,18 @@ pub fn update_choice_buttons(
 
         let btn = commands
             .spawn((
-                NodeBundle {
+                ButtonBundle {
                     style: Style {
                         position_type: PositionType::Absolute,
                         width: Val::Px(btn_w),
                         height: Val::Px(btn_h),
-                        left: Val::Px((WIN_W - btn_w) / 2.0),
+                        left: Val::Percent(50.0),
                         bottom: Val::Px(bottom),
-                        justify_content: JustifyContent::FlexStart,
+                        margin: UiRect::left(Val::Px(-btn_w / 2.0)),
+                        justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
                         padding: UiRect::horizontal(Val::Px(22.0)),
+                        column_gap: Val::Px(4.0),
                         border: if focused {
                             UiRect::all(Val::Px(2.0))
                         } else {
@@ -101,7 +103,6 @@ pub fn update_choice_buttons(
                     },
                     ..default()
                 },
-                Button,
                 ChoiceButton(i),
             ))
             .with_children(|p| {
@@ -124,5 +125,21 @@ pub fn update_choice_buttons(
             })
             .id();
         commands.entity(container).add_child(btn);
+    }
+}
+
+pub fn choice_interaction_system(
+    mut interaction_query: Query<
+        (&Interaction, &ChoiceButton),
+        (Changed<Interaction>, With<Button>, With<ChoiceButton>),
+    >,
+    mut choice_focus: ResMut<ChoiceFocus>,
+    mut player_events: EventWriter<PlayerInput>,
+) {
+    for (interaction, choice_button) in interaction_query.iter_mut() {
+        if *interaction == Interaction::Pressed {
+            choice_focus.clear();
+            player_events.send(PlayerInput::Choose(choice_button.0));
+        }
     }
 }

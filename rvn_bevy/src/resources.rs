@@ -164,6 +164,21 @@ impl ImagemapState {
 #[derive(Resource, Default)]
 pub struct MusicEntity(pub Option<Entity>);
 
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct PendingMusicPlayback {
+    pub file: String,
+    pub fade_ms: Option<u32>,
+}
+
+#[allow(dead_code)]
+#[derive(Resource, Default)]
+pub struct MusicPlaybackState {
+    pub last_request: Option<PendingMusicPlayback>,
+    pub web_resume_attempts: u32,
+    pub web_music_replay_pending: bool,
+}
+
 #[derive(Resource)]
 pub struct MusicVolume(pub f32);
 
