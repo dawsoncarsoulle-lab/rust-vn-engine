@@ -26,11 +26,20 @@ pub enum SaveMenuMode {
     Load,
 }
 
+/// Origin of the save/load overlay.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SaveMenuOrigin {
+    #[default]
+    InGame,
+    TitleScreen,
+}
+
 /// Resource tracking whether the save menu is active and which mode it is in.
 #[derive(Resource, Debug)]
 pub struct SaveMenuState {
     pub active: bool,
     pub mode: SaveMenuMode,
+    pub origin: SaveMenuOrigin,
 }
 
 impl Default for SaveMenuState {
@@ -38,7 +47,21 @@ impl Default for SaveMenuState {
         Self {
             active: false,
             mode: SaveMenuMode::Save,
+            origin: SaveMenuOrigin::InGame,
         }
+    }
+}
+
+impl SaveMenuState {
+    pub fn open(&mut self, mode: SaveMenuMode, origin: SaveMenuOrigin) {
+        self.mode = mode;
+        self.origin = origin;
+        self.active = true;
+    }
+
+    fn close(&mut self) {
+        self.active = false;
+        self.origin = SaveMenuOrigin::InGame;
     }
 }
 
@@ -276,9 +299,9 @@ pub fn save_menu_interaction_system(
             Interaction::Pressed => {
                 *bg_color = Color::srgba(0.30, 0.30, 0.50, 0.95).into();
                 if let Some(_) = cancel_comp {
-                    // Cancel: close menu
-                    save_state.active = false;
-                    if menu_state.return_to == Some(VnState::TitleScreen) {
+                    let origin = save_state.origin;
+                    save_state.close();
+                    if origin == SaveMenuOrigin::TitleScreen {
                         menu_state.return_to = None;
                         next_state.set(VnState::TitleScreen);
                     }
@@ -299,36 +322,63 @@ pub fn save_menu_interaction_system(
                                         slot_index, e
                                     ),
                                 }
-                                save_state.active = false;
+                                save_state.close();
                             }
-                            SaveMenuMode::Load => {
-                                match engine.0.load(&mgr, slot_index as u32) {
-                                    Ok(_) => {
-                                        info!("[save_menu] loaded slot {}", slot_index);
-                                        apply_loaded_game(
-                                            &mut engine,
-                                            &mut render_state,
-                                            &mut imagemap_state,
-                                            &mut tw_state,
-                                            &mut history,
-                                            &mut vn_events,
-                                        );
-                                        menu_state.return_to = None;
-                                        next_state.set(VnState::Waiting);
-                                    }
-                                    Err(e) => error!(
-                                        "[save_menu] error loading slot {}: {}",
-                                        slot_index, e
-                                    ),
+                            SaveMenuMode::Load => match engine.0.load(&mgr, slot_index as u32) {
+                                Ok(_) => {
+                                    info!("[save_menu] loaded slot {}", slot_index);
+                                    apply_loaded_game(
+                                        &mut engine,
+                                        &mut render_state,
+                                        &mut imagemap_state,
+                                        &mut tw_state,
+                                        &mut history,
+                                        &mut vn_events,
+                                    );
+                                    menu_state.return_to = None;
+                                    next_state.set(VnState::Waiting);
+                                    save_state.close();
                                 }
-                                save_state.active = false;
-                            }
+                                Err(e) => {
+                                    error!("[save_menu] error loading slot {}: {}", slot_index, e)
+                                }
+                            },
                         },
                         Err(e) => error!("[save_menu] failed to create SaveManager: {}", e),
                     }
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_records_mode_origin_and_active_flag() {
+        let mut state = SaveMenuState::default();
+
+        state.open(SaveMenuMode::Load, SaveMenuOrigin::TitleScreen);
+
+        assert!(state.active);
+        assert_eq!(state.mode, SaveMenuMode::Load);
+        assert_eq!(state.origin, SaveMenuOrigin::TitleScreen);
+    }
+
+    #[test]
+    fn close_resets_to_ingame_origin() {
+        let mut state = SaveMenuState {
+            active: true,
+            mode: SaveMenuMode::Load,
+            origin: SaveMenuOrigin::TitleScreen,
+        };
+
+        state.close();
+
+        assert!(!state.active);
+        assert_eq!(state.origin, SaveMenuOrigin::InGame);
     }
 }
 

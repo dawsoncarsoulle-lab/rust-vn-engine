@@ -1,13 +1,8 @@
 use bevy::prelude::*;
-// SaveManager n'est plus utilisé ici ; le menu n'accède plus aux fichiers directement.
-use rvn_parser::Transition;
 
-use crate::resources::{
-    DialogueHistory, ImagemapState, MenuState, TypewriterState, VnEngine, VnRenderState, VnState,
-};
-use crate::systems::save_menu::{SaveMenuMode, SaveMenuState};
+use crate::resources::{MenuState, VnState};
+use crate::systems::save_menu::{SaveMenuMode, SaveMenuOrigin, SaveMenuState};
 use crate::systems::settings_menu::SettingsMenuState;
-use crate::vn_command::VnCommand;
 
 // ─── Composants locaux ───────────────────────────────────────────────────────
 
@@ -111,12 +106,6 @@ pub fn menu_interaction_system(
     >,
     mut next_state: ResMut<NextState<VnState>>,
     mut menu_state: ResMut<MenuState>,
-    mut engine: ResMut<VnEngine>,
-    mut render_state: ResMut<VnRenderState>,
-    mut imagemap_state: ResMut<ImagemapState>,
-    mut tw_state: ResMut<TypewriterState>,
-    mut history: ResMut<DialogueHistory>,
-    mut vn_events: EventWriter<VnCommand>,
     mut exit: EventWriter<AppExit>,
     mut save_menu_state: ResMut<SaveMenuState>,
     mut settings_menu_state: ResMut<SettingsMenuState>,
@@ -141,20 +130,31 @@ pub fn menu_interaction_system(
 
                 match button {
                     MenuButton::Resume => {
+                        if menu_state.return_to == Some(VnState::TitleScreen) {
+                            menu_state.return_to = None;
+                            next_state.set(VnState::TitleScreen);
+                            return;
+                        }
                         let ret = menu_state.return_to.take().unwrap_or(VnState::Waiting);
                         next_state.set(ret);
                     }
 
                     MenuButton::Save => {
+                        if menu_state.return_to == Some(VnState::TitleScreen) {
+                            warn!("[menu] save ignored outside an active game session");
+                            return;
+                        }
                         // Open save menu overlay in Save mode
-                        save_menu_state.mode = SaveMenuMode::Save;
-                        save_menu_state.active = true;
+                        save_menu_state.open(SaveMenuMode::Save, SaveMenuOrigin::InGame);
                     }
 
                     MenuButton::Load => {
+                        if menu_state.return_to == Some(VnState::TitleScreen) {
+                            warn!("[menu] load ignored outside an active game session");
+                            return;
+                        }
                         // Open save menu overlay in Load mode
-                        save_menu_state.mode = SaveMenuMode::Load;
-                        save_menu_state.active = true;
+                        save_menu_state.open(SaveMenuMode::Load, SaveMenuOrigin::InGame);
                     }
 
                     MenuButton::Settings => {

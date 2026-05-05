@@ -7,7 +7,9 @@ use crate::resources::{
     TitleAnchor, TitleBackgroundMode, TitleButtonAlign, TitleButtonStyle, TitleScreenTheme,
     TypewriterState, VnEngine, VnRenderState, VnState,
 };
-use crate::systems::save_menu::{apply_loaded_game, SaveMenuMode, SaveMenuState, MAX_SLOTS};
+use crate::systems::save_menu::{
+    apply_loaded_game, SaveMenuMode, SaveMenuOrigin, SaveMenuState, MAX_SLOTS,
+};
 use crate::systems::settings_menu::SettingsMenuState;
 use crate::vn_command::VnCommand;
 
@@ -680,8 +682,7 @@ pub fn title_interaction_system(
 
                     TitleButton::LoadGame => {
                         menu_state.return_to = Some(VnState::TitleScreen);
-                        save_menu_state.mode = SaveMenuMode::Load;
-                        save_menu_state.active = true;
+                        save_menu_state.open(SaveMenuMode::Load, SaveMenuOrigin::TitleScreen);
                         next_state.set(VnState::Menu);
                     }
 

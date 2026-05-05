@@ -9,7 +9,7 @@ use crate::resources::{
     ChoiceFocus, DialogueHistory, ImagemapState, MenuState, ScriptErrorMessage, TypewriterState,
     VnEngine, VnRenderState, VnState,
 };
-use crate::systems::save_menu::{apply_loaded_game, MAX_SLOTS};
+use crate::systems::save_menu::{apply_loaded_game, SaveMenuState, MAX_SLOTS};
 use crate::systems::typewriter::apply_visible_sections;
 use crate::vn_command::{PlayerInput, VnCommand};
 use rvn_core::error::ScriptError;
@@ -187,6 +187,7 @@ pub fn player_input_system(
     mut next_state: ResMut<NextState<VnState>>,
     current_state: Res<State<VnState>>,
     mut menu_state: ResMut<MenuState>,
+    save_menu_state: Res<SaveMenuState>,
     mut render_state: ResMut<VnRenderState>,
     mut imagemap_state: ResMut<ImagemapState>,
     mut tw_state: ResMut<TypewriterState>,
@@ -266,6 +267,9 @@ pub fn player_input_system(
             }
 
             PlayerInput::ToggleMenu => {
+                if save_menu_state.active {
+                    return;
+                }
                 let state = current_state.get();
                 if *state == VnState::Menu {
                     let ret = menu_state.return_to.take().unwrap_or(VnState::Waiting);
