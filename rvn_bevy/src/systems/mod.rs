@@ -1,7 +1,6 @@
 // rvn_bevy/src/systems/mod.rs
 //
-// Point d'entrée unique : re-exporte tous les systèmes publics des sous-modules.
-// main.rs importe depuis `crate::systems::*` — rien ne change côté appelant.
+// Point d'entrée unique pour les systèmes utilisés par le plugin Bevy.
 
 pub mod audio;
 pub mod background;
@@ -24,17 +23,13 @@ pub mod theme;
 pub mod title;
 pub mod typewriter;
 
-// Module pour le menu des paramètres.  Permet d'ajuster volume, vitesse du texte,
-// activer/désactiver typewriter et plein écran, et la vitesse du mode auto.
+// Menu des paramètres : volume, vitesse du texte, typewriter, langue et plein écran.
 pub mod settings_menu;
 
-// Module pour le menu de sauvegarde/chargement.  Gère l'overlay listant
-// plusieurs emplacements de sauvegarde et permet à l'utilisateur de choisir
-// un slot pour sauvegarder ou charger.
+// Menu de sauvegarde/chargement avec slots.
 pub mod save_menu;
 
-// Nouveau module pour l'overlay de debug. Permet d'afficher en jeu le PC,
-// le statement courant et les variables de l'état. Voir debug_overlay.rs.
+// Overlay de debug : PC, statement courant et variables runtime.
 pub mod debug_overlay;
 
 use crate::components::FadeAnim;
@@ -116,25 +111,17 @@ pub use title::{
 };
 pub use typewriter::{typewriter_config_system, typewriter_system};
 
-// Réexporte les composants et systèmes du menu de sauvegarde afin que
-// `lib.rs` puisse les importer facilement.
 pub use save_menu::{
     despawn_save_menu_overlay, save_menu_interaction_system, spawn_save_menu_overlay,
-    SaveMenuCancelButton, SaveMenuMode, SaveMenuOverlay, SaveMenuState, SaveSlotButton,
 };
 
-// Réexporte les ressources et systèmes du menu des paramètres.
 pub use settings_menu::{
     apply_settings_to_runtime_system, despawn_settings_menu_overlay,
     settings_menu_interaction_system, spawn_settings_menu_overlay,
-    update_settings_value_text_system, Settings, SettingsButton, SettingsMenuOverlay,
-    SettingsMenuState, SettingsValueText,
+    update_settings_value_text_system,
 };
 
-// Re-exporte les systèmes de l'overlay de debug afin que lib.rs puisse les
-// importer facilement.
 pub use debug_overlay::{
     debug_step_input_system, debug_toggle_system, spawn_or_despawn_debug_overlay_system,
-    update_debug_overlay_system, DebugOverlay, DebugOverlayState, DebugOverlayText,
-    DebugStepRequest,
+    update_debug_overlay_system, DebugOverlayState, DebugStepRequest,
 };

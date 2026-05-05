@@ -1,10 +1,3 @@
-// rvn_bevy/src/vn_command.rs
-//
-// CHANGEMENTS vs version précédente :
-//   - MusicPlay : le champ `transition` est restauré.
-//     Il était supprimé car non-implémenté — il l'est maintenant (crossfade).
-//   - MusicStop : reste unitaire (pas de fade-out demandé pour l'instant).
-
 use bevy::prelude::*;
 use rvn_parser::{AnimationParam, Position, Transition};
 
@@ -67,8 +60,6 @@ pub enum VnCommand {
     MusicPlay {
         file: String,
         transition: Transition,
-        #[allow(dead_code)]
-        previous: Option<String>,
     },
     MusicStop,
     MusicSetVolume {

@@ -1,10 +1,12 @@
 use bevy::audio::Volume;
 use bevy::prelude::*;
 
-use crate::components::{AudioFade, MusicMarker, SfxSource};
-use crate::resources::{
-    MusicAssetRegistry, MusicEntity, MusicPlaybackState, MusicVolume, PendingMusicPlayback,
-};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::components::MusicMarker;
+use crate::components::{AudioFade, SfxSource};
+#[cfg(target_arch = "wasm32")]
+use crate::resources::PendingMusicPlayback;
+use crate::resources::{MusicAssetRegistry, MusicEntity, MusicPlaybackState, MusicVolume};
 use crate::systems::settings_menu::Settings;
 use crate::vn_command::VnCommand;
 use rvn_parser::Transition;
@@ -70,7 +72,7 @@ pub fn audio_system(
     asset_server: Res<AssetServer>,
     mut vn_events: EventReader<VnCommand>,
     mut music_entity: ResMut<MusicEntity>,
-    mut music_playback: ResMut<MusicPlaybackState>,
+    mut _music_playback: ResMut<MusicPlaybackState>,
     music_registry: Res<MusicAssetRegistry>,
     music_volume: Res<MusicVolume>,
     settings: Res<Settings>,
@@ -89,24 +91,20 @@ pub fn audio_system(
 
     for cmd in cmds {
         match cmd {
-            VnCommand::MusicPlay {
-                file,
-                transition,
-                previous: _,
-            } => {
+            VnCommand::MusicPlay { file, transition } => {
                 let fade_ms = match &transition {
                     Transition::Fade { duration_ms } | Transition::Dissolve { duration_ms } => {
                         Some(*duration_ms)
                     }
                     Transition::None => None,
                 };
-                music_playback.last_request = Some(PendingMusicPlayback {
-                    file: file.clone(),
-                    fade_ms,
-                });
                 #[cfg(target_arch = "wasm32")]
                 {
-                    music_playback.web_music_replay_pending = true;
+                    _music_playback.last_request = Some(PendingMusicPlayback {
+                        file: file.clone(),
+                        fade_ms,
+                    });
+                    _music_playback.web_music_replay_pending = true;
                 }
                 spawn_music(
                     &mut commands,
@@ -125,10 +123,10 @@ pub fn audio_system(
                 }
                 #[cfg(target_arch = "wasm32")]
                 rvn_browser_music_stop();
-                music_playback.last_request = None;
                 #[cfg(target_arch = "wasm32")]
                 {
-                    music_playback.web_music_replay_pending = false;
+                    _music_playback.last_request = None;
+                    _music_playback.web_music_replay_pending = false;
                 }
                 info!("[music] stop");
             }

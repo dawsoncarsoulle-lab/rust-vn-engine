@@ -25,7 +25,7 @@ pub use types::{CinematicState, GameState, MusicState, SpriteState, TypewriterSt
 mod tests {
     use super::*;
     use rvn_parser::parse;
-    use rvn_parser::{Hotspot, Position, Statement, Transition, Value};
+    use rvn_parser::{Hotspot, Position, Transition, Value};
 
     // ── Mock Renderer ─────────────────────────────────────────────────────────
 

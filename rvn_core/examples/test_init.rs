@@ -54,7 +54,7 @@ fn main() {
     let parsed = parse(script).expect("Erreur de parsing");
     println!("✓ Script parsé : {} statements", parsed.len());
 
-    let mut engine = Engine::new(parsed, TerminalRenderer, 32).expect("Erreur d'initialisation");
+    let engine = Engine::new(parsed, TerminalRenderer, 32).expect("Erreur d'initialisation");
 
     // Vérifier que les variables init sont définies
     println!("\n=== Variables après init ===");

@@ -3,6 +3,8 @@
 
 # Runtime data
 /saves
+dist/
+dist-web/
 
 # OS
 .DS_Store

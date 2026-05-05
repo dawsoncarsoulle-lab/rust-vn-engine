@@ -119,11 +119,10 @@ impl Renderer for BevyRenderer {
         }
     }
 
-    fn music_play(&mut self, file: &str, transition: &Transition, previous: Option<&str>) {
+    fn music_play(&mut self, file: &str, transition: &Transition, _previous: Option<&str>) {
         self.pending.push(VnCommand::MusicPlay {
             file: file.to_string(),
             transition: transition.clone(),
-            previous: previous.map(str::to_string),
         });
     }
 
@@ -204,7 +203,6 @@ impl Renderer for BevyRenderer {
             self.pending.push(VnCommand::MusicPlay {
                 file: file.clone(),
                 transition: Transition::None,
-                previous: None,
             });
         }
     }

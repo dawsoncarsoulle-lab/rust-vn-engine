@@ -198,18 +198,20 @@ impl ImagemapState {
 #[derive(Resource, Default)]
 pub struct MusicEntity(pub Option<Entity>);
 
-#[allow(dead_code)]
+#[cfg(target_arch = "wasm32")]
 #[derive(Clone, Debug)]
 pub struct PendingMusicPlayback {
     pub file: String,
     pub fade_ms: Option<u32>,
 }
 
-#[allow(dead_code)]
 #[derive(Resource, Default)]
 pub struct MusicPlaybackState {
+    #[cfg(target_arch = "wasm32")]
     pub last_request: Option<PendingMusicPlayback>,
+    #[cfg(target_arch = "wasm32")]
     pub web_resume_attempts: u32,
+    #[cfg(target_arch = "wasm32")]
     pub web_music_replay_pending: bool,
 }
 
@@ -328,26 +330,13 @@ impl TypewriterState {
 // ─── Localisation ─────────────────────────────────────────────────────────────
 
 /// Configuration de localisation + timestamps pour le hot-reload.
-#[allow(dead_code)]
 #[derive(Resource)]
 pub struct LocaleConfig {
-    pub default_lang: String,
     pub available_langs: Vec<String>,
     /// Timestamp du dernier chargement du fichier de la langue courante.
     pub last_modified_current: std::time::SystemTime,
     /// Timestamp du dernier chargement du fichier de fallback.
     pub last_modified_default: std::time::SystemTime,
-}
-
-impl LocaleConfig {
-    pub fn new(default_lang: String, available_langs: Vec<String>) -> Self {
-        Self {
-            default_lang,
-            available_langs,
-            last_modified_current: std::time::SystemTime::UNIX_EPOCH,
-            last_modified_default: std::time::SystemTime::UNIX_EPOCH,
-        }
-    }
 }
 
 // ─── Thème ────────────────────────────────────────────────────────────────────

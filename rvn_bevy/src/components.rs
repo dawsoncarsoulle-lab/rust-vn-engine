@@ -41,13 +41,13 @@ pub struct CharacterNameText;
 #[derive(Component)]
 pub struct DialogueText;
 
-#[allow(dead_code)]
 #[derive(Component)]
 pub struct ChoiceButton(pub usize);
 
 #[derive(Component)]
 pub struct ChoiceContainer;
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Component)]
 pub struct MusicMarker;
 

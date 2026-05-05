@@ -2,11 +2,13 @@ use bevy::prelude::*;
 use rvn_core::save::SaveManager;
 
 use crate::project_paths::ProjectPaths;
+#[cfg(target_arch = "wasm32")]
+use crate::resources::PendingMusicPlayback;
 use crate::resources::{
     DialogueHistory, ImagemapState, MenuState, MusicAssetRegistry, MusicEntity, MusicPlaybackState,
-    MusicVolume, PendingMusicPlayback, PersistentDataResource, ProjectTitle, Theme, TitleAnchor,
-    TitleBackgroundMode, TitleButtonAlign, TitleButtonStyle, TitleScreenTheme, TypewriterState,
-    VnEngine, VnRenderState, VnState,
+    MusicVolume, PersistentDataResource, ProjectTitle, Theme, TitleAnchor, TitleBackgroundMode,
+    TitleButtonAlign, TitleButtonStyle, TitleScreenTheme, TypewriterState, VnEngine, VnRenderState,
+    VnState,
 };
 use crate::systems::audio::spawn_music;
 use crate::systems::save_menu::{
@@ -475,7 +477,7 @@ fn play_title_music(
     asset_server: &AssetServer,
     project_paths: &ProjectPaths,
     music_entity: &mut MusicEntity,
-    music_playback: &mut MusicPlaybackState,
+    _music_playback: &mut MusicPlaybackState,
     music_registry: &MusicAssetRegistry,
     music_volume: &MusicVolume,
     music: Option<&str>,
@@ -493,13 +495,13 @@ fn play_title_music(
         );
         return;
     }
-    music_playback.last_request = Some(PendingMusicPlayback {
-        file: music.to_string(),
-        fade_ms: None,
-    });
     #[cfg(target_arch = "wasm32")]
     {
-        music_playback.web_music_replay_pending = true;
+        _music_playback.last_request = Some(PendingMusicPlayback {
+            file: music.to_string(),
+            fade_ms: None,
+        });
+        _music_playback.web_music_replay_pending = true;
     }
     spawn_music(
         commands,
