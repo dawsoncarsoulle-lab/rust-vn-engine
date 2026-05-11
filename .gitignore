@@ -11,7 +11,6 @@ dist-web/
 Thumbs.db
 
 #other
-.images
 
 rvn_lsp
 tree-sitter-rvn
