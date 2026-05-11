@@ -9,3 +9,10 @@ dist-web/
 # OS
 .DS_Store
 Thumbs.db
+
+#other
+.images
+
+rvn_lsp
+tree-sitter-rvn
+rvn-zed-extension

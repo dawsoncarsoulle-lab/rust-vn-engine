@@ -1,0 +1,16 @@
+[package]
+name = "rvn_lsp"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+tokio = { version = "1.37", features = ["full"] }
+tower-lsp = "0.20"
+url = "2.5"
+walkdir = "2.5"
+rvn_parser = { path = "../rvn_parser" }
+
+[[bin]]
+name = "rvn-lsp"
+path = "src/main.rs"

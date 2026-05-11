@@ -32,8 +32,27 @@ pub struct Diagnostic {
     pub source_line: Option<String>,
     pub kind: &'static str,
     pub message: String,
+    pub primary_label: Option<String>,
     pub suggestion: Option<String>,
+    pub code_suggestion: Option<CodeSuggestion>,
     pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeSuggestion {
+    pub help: String,
+    pub kind: SuggestionKind,
+    pub line: usize,
+    pub column: usize,
+    pub span_len: usize,
+    pub source_line: String,
+    pub replacement: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SuggestionKind {
+    Insertion,
+    Replacement,
 }
 
 impl Diagnostic {
@@ -47,7 +66,9 @@ impl Diagnostic {
             source_line: None,
             kind,
             message: message.into(),
+            primary_label: None,
             suggestion: None,
+            code_suggestion: None,
             notes: Vec::new(),
         }
     }
@@ -62,7 +83,9 @@ impl Diagnostic {
             source_line: None,
             kind,
             message: message.into(),
+            primary_label: None,
             suggestion: None,
+            code_suggestion: None,
             notes: Vec::new(),
         }
     }
@@ -83,14 +106,19 @@ impl Diagnostic {
         self
     }
 
-    fn with_source_line(mut self, source_line: impl Into<String>, span_len: usize) -> Self {
-        self.source_line = Some(source_line.into());
-        self.span_len = Some(span_len.max(1));
+    fn label(mut self, label: impl Into<String>) -> Self {
+        self.primary_label = Some(label.into());
         self
     }
 
-    fn note(mut self, note: impl Into<String>) -> Self {
-        self.notes.push(note.into());
+    fn code_suggestion(mut self, suggestion: CodeSuggestion) -> Self {
+        self.code_suggestion = Some(suggestion);
+        self
+    }
+
+    fn with_source_line(mut self, source_line: impl Into<String>, span_len: usize) -> Self {
+        self.source_line = Some(source_line.into());
+        self.span_len = Some(span_len.max(1));
         self
     }
 }
@@ -122,16 +150,77 @@ impl fmt::Display for Diagnostic {
             let carets = "^".repeat(self.span_len.unwrap_or(1).max(1));
             writeln!(f, "{pad} |")?;
             writeln!(f, "{line_no} | {source_line}")?;
-            writeln!(f, "{pad} | {}{carets}", " ".repeat(col0))?;
+            write!(f, "{pad} | {}{carets}", " ".repeat(col0))?;
+            if let Some(label) = &self.primary_label {
+                write!(f, " {label}")?;
+            }
+            writeln!(f)?;
         }
         for note in &self.notes {
             writeln!(f, "  = {note}")?;
+        }
+        if let Some(suggestion) = &self.code_suggestion {
+            render_code_suggestion(f, suggestion)?;
         }
         if let Some(suggestion) = &self.suggestion {
             writeln!(f, "  = suggestion: {suggestion}")?;
         }
         Ok(())
     }
+}
+
+fn render_code_suggestion(f: &mut fmt::Formatter<'_>, suggestion: &CodeSuggestion) -> fmt::Result {
+    let corrected = corrected_source_line(suggestion);
+    let line_no = suggestion.line.to_string();
+    let gutter = line_no.len();
+    let pad = " ".repeat(gutter);
+    let col0 = suggestion.column.saturating_sub(1);
+    let marker_char = match suggestion.kind {
+        SuggestionKind::Insertion => '+',
+        SuggestionKind::Replacement => '~',
+    };
+    let marker_len = match suggestion.kind {
+        SuggestionKind::Insertion => suggestion.replacement.trim_end().chars().count().max(1),
+        SuggestionKind::Replacement => suggestion
+            .replacement
+            .chars()
+            .count()
+            .max(suggestion.span_len)
+            .max(1),
+    };
+    writeln!(f, "help: {}", suggestion.help)?;
+    writeln!(f, "{pad} |")?;
+    writeln!(f, "{line_no} | {corrected}")?;
+    writeln!(
+        f,
+        "{pad} | {}{}",
+        " ".repeat(col0),
+        marker_char.to_string().repeat(marker_len)
+    )?;
+    Ok(())
+}
+
+fn corrected_source_line(suggestion: &CodeSuggestion) -> String {
+    let start = char_to_byte_index(&suggestion.source_line, suggestion.column.saturating_sub(1));
+    let end = match suggestion.kind {
+        SuggestionKind::Insertion => start,
+        SuggestionKind::Replacement => char_to_byte_index(
+            &suggestion.source_line,
+            suggestion.column.saturating_sub(1) + suggestion.span_len,
+        ),
+    };
+    let mut corrected = String::new();
+    corrected.push_str(&suggestion.source_line[..start]);
+    corrected.push_str(&suggestion.replacement);
+    corrected.push_str(&suggestion.source_line[end..]);
+    corrected
+}
+
+fn char_to_byte_index(text: &str, char_index: usize) -> usize {
+    text.char_indices()
+        .nth(char_index)
+        .map(|(idx, _)| idx)
+        .unwrap_or(text.len())
 }
 
 #[derive(Debug)]
@@ -431,12 +520,21 @@ fn parser_diagnostic(path: &Path, error: &ParseError) -> Option<Diagnostic> {
         span_len: Some(error.location.len),
     };
     let diag = match &error.kind {
-        ParseErrorKind::InvalidAssignment { suggestion, .. } => {
-            Diagnostic::error("invalid-assignment", "affectation invalide")
-                .at(Some(loc))
+        ParseErrorKind::InvalidAssignment { .. } => {
+            let code_suggestion = CodeSuggestion {
+                help: "prefix the assignment with `set`".to_string(),
+                kind: SuggestionKind::Insertion,
+                line: loc.line,
+                column: loc.column,
+                span_len: 0,
+                source_line: error.source_line.clone(),
+                replacement: "set ".to_string(),
+            };
+            Diagnostic::error("invalid-assignment", "invalid assignment")
+                .at(Some(loc.clone()))
                 .with_source_line(error.source_line.clone(), error.location.len)
-                .note("en RVN, les variables s'assignent avec `set`")
-                .suggest(format!("`{suggestion}`"))
+                .label("variables must be assigned with `set`")
+                .code_suggestion(code_suggestion)
         }
         ParseErrorKind::UnexpectedToken { got, expected } => Diagnostic::error(
             "parse",
@@ -674,15 +772,24 @@ fn validate_symbols(
             let mut diag = Diagnostic::error(
                 "unknown-label-target",
                 match *kind {
-                    "jump" => "label introuvable".to_string(),
-                    "call" => "label appelé introuvable".to_string(),
+                    "jump" => format!("unknown jump target `{target}`"),
+                    "call" => format!("unknown call target `{target}`"),
                     _ => format!("cible de {kind} introuvable"),
                 },
             )
             .at(Some(loc.clone()))
-            .note(format!("le label `{target}` n'existe pas dans le projet"));
+            .label("unknown label target");
             if let Some(suggestion) = nearest(target, symbols.labels.keys()) {
-                diag = diag.suggest(format!("voulez-vous dire `{suggestion}` ?"));
+                if let Some(code_suggestion) = replacement_code_suggestion(
+                    loc,
+                    target,
+                    &suggestion,
+                    "a similarly named label exists",
+                ) {
+                    diag = diag.code_suggestion(code_suggestion);
+                } else {
+                    diag = diag.suggest(format!("use `{suggestion}`"));
+                }
             }
             diagnostics.push(diag);
         }
@@ -690,16 +797,29 @@ fn validate_symbols(
 
     for (id, loc) in &symbols.used_characters {
         if !symbols.declared_characters.contains_key(id) {
-            diagnostics.push(
-                Diagnostic::error(
-                    "undefined-character",
-                    format!("undefined character id '{id}'"),
-                )
-                .at(Some(loc.clone()))
-                .suggest(format!(
+            let mut diag = Diagnostic::error(
+                "undefined-character",
+                format!("undefined character id `{id}`"),
+            )
+            .at(Some(loc.clone()))
+            .label("undefined character id");
+            if let Some(suggestion) = nearest(id, symbols.declared_characters.keys()) {
+                if let Some(code_suggestion) = replacement_code_suggestion(
+                    loc,
+                    id,
+                    &suggestion,
+                    "a similarly named character exists",
+                ) {
+                    diag = diag.code_suggestion(code_suggestion);
+                } else {
+                    diag = diag.suggest(format!("use `{suggestion}`"));
+                }
+            } else {
+                diag = diag.suggest(format!(
                     "declare it in init with `character.create(\"{id}\", \"Display Name\")`"
-                )),
-            );
+                ));
+            }
+            diagnostics.push(diag);
         }
     }
     for (id, loc) in &symbols.declared_characters {
@@ -2015,6 +2135,28 @@ fn find_location(path: &Path, source: &str, needle: &str) -> Option<Location> {
     })
 }
 
+fn replacement_code_suggestion(
+    loc: &Location,
+    old_text: &str,
+    replacement: &str,
+    help: &str,
+) -> Option<CodeSuggestion> {
+    let source_line = loc.source_line.clone()?;
+    let column = source_line
+        .find(old_text)
+        .map(|byte| source_line[..byte].chars().count() + 1)
+        .unwrap_or(loc.column);
+    Some(CodeSuggestion {
+        help: help.to_string(),
+        kind: SuggestionKind::Replacement,
+        line: loc.line,
+        column,
+        span_len: old_text.chars().count().max(1),
+        source_line,
+        replacement: replacement.to_string(),
+    })
+}
+
 fn nearest<'a>(target: &str, candidates: impl Iterator<Item = &'a String>) -> Option<String> {
     candidates
         .map(|candidate| (levenshtein(target, candidate), candidate))
@@ -2135,7 +2277,41 @@ mod tests {
             .iter()
             .find(|d| d.kind == "invalid-assignment")
             .unwrap();
-        assert_eq!(assignment.suggestion.as_deref(), Some("`set varible = 5`"));
+        assert!(assignment.suggestion.is_none());
+        let rendered = assignment.to_string();
+        assert!(rendered.contains("help: prefix the assignment with `set`"));
+        assert!(rendered.contains("set varible = 5"));
+        assert!(rendered.contains("+++"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn renders_structured_replacement_suggestions() {
+        let root = fixture(
+            "init { character.create(\"eileen\", \"Eileen\") }\nlabel start\n    eiileen \"Bonjour\"\n    jump strat\n",
+        );
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+
+        let label = report
+            .diagnostics
+            .iter()
+            .find(|d| d.kind == "unknown-label-target")
+            .unwrap()
+            .to_string();
+        assert!(label.contains("help: a similarly named label exists"));
+        assert!(label.contains("jump start"));
+        assert!(label.contains("~~~~~"));
+
+        let character = report
+            .diagnostics
+            .iter()
+            .find(|d| d.kind == "undefined-character")
+            .unwrap()
+            .to_string();
+        assert!(character.contains("help: a similarly named character exists"));
+        assert!(character.contains("eileen \"Bonjour\""));
+        assert!(character.contains("~~~~~~"));
+
         let _ = fs::remove_dir_all(root);
     }
 

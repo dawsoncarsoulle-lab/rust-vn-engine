@@ -4,6 +4,7 @@ members = [
     "rvn_core",
     "rvn_bevy",
     "rvn_cli",
+    "rvn_lsp",
 ]
 resolver = "2"
 

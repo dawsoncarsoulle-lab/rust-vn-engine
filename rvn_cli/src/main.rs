@@ -160,17 +160,86 @@ fn print_project_diagnostics(project: &str, diagnostics: &[check::Diagnostic], u
 }
 
 fn print_colored_diagnostic(rendered: &str) {
-    for line in rendered.lines() {
+    let lines: Vec<_> = rendered.lines().collect();
+    let mut index = 0;
+    while index < lines.len() {
+        let line = lines[index];
         if line.starts_with("error[") {
             eprintln!("{}", line.red());
         } else if line.starts_with("warning[") {
             eprintln!("{}", line.yellow());
+        } else if line.starts_with("help:") {
+            if let Some(rest) = line.strip_prefix("help:") {
+                eprintln!("{}{}", "help:".cyan(), rest);
+            } else {
+                eprintln!("{}", line.cyan());
+            }
+        } else if index + 1 < lines.len() && is_suggestion_marker_line(lines[index + 1]) {
+            eprintln!("{}", color_suggested_code_line(line, lines[index + 1]));
+            eprintln!("{}", color_suggestion_marker_line(lines[index + 1]));
+            index += 1;
         } else if line.starts_with("  = ") {
             eprintln!("{}", line.cyan());
         } else {
             eprintln!("{line}");
         }
+        index += 1;
     }
+}
+
+fn is_suggestion_marker_line(line: &str) -> bool {
+    let Some((_, body)) = line.split_once('|') else {
+        return false;
+    };
+    let trimmed = body.trim_start();
+    !trimmed.is_empty() && trimmed.chars().all(|ch| ch == '+' || ch == '~')
+}
+
+fn color_suggested_code_line(code_line: &str, marker_line: &str) -> String {
+    let Some((marker_start, marker_len)) = marker_span(marker_line) else {
+        return code_line.to_string();
+    };
+    color_line_body_span(code_line, marker_start, marker_len, true)
+}
+
+fn color_suggestion_marker_line(marker_line: &str) -> String {
+    let Some((marker_start, marker_len)) = marker_span(marker_line) else {
+        return marker_line.to_string();
+    };
+    color_line_body_span(marker_line, marker_start, marker_len, false)
+}
+
+fn marker_span(marker_line: &str) -> Option<(usize, usize)> {
+    let (_, body) = marker_line.split_once('|')?;
+    let start = body.chars().position(|ch| ch == '+' || ch == '~')?;
+    let len = body
+        .chars()
+        .skip(start)
+        .take_while(|ch| *ch == '+' || *ch == '~')
+        .count();
+    Some((start, len))
+}
+
+fn color_line_body_span(line: &str, start: usize, len: usize, clamp_to_word: bool) -> String {
+    let Some((gutter, body)) = line.split_once('|') else {
+        return line.to_string();
+    };
+    let mut end = start + len;
+    let body_len = body.chars().count();
+    if clamp_to_word {
+        end = end.min(body_len);
+    }
+    let before = take_chars(body, 0, start);
+    let highlighted = take_chars(body, start, end);
+    let after = take_chars(body, end, body_len);
+    format!("{gutter}|{before}{}{after}", highlighted.green())
+}
+
+fn take_chars(text: &str, start: usize, end: usize) -> String {
+    text.chars()
+        .skip(start)
+        .take(end.saturating_sub(start))
+        .collect()
 }
 
 fn print_success(message: &str, use_color: bool) {
