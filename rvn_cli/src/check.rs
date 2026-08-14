@@ -2430,7 +2430,16 @@ mod tests {
             .iter()
             .find(|d| d.kind == "undefined-character")
             .unwrap();
-        assert!(diag.suggestion.is_none());
+        // No fuzzy match → the suggestion is the "declare it" hint, not "use <name>".
+        let suggestion = diag.suggestion.as_deref().unwrap_or("");
+        assert!(
+            !suggestion.starts_with("use `"),
+            "unexpected fuzzy suggestion: {suggestion}"
+        );
+        assert!(
+            suggestion.contains("declare"),
+            "expected declare hint, got: {suggestion}"
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -2479,8 +2488,9 @@ mod tests {
 
     #[test]
     fn reports_empty_imagemap() {
-        let root =
-            fixture("label start\n    imagemap \"backgrounds/map.png\" {\n    }\n    return\n");
+        let root = fixture(
+            "label start\n    imagemap { background: \"backgrounds/map.png\" }\n    return\n",
+        );
         let report = check_project(root.to_str().unwrap(), CheckOptions::default());
         assert!(kinds(&report).contains(&"empty-imagemap"));
         let _ = fs::remove_dir_all(root);
@@ -2490,7 +2500,7 @@ mod tests {
 
     #[test]
     fn reports_imagemap_overlap() {
-        let script = "label start\n    imagemap \"backgrounds/map.png\" {\n        hotspot { area: (0,0,100,100) => { return } }\n        hotspot { area: (50,50,100,100) => { return } }\n    }\n    return\n";
+        let script = "label start\n    imagemap {\n        background: \"backgrounds/map.png\"\n        hotspot { area: (0,0,100,100) => { return } }\n        hotspot { area: (50,50,100,100) => { return } }\n    }\n    return\n";
         let root = fixture(script);
         let report = check_project(root.to_str().unwrap(), CheckOptions::default());
         assert!(kinds(&report).contains(&"imagemap-overlap"));
