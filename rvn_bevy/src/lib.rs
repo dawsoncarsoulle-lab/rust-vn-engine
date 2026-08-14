@@ -1,6 +1,10 @@
 // Bevy systems routinely exceed clippy's defaults for argument count and
 // query type complexity; these are idiomatic for the ECS pattern.
-#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+#![allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::clone_on_copy
+)]
 //! Library interface for the RVN Bevy runtime.
 //!
 //! This module exposes a single function, [`run_game`], which launches a
