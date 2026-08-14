@@ -711,12 +711,12 @@ impl TitleLogoSource {
 impl Default for TitleButtonLabels {
     fn default() -> Self {
         Self {
-            continue_label: None,
-            new_game: None,
-            load: None,
-            gallery: None,
-            settings: None,
-            quit: None,
+            continue_label: Default::default(),
+            new_game: Default::default(),
+            load: Default::default(),
+            gallery: Default::default(),
+            settings: Default::default(),
+            quit: Default::default(),
         }
     }
 }

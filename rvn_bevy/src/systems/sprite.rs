@@ -205,7 +205,7 @@ pub fn sprite_system(
                 for (entity, sprite) in queries.p0().iter() {
                     if sprite.id == id {
                         found = true;
-                        commands.entity(entity).insert((transform.clone(), base));
+                        commands.entity(entity).insert((*transform, base));
                         commands.entity(entity).remove::<SpriteAnimation>();
                     }
                 }

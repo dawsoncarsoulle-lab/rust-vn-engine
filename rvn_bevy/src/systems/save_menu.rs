@@ -193,7 +193,7 @@ pub fn spawn_save_menu_overlay(
                 let timestamp_text: String;
                 if let Some(meta) = meta_opt {
                     label_text = meta.label.clone();
-                    let ts = UNIX_EPOCH + Duration::from_secs(meta.timestamp as u64);
+                    let ts = UNIX_EPOCH + Duration::from_secs(meta.timestamp);
                     let datetime: DateTime<Local> = ts.into();
                     timestamp_text = datetime.format("%d/%m/%Y %H:%M").to_string();
                 } else {
@@ -308,7 +308,7 @@ pub fn save_menu_interaction_system(
             }
             Interaction::Pressed => {
                 *bg_color = Color::srgba(0.30, 0.30, 0.50, 0.95).into();
-                if let Some(_) = cancel_comp {
+                if cancel_comp.is_some() {
                     let origin = save_state.origin;
                     save_state.close();
                     if origin == SaveMenuOrigin::TitleScreen {
