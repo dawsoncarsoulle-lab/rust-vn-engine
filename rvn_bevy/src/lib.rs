@@ -1,3 +1,10 @@
+// Bevy systems routinely exceed clippy's defaults for argument count and
+// query type complexity; these are idiomatic for the ECS pattern.
+#![allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::clone_on_copy
+)]
 //! Library interface for the RVN Bevy runtime.
 //!
 //! This module exposes a single function, [`run_game`], which launches a
@@ -867,6 +874,7 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
 }
 
+#[allow(clippy::field_reassign_with_default)]
 fn settings_from_persistent(data: &PersistentData, current_lang: &str) -> Settings {
     let mut settings = Settings::default();
     settings.language = current_lang.to_string();

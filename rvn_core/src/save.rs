@@ -650,8 +650,8 @@ mod tests {
         assert_eq!(restored.call_stack, state.call_stack);
         assert_eq!(restored.vars, state.vars);
         assert_eq!(restored.sprites["sarah"].position, Position::Left);
-        assert_eq!(restored.sprites["sarah"].visible, true);
-        assert_eq!(restored.sprites["marc"].visible, false);
+        assert!(restored.sprites["sarah"].visible);
+        assert!(!restored.sprites["marc"].visible);
     }
 
     #[test]

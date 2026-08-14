@@ -1,8 +1,9 @@
-# Rust build
-/target
+# Rust
+build/
+target/
 
 # Runtime data
-/saves
+saves/
 dist/
 dist-web/
 
@@ -10,8 +11,5 @@ dist-web/
 .DS_Store
 Thumbs.db
 
-#other
-
-rvn_lsp
-tree-sitter-rvn
-rvn-zed-extension
+# External grammar sources pulled in for development
+tree-sitter-rvn/

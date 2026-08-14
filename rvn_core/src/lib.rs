@@ -11,12 +11,12 @@ pub mod types;
 
 pub use engine::{Engine, Interaction};
 pub use error::RuntimeError;
-pub use eval::{EvalError, eval_bool, eval_expr, eval_interpolated};
-pub use locale::{LocaleManager, collect_strings_from_flat_script, collect_strings_from_script};
+pub use eval::{eval_bool, eval_expr, eval_interpolated, EvalError};
+pub use locale::{collect_strings_from_flat_script, collect_strings_from_script, LocaleManager};
 pub use persistent::{PersistentData, PersistentDataError, PersistentDataManager};
 pub use renderer::{Renderer, TerminalRenderer};
 pub use rollback::{HistoryDisplay, RollbackHistory};
-pub use text_tags::{RichText, RichTextSegment, TextTagError, parse_text_tags};
+pub use text_tags::{parse_text_tags, RichText, RichTextSegment, TextTagError};
 pub use types::{CinematicState, GameState, MusicState, SpriteState, TypewriterState};
 
 // ─── TESTS ───────────────────────────────────────────────────────────────────
@@ -202,12 +202,11 @@ mod tests {
         "#;
         let mut e = engine(src);
         step(&mut e);
-        assert!(
-            e.renderer
-                .events
-                .iter()
-                .any(|s| s.contains("pas encore fait"))
-        );
+        assert!(e
+            .renderer
+            .events
+            .iter()
+            .any(|s| s.contains("pas encore fait")));
     }
 
     #[test]
@@ -324,12 +323,11 @@ mod tests {
         let mut e = engine(src);
         assert_eq!(e.get_var("score"), Some(&Value::Int(100)));
         step(&mut e);
-        assert!(
-            e.renderer
-                .events
-                .iter()
-                .any(|s| s.contains("Le score est 100."))
-        );
+        assert!(e
+            .renderer
+            .events
+            .iter()
+            .any(|s| s.contains("Le score est 100.")));
     }
 
     #[test]
@@ -373,17 +371,15 @@ mod tests {
         let mut e = engine(src);
         step(&mut e);
         step(&mut e);
-        assert!(
-            e.renderer
-                .events
-                .iter()
-                .any(|s| s == "animate:eileen:shake")
-        );
-        assert!(
-            e.renderer
-                .events
-                .iter()
-                .any(|s| s == "stop_animation:eileen")
-        );
+        assert!(e
+            .renderer
+            .events
+            .iter()
+            .any(|s| s == "animate:eileen:shake"));
+        assert!(e
+            .renderer
+            .events
+            .iter()
+            .any(|s| s == "stop_animation:eileen"));
     }
 }

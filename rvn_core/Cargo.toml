@@ -1,7 +1,7 @@
 [package]
 name = "rvn_core"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 rvn_parser = { path = "../rvn_parser" }

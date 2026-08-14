@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_arguments,
+    clippy::needless_borrow,
+    clippy::needless_borrows_for_generic_args
+)]
 use std::fs;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};

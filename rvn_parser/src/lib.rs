@@ -9,7 +9,7 @@ pub mod parser;
 pub use ast::*;
 pub use error::*;
 pub use expr::{BinOpKind, Expr, InterpolatedText, TextSegment};
-pub use parser::{RecoveredScript, parse, parse_interpolated_str, parse_recovering};
+pub use parser::{parse, parse_interpolated_str, parse_recovering, RecoveredScript};
 
 use std::collections::HashSet;
 use std::fs;
