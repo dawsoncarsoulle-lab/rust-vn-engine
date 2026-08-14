@@ -39,7 +39,10 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Clippy
+      - name: Clippy (core crates)
+        run: cargo clippy -p rvn_parser -p rvn_core -p rvn_lsp --all-targets -- -D warnings
+
+      - name: Clippy (full workspace)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Build workspace

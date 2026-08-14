@@ -603,7 +603,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let loc2 = self.current_location();
                 match self.advance().cloned() {
-                    Some(Token::Ident(m)) if m == "speed" => {
+                    Some(Token::Ident("speed")) => {
                         self.expect("(")?;
                         let loc3 = self.current_location();
                         let chars_per_sec = match self.advance().cloned() {
@@ -794,7 +794,7 @@ impl<'a> Parser<'a> {
                 let transition = self.try_parse_with_name()?;
                 Ok(Statement::CinematicShow { id, transition })
             }
-            Some(Token::Ident(s)) if s == "hide" => {
+            Some(Token::Ident("hide")) => {
                 let transition = self.try_parse_with_name()?;
                 Ok(Statement::CinematicHide { transition })
             }
@@ -1207,16 +1207,11 @@ impl<'a> Parser<'a> {
 
     fn parse_optional_args(&mut self) -> ParseResult<Vec<String>> {
         let mut args = Vec::new();
-        loop {
-            match self.peek() {
-                Some(Token::String(_)) => {
-                    let tok = self.advance().unwrap().clone();
-                    args.push(Self::unwrap_string(&tok).to_string());
-                    if matches!(self.peek(), Some(Token::Comma)) {
-                        self.advance();
-                    }
-                }
-                _ => break,
+        while let Some(Token::String(_)) = self.peek() {
+            let tok = self.advance().unwrap().clone();
+            args.push(Self::unwrap_string(&tok).to_string());
+            if matches!(self.peek(), Some(Token::Comma)) {
+                self.advance();
             }
         }
         Ok(args)

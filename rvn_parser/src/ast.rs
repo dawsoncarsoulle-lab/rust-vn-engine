@@ -83,14 +83,7 @@ impl std::fmt::Display for Value {
         match self {
             Value::Bool(b) => write!(f, "{b}"),
             Value::Int(n) => write!(f, "{n}"),
-            Value::Float(x) => {
-                // Affiche sans ".0" superflu pour les entiers flottants
-                if x.fract() == 0.0 {
-                    write!(f, "{x}")
-                } else {
-                    write!(f, "{x}")
-                }
-            }
+            Value::Float(x) => write!(f, "{x}"),
             Value::Str(s) => write!(f, "{s}"),
         }
     }

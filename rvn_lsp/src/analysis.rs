@@ -399,12 +399,15 @@ impl ProjectIndex {
                     uri: label.uri.clone(),
                     range: label.range,
                 });
-                locations.extend(self.label_refs.iter().filter_map(|reference| {
-                    (reference.name == symbol.name).then(|| Location {
-                        uri: reference.uri.clone(),
-                        range: reference.range,
-                    })
-                }));
+                locations.extend(
+                    self.label_refs
+                        .iter()
+                        .filter(|reference| reference.name == symbol.name)
+                        .map(|reference| Location {
+                            uri: reference.uri.clone(),
+                            range: reference.range,
+                        }),
+                );
             }
             RvnSymbolKind::Character => {
                 let Some(character) = self.characters.get(&symbol.name) else {
@@ -414,12 +417,15 @@ impl ProjectIndex {
                     uri: character.uri.clone(),
                     range: character.range,
                 });
-                locations.extend(self.character_uses.iter().filter_map(|character_use| {
-                    (character_use.name == symbol.name).then(|| Location {
-                        uri: character_use.uri.clone(),
-                        range: character_use.range,
-                    })
-                }));
+                locations.extend(
+                    self.character_uses
+                        .iter()
+                        .filter(|character_use| character_use.name == symbol.name)
+                        .map(|character_use| Location {
+                            uri: character_use.uri.clone(),
+                            range: character_use.range,
+                        }),
+                );
             }
         }
         locations.sort_by(|a, b| {
@@ -449,7 +455,7 @@ impl ProjectIndex {
                 .or_default()
                 .push(TextEdit::new(location.range, new_name.to_string()));
         }
-        (!changes.is_empty()).then(|| WorkspaceEdit {
+        (!changes.is_empty()).then_some(WorkspaceEdit {
             changes: Some(changes),
             document_changes: None,
             change_annotations: None,
@@ -1563,13 +1569,12 @@ fn nearest_symbol<'a>(needle: &str, candidates: impl Iterator<Item = &'a str>) -
     for candidate in candidates {
         let distance = levenshtein(needle, candidate);
         let max_len = needle.len().max(candidate.len()).max(1);
-        if distance <= 2 || distance * 3 <= max_len {
-            if best
+        if (distance <= 2 || distance * 3 <= max_len)
+            && best
                 .map(|(_, best_distance)| distance < best_distance)
                 .unwrap_or(true)
-            {
-                best = Some((candidate, distance));
-            }
+        {
+            best = Some((candidate, distance));
         }
     }
     best.map(|(candidate, _)| candidate.to_string())
