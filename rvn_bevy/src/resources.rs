@@ -571,7 +571,7 @@ pub struct TitleButtonStyle {
     pub text_color: String,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct TitleButtonLabels {
     #[serde(default, rename = "continue")]
     pub continue_label: Option<String>,
@@ -704,19 +704,6 @@ impl TitleLogoSource {
         match self {
             Self::Path(_) => default_logo_scale(),
             Self::Config(config) => config.scale.max(0.01),
-        }
-    }
-}
-
-impl Default for TitleButtonLabels {
-    fn default() -> Self {
-        Self {
-            continue_label: Default::default(),
-            new_game: Default::default(),
-            load: Default::default(),
-            gallery: Default::default(),
-            settings: Default::default(),
-            quit: Default::default(),
         }
     }
 }
