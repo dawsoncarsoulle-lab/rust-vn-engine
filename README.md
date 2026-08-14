@@ -239,10 +239,12 @@ RVN ships with production-ready implementations of the systems that visual novel
 
 ## Quick Start
 
-**Prerequisites:** [Rust](https://rustup.rs/) (stable) — that's it.
+**Prerequisites:** [Rust](https://rustup.rs/) (stable). On Linux you also need `pkg-config` and ALSA headers for audio support (e.g. `sudo apt install pkg-config libasound2-dev` on Debian/Ubuntu).
+
+RVN is not yet published to crates.io. Install from source:
 
 ```bash
-cargo install rvn_cli
+cargo install --path rvn_cli
 ```
 
 ```bash
@@ -281,7 +283,7 @@ python3 -m http.server --directory dist-web/my_project/
 ```bash
 cargo install --path rvn_lsp
 # Then configure your editor to use rvn-lsp for *.rvn files
-# Zed: install the rvn-zed-extension — rvn-lsp is auto-configured
+# Zed: install the rvn-zed-extension (shipped in this repo) — rvn-lsp is auto-configured
 ```
 
 ---
