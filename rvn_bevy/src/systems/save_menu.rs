@@ -382,6 +382,20 @@ pub fn save_menu_interaction_system(
     }
 }
 
+/// Despawn the save menu overlay when it is no longer active.
+pub fn despawn_save_menu_overlay(
+    mut commands: Commands,
+    save_state: Res<SaveMenuState>,
+    overlay_query: Query<Entity, With<SaveMenuOverlay>>,
+) {
+    if save_state.active {
+        return;
+    }
+    for entity in overlay_query.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -409,19 +423,5 @@ mod tests {
 
         assert!(!state.active);
         assert_eq!(state.origin, SaveMenuOrigin::InGame);
-    }
-}
-
-/// Despawn the save menu overlay when it is no longer active.
-pub fn despawn_save_menu_overlay(
-    mut commands: Commands,
-    save_state: Res<SaveMenuState>,
-    overlay_query: Query<Entity, With<SaveMenuOverlay>>,
-) {
-    if save_state.active {
-        return;
-    }
-    for entity in overlay_query.iter() {
-        commands.entity(entity).despawn_recursive();
     }
 }
