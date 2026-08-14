@@ -2395,7 +2395,7 @@ mod tests {
     #[test]
     fn reports_unused_locale_key() {
         let root = fixture("label start\n    \"Hello world\"\n    return\n");
-        write_locale(&root, "en.toml", "\"Stale key\" = \"...\"\n");
+        write_locale(&root, "en.toml", "[strings]\n\"Stale key\" = \"...\"\n");
         let report = check_project(root.to_str().unwrap(), CheckOptions::default());
         assert!(kinds(&report).contains(&"unused-locale-key"));
         let _ = fs::remove_dir_all(root);
@@ -2404,7 +2404,11 @@ mod tests {
     #[test]
     fn no_locale_diagnostics_when_covered() {
         let root = fixture("label start\n    \"Hello world\"\n    return\n");
-        write_locale(&root, "en.toml", "\"Hello world\" = \"Bonjour\"\n");
+        write_locale(
+            &root,
+            "en.toml",
+            "[strings]\n\"Hello world\" = \"Bonjour\"\n",
+        );
         let report = check_project(root.to_str().unwrap(), CheckOptions::default());
         assert!(!kinds(&report).contains(&"missing-locale-key"));
         assert!(!kinds(&report).contains(&"unused-locale-key"));
@@ -2415,7 +2419,11 @@ mod tests {
 
     #[test]
     fn reports_undefined_character_without_suggestion() {
-        let root = fixture("label start\n    ghost \"Boo\"\n    return\n");
+        // Declare a character so the parser treats unknown ids as character refs.
+        // "zzzzzzz" has no nearby declared character, so no fuzzy suggestion.
+        let root = fixture(
+            "init { character.create(\"eileen\", \"Eileen\") }\nlabel start\n    zzzzzzz \"Boo\"\n    return\n",
+        );
         let report = check_project(root.to_str().unwrap(), CheckOptions::default());
         let diag = report
             .diagnostics
@@ -2471,7 +2479,8 @@ mod tests {
 
     #[test]
     fn reports_empty_imagemap() {
-        let root = fixture("label start\n    imagemap \"backgrounds/map.png\" { }\n    return\n");
+        let root =
+            fixture("label start\n    imagemap \"backgrounds/map.png\" {\n    }\n    return\n");
         let report = check_project(root.to_str().unwrap(), CheckOptions::default());
         assert!(kinds(&report).contains(&"empty-imagemap"));
         let _ = fs::remove_dir_all(root);
@@ -2481,7 +2490,7 @@ mod tests {
 
     #[test]
     fn reports_imagemap_overlap() {
-        let script = "label start\n    imagemap \"backgrounds/map.png\" {\n        hotspot (0,0,100,100) { return }\n        hotspot (50,50,100,100) { return }\n    }\n    return\n";
+        let script = "label start\n    imagemap \"backgrounds/map.png\" {\n        hotspot { area: (0,0,100,100) => { return } }\n        hotspot { area: (50,50,100,100) => { return } }\n    }\n    return\n";
         let root = fixture(script);
         let report = check_project(root.to_str().unwrap(), CheckOptions::default());
         assert!(kinds(&report).contains(&"imagemap-overlap"));
@@ -2492,8 +2501,11 @@ mod tests {
 
     #[test]
     fn reports_missing_project_dir() {
-        let report = check_project("/nonexistent/rvn/path/xyz", CheckOptions::default());
+        let root = fixture("label start\n    return\n");
+        fs::remove_dir_all(root.join("locales")).unwrap();
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
         assert!(kinds(&report).contains(&"missing-project-dir"));
+        let _ = fs::remove_dir_all(root);
     }
 
     // ── Missing start label ───────────────────────────────────────────
