@@ -2500,7 +2500,7 @@ mod tests {
 
     #[test]
     fn reports_imagemap_overlap() {
-        let script = "label start\n    imagemap {\n        background: \"backgrounds/map.png\"\n        hotspot { area: (0,0,100,100) => { return } }\n        hotspot { area: (50,50,100,100) => { return } }\n    }\n    return\n";
+        let script = "label start\n    imagemap {\n        background: \"backgrounds/map.png\"\n        hotspot { area: (0,0,100,100) } => { return }\n        hotspot { area: (50,50,100,100) } => { return }\n    }\n    return\n";
         let root = fixture(script);
         let report = check_project(root.to_str().unwrap(), CheckOptions::default());
         assert!(kinds(&report).contains(&"imagemap-overlap"));
