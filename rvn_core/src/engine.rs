@@ -2,7 +2,7 @@ use rvn_parser::{Hotspot, Position, Script, Statement, Transition, Value};
 use std::collections::HashMap;
 
 use crate::error::RuntimeError;
-use crate::eval::{EvalError, eval_bool, eval_expr, eval_interpolated};
+use crate::eval::{eval_bool, eval_expr, eval_interpolated, EvalError};
 use crate::locale::LocaleManager;
 use crate::renderer::Renderer;
 use crate::rollback::{HistoryDisplay, RollbackHistory};
