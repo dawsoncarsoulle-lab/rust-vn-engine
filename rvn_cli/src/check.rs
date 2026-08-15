@@ -723,7 +723,8 @@ fn collect_block(
             | Statement::MusicVolume { .. }
             | Statement::TypewriterSet { .. }
             | Statement::TypewriterSpeed { .. }
-            | Statement::VoiceStop => {}
+            | Statement::VoiceStop
+            | Statement::SpriteEffect { .. } => {}
         }
         if let Statement::SpriteAnimate {
             animation, params, ..

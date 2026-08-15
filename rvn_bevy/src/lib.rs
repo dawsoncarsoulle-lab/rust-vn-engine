@@ -3,7 +3,8 @@
 #![allow(
     clippy::too_many_arguments,
     clippy::type_complexity,
-    clippy::clone_on_copy
+    clippy::clone_on_copy,
+    dead_code
 )]
 //! Library interface for the RVN Bevy runtime.
 //!
@@ -371,6 +372,7 @@ fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
         .insert_resource(theme_watcher)
         .insert_resource(VnEngine(engine))
         .insert_resource(VnRenderState::default())
+        .insert_resource(crate::resources::SkipMode::default())
         .insert_resource(ImagemapState::default())
         .insert_resource(MusicEntity::default())
         .insert_resource(MusicPlaybackState::default())

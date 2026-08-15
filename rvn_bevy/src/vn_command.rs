@@ -38,6 +38,14 @@ pub enum VnCommand {
     StopSpriteAnimation {
         id: String,
     },
+    SetSpriteEffect {
+        id: String,
+        flip_x: Option<bool>,
+        flip_y: Option<bool>,
+        scale: Option<f32>,
+        rotation: Option<f32>,
+        tint: Option<String>,
+    },
 
     // ── Dialogue / choix ──────────────────────────────────────────────────────
     ShowDialogue {
