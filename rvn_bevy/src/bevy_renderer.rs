@@ -94,6 +94,16 @@ impl Renderer for BevyRenderer {
         });
     }
 
+    fn voice_play(&mut self, file: &str) {
+        self.pending.push(VnCommand::VoicePlay {
+            file: file.to_string(),
+        });
+    }
+
+    fn voice_stop(&mut self) {
+        self.pending.push(VnCommand::VoiceStop);
+    }
+
     fn stop_sprite_animation(&mut self, id: &str) {
         self.pending
             .push(VnCommand::StopSpriteAnimation { id: id.to_string() });
