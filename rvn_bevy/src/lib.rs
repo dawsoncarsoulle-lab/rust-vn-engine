@@ -4,7 +4,7 @@
     clippy::too_many_arguments,
     clippy::type_complexity,
     clippy::clone_on_copy,
-    dead_code,
+    dead_code
 )]
 //! Library interface for the RVN Bevy runtime.
 //!
