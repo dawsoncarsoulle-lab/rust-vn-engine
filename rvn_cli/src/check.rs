@@ -2064,6 +2064,15 @@ fn collect_expr_vars(expr: &Expr, out: &mut Vec<(String, Location)>, loc: &Locat
                 collect_expr_vars(arg, out, loc);
             }
         }
+        Expr::ListLit(items) => {
+            for item in items {
+                collect_expr_vars(item, out, loc);
+            }
+        }
+        Expr::Index { target, index } => {
+            collect_expr_vars(target, out, loc);
+            collect_expr_vars(index, out, loc);
+        }
     }
 }
 
