@@ -581,4 +581,65 @@ mod tests {
             other => panic!("expected Dialogue, got {other:?}"),
         }
     }
+
+    #[test]
+    fn test_new_transitions_parse() {
+        let s = parse(
+            r#"label start
+    scene "bg.png" with slideleft
+    scene "bg.png" with slideright
+    scene "bg.png" with slideup
+    scene "bg.png" with slidedown
+    scene "bg.png" with zoomin
+    scene "bg.png" with zoomout
+    scene "bg.png" with wipe
+    scene "bg.png" with blur
+"#,
+        )
+        .unwrap();
+        let transitions: Vec<_> = s
+            .iter()
+            .filter_map(|stmt| {
+                if let Statement::Scene { transition, .. } = stmt {
+                    Some(transition.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert!(transitions
+            .iter()
+            .any(|t| matches!(t, Transition::SlideLeft { .. })));
+        assert!(transitions
+            .iter()
+            .any(|t| matches!(t, Transition::SlideRight { .. })));
+        assert!(transitions
+            .iter()
+            .any(|t| matches!(t, Transition::ZoomIn { .. })));
+        assert!(transitions
+            .iter()
+            .any(|t| matches!(t, Transition::Wipe { .. })));
+        assert!(transitions
+            .iter()
+            .any(|t| matches!(t, Transition::Blur { .. })));
+    }
+
+    #[test]
+    fn test_transition_with_duration() {
+        let s = parse(
+            r#"label start
+    scene "bg.png" with slideleft(800)
+"#,
+        )
+        .unwrap();
+        if let Statement::Scene { transition, .. } = &s[1] {
+            assert!(matches!(
+                transition,
+                Transition::SlideLeft { duration_ms: 800 }
+            ));
+        } else {
+            panic!("expected Scene");
+        }
+    }
 }
