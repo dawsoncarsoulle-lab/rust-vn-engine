@@ -139,6 +139,10 @@ fn expr_to_display(expr: &rvn_parser::Expr) -> String {
                 expr_to_display(right)
             )
         }
+        Expr::Call { name, args } => {
+            let args_str: Vec<String> = args.iter().map(expr_to_display).collect();
+            format!("{}({})", name, args_str.join(", "))
+        }
     }
 }
 
@@ -777,6 +781,14 @@ impl<R: Renderer> Engine<R> {
                     resolved = format!("sfx/{}", resolved);
                 }
                 self.renderer.sfx_stop(&resolved, &transition);
+                self.state.pc += 1;
+            }
+            Statement::VoicePlay { file } => {
+                self.renderer.voice_play(&file);
+                self.state.pc += 1;
+            }
+            Statement::VoiceStop => {
+                self.renderer.voice_stop();
                 self.state.pc += 1;
             }
             Statement::TypewriterSet { enabled } => {

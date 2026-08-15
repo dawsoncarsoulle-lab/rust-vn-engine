@@ -40,6 +40,8 @@ pub trait Renderer {
     fn music_set_volume(&mut self, level: f32);
     fn sfx_play(&mut self, file: &str, transition: &Transition);
     fn sfx_stop(&mut self, file: &str, transition: &Transition);
+    fn voice_play(&mut self, _file: &str) {}
+    fn voice_stop(&mut self) {}
     fn show_imagemap(
         &mut self,
         background: &str,

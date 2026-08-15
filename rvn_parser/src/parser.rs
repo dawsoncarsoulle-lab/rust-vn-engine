@@ -358,6 +358,20 @@ impl<'a> Parser<'a> {
                         break;
                     }
                 }
+                // Function call: name(args)
+                if matches!(self.peek(), Some(Token::ParenOpen)) {
+                    self.advance();
+                    let mut args = Vec::new();
+                    if !matches!(self.peek(), Some(Token::ParenClose)) {
+                        args.push(self.parse_expr()?);
+                        while matches!(self.peek(), Some(Token::Comma)) {
+                            self.advance();
+                            args.push(self.parse_expr()?);
+                        }
+                    }
+                    self.expect(")")?;
+                    return Ok(Expr::Call { name, args });
+                }
                 Ok(Expr::Var(name))
             }
             Some(Token::ParenOpen) => {
@@ -521,7 +535,8 @@ impl<'a> Parser<'a> {
             Some(Token::Use) => self.parse_use(),
             Some(Token::Init) => self.parse_init(),
             Some(Token::Choice) => self.parse_choice(),
-            Some(Token::Set) => self.parse_set(),
+            Some(Token::Set) | Some(Token::Define) | Some(Token::Default) => self.parse_set(),
+            Some(Token::Voice) => self.parse_voice(),
             Some(Token::If) => self.parse_if(),
             Some(Token::Label) => self.parse_label(),
             Some(Token::Jump) => self.parse_jump(),
@@ -1221,6 +1236,26 @@ impl<'a> Parser<'a> {
         self.expect("=")?;
         let value = self.parse_expr()?;
         Ok(Statement::SetVar { name, value })
+    }
+
+    /// `voice "file.ogg"` or `voice stop`
+    fn parse_voice(&mut self) -> ParseResult<Statement> {
+        self.advance();
+        // `voice stop` stops the current voice line.
+        if matches!(self.peek(), Some(Token::Ident(_))) {
+            let id = self.expect_ident("voice command")?;
+            if id == "stop" {
+                return Ok(Statement::VoiceStop);
+            }
+            return Err(self.err_msg(
+                self.current_location(),
+                format!("unknown voice subcommand `{id}`"),
+                "`stop` or a string filename",
+            ));
+        }
+        let tok = self.expect("string filename for voice")?.clone();
+        let file = Self::unwrap_string(&tok).to_string();
+        Ok(Statement::VoicePlay { file })
     }
 
     /// `if expr { … } [else { … }]`
