@@ -272,25 +272,24 @@ pub fn sprite_system(
                 rotation,
                 tint,
             } => {
-                let id = &*id;
                 for (sprite, mut transform, mut sprite_vis) in queries.p2().iter_mut() {
                     if &sprite.id != id {
                         continue;
                     }
-                    if let Some(fx) = flip_x {
-                        transform.scale.x = transform.scale.x.abs() * if fx { -1.0 } else { 1.0 };
+                    if let Some(fx) = &flip_x {
+                        transform.scale.x = transform.scale.x.abs() * if *fx { -1.0 } else { 1.0 };
                     }
-                    if let Some(fy) = flip_y {
-                        transform.scale.y = transform.scale.y.abs() * if fy { -1.0 } else { 1.0 };
+                    if let Some(fy) = &flip_y {
+                        transform.scale.y = transform.scale.y.abs() * if *fy { -1.0 } else { 1.0 };
                     }
-                    if let Some(sc) = scale {
+                    if let Some(sc) = &scale {
                         transform.scale.x = transform.scale.x.signum() * sc;
                         transform.scale.y = transform.scale.y.signum() * sc;
                     }
-                    if let Some(deg) = rotation {
+                    if let Some(deg) = &rotation {
                         transform.rotation = Quat::from_rotation_z(deg.to_radians());
                     }
-                    if let Some(color) = tint {
+                    if let Some(color) = &tint {
                         if let Ok(c) = Srgba::hex(color.trim_start_matches('#')) {
                             sprite_vis.color = Color::from(c);
                         }
