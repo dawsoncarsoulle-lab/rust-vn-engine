@@ -55,6 +55,11 @@ pub fn dialogue_system(
                             speed: None,
                             shake: false,
                             pause_after: None,
+                            bold: false,
+                            italic: false,
+                            underline: false,
+                            size: None,
+                            alpha: None,
                         }],
                     }
                 })
