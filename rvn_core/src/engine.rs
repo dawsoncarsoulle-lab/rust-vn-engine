@@ -68,18 +68,18 @@ pub fn flatten_ast(script: &mut Script, extra: &mut Vec<Statement>, counter: &mu
                 }
             }
             Statement::Choice { options } => {
-                for (_, body) in options.iter_mut() {
-                    flatten_ast(body, extra, counter);
-                    if !body.is_empty() {
+                for opt in options.iter_mut() {
+                    flatten_ast(&mut opt.body, extra, counter);
+                    if !opt.body.is_empty() {
                         *counter += 1;
                         let target = format!("__internal_choice_{}", counter);
-                        let mut block = std::mem::take(body);
+                        let mut block = std::mem::take(&mut opt.body);
                         block.push(Statement::Return);
                         extra.push(Statement::Label {
                             name: target.clone(),
                         });
                         extra.extend(block);
-                        *body = vec![Statement::Call { target }];
+                        opt.body = vec![Statement::Call { target }];
                     }
                 }
             }
@@ -163,6 +163,9 @@ pub struct Engine<R: Renderer> {
     pub history: RollbackHistory,
     /// Gestionnaire de localisation. None = pas de i18n (tests headless).
     pub locale: Option<LocaleManager>,
+    /// Variables persistantes (préfixe `persistent.`). Survivent aux
+    /// save/load et entre playthroughs. Stockées dans PersistentData.
+    pub persistent_vars: HashMap<String, Value>,
 }
 
 impl<R: Renderer> Engine<R> {
@@ -213,6 +216,7 @@ impl<R: Renderer> Engine<R> {
             renderer,
             history: RollbackHistory::new(rollback_depth),
             locale: None,
+            persistent_vars: HashMap::new(),
         };
 
         engine.run_init_blocks()?;
@@ -427,7 +431,7 @@ impl<R: Renderer> Engine<R> {
     ) -> Result<Option<HistoryDisplay>, RuntimeError> {
         Ok(match stmt {
             Statement::Dialogue { character_id, text } => {
-                let resolved = eval_interpolated(text, &self.state.vars)
+                let resolved = eval_interpolated(text, &self.vars_for_eval())
                     .map_err(|e| self.eval_err(e, "Dialogue (interpolation)"))?;
                 Some(HistoryDisplay::Dialogue {
                     character: character_id.clone(),
@@ -436,9 +440,9 @@ impl<R: Renderer> Engine<R> {
             }
             Statement::Choice { options } => {
                 let mut resolved = Vec::new();
-                for (label, _) in options {
+                for opt in options {
                     resolved.push(
-                        eval_interpolated(label, &self.state.vars)
+                        eval_interpolated(&opt.label, &self.vars_for_eval())
                             .map_err(|e| self.eval_err(e, "Choice (label interpolation)"))?,
                     );
                 }
@@ -464,11 +468,11 @@ impl<R: Renderer> Engine<R> {
         let template_key = text_to_locale_key(text);
         let translated_tmpl = self.translate(&template_key).to_string();
         if translated_tmpl == template_key {
-            eval_interpolated(text, &self.state.vars)
+            eval_interpolated(text, &self.vars_for_eval())
                 .map_err(|e| self.eval_err(e, "Dialogue (interpolation)"))
         } else {
             match rvn_parser::parse_interpolated_str(&translated_tmpl) {
-                Ok(t) => eval_interpolated(&t, &self.state.vars)
+                Ok(t) => eval_interpolated(&t, &self.vars_for_eval())
                     .map_err(|e| self.eval_err(e, "Dialogue (traduction + interpolation)")),
                 Err(_) => Ok(translated_tmpl),
             }
@@ -477,18 +481,18 @@ impl<R: Renderer> Engine<R> {
 
     fn resolve_choice_labels(
         &self,
-        options: &[(rvn_parser::InterpolatedText, Vec<Statement>)],
+        options: &[rvn_parser::ChoiceOption],
     ) -> Result<Vec<String>, RuntimeError> {
         let mut labels = Vec::new();
-        for (label, _) in options {
-            let template_key = text_to_locale_key(label);
+        for opt in options {
+            let template_key = text_to_locale_key(&opt.label);
             let translated = self.translate(&template_key).to_string();
             let final_label = if translated == template_key {
-                eval_interpolated(label, &self.state.vars)
+                eval_interpolated(&opt.label, &self.vars_for_eval())
                     .map_err(|e| self.eval_err(e, "Choice (label interpolation)"))?
             } else {
                 match rvn_parser::parse_interpolated_str(&translated) {
-                    Ok(t) => eval_interpolated(&t, &self.state.vars)
+                    Ok(t) => eval_interpolated(&t, &self.vars_for_eval())
                         .map_err(|e| self.eval_err(e, "Choice (label traduction)"))?,
                     Err(_) => translated,
                 }
@@ -511,11 +515,11 @@ impl<R: Renderer> Engine<R> {
                 let template_key = text_to_locale_key(&text);
                 let translated_tmpl = self.translate(&template_key).to_string();
                 let final_text = if translated_tmpl == template_key {
-                    eval_interpolated(&text, &self.state.vars)
+                    eval_interpolated(&text, &self.vars_for_eval())
                         .map_err(|e| self.eval_err(e, "Dialogue (interpolation)"))?
                 } else {
                     match rvn_parser::parse_interpolated_str(&translated_tmpl) {
-                        Ok(t) => eval_interpolated(&t, &self.state.vars).map_err(|e| {
+                        Ok(t) => eval_interpolated(&t, &self.vars_for_eval()).map_err(|e| {
                             self.eval_err(e, "Dialogue (traduction + interpolation)")
                         })?,
                         Err(_) => translated_tmpl,
@@ -526,37 +530,43 @@ impl<R: Renderer> Engine<R> {
                 self.state.pc += 1;
             }
             Statement::Choice { options } => {
+                // Filter out options whose condition evaluates to false.
+                let vars = self.vars_for_eval();
+                let active: Vec<&rvn_parser::ChoiceOption> = options
+                    .iter()
+                    .filter(|opt| match &opt.condition {
+                        Some(cond) => eval_bool(cond, &vars).unwrap_or(false),
+                        None => true,
+                    })
+                    .collect();
+                drop(vars);
+                // If no options are active, skip the choice entirely.
+                if active.is_empty() {
+                    self.state.pc += 1;
+                    return Ok(());
+                }
                 // Evaluate the choice labels before displaying them.  If localisation
                 // provides a translation for the template key use it, otherwise
-                // perform interpolation on the original label.  The final list
-                // of labels will be passed to the renderer for display.
+                // perform interpolation on the original label.
                 let mut labels = Vec::new();
-                for (label, _) in &options {
-                    let template_key = text_to_locale_key(label);
+                for opt in &active {
+                    let template_key = text_to_locale_key(&opt.label);
                     let translated = self.translate(&template_key).to_string();
                     let final_label = if translated == template_key {
-                        eval_interpolated(label, &self.state.vars)
+                        eval_interpolated(&opt.label, &self.vars_for_eval())
                             .map_err(|e| self.eval_err(e, "Choice (label interpolation)"))?
                     } else {
                         match rvn_parser::parse_interpolated_str(&translated) {
-                            Ok(t) => eval_interpolated(&t, &self.state.vars)
+                            Ok(t) => eval_interpolated(&t, &self.vars_for_eval())
                                 .map_err(|e| self.eval_err(e, "Choice (label traduction)"))?,
                             Err(_) => translated,
                         }
                     };
                     labels.push(final_label);
                 }
-                // If no options are present, skip the choice entirely.
-                if options.is_empty() {
-                    self.state.pc += 1;
-                    return Ok(());
-                }
                 let selected = self.renderer.show_choice(&labels);
-                // Clamp the selected index to a valid range to avoid panics in case
-                // the renderer returns an out-of-bounds value.
-                let idx = selected.min(options.len().saturating_sub(1));
-                // It is guaranteed that options is non-empty here.
-                let body = options[idx].1.clone();
+                let idx = selected.min(active.len().saturating_sub(1));
+                let body = active[idx].body.clone();
                 if !body.is_empty() {
                     self.exec_silent(body[0].clone())?;
                 } else {
@@ -695,9 +705,13 @@ impl<R: Renderer> Engine<R> {
                 self.state.pc += 1;
             }
             Statement::SetVar { name, value } => {
-                let val = eval_expr(&value, &self.state.vars)
+                let val = eval_expr(&value, &self.vars_for_eval())
                     .map_err(|e| self.eval_err(e, &format!("SetVar {{ name: {:?} }}", name)))?;
-                self.state.vars.insert(name, val);
+                if Self::is_persistent(name.as_str()) {
+                    self.persistent_vars.insert(name, val);
+                } else {
+                    self.state.vars.insert(name, val);
+                }
                 self.state.pc += 1;
             }
             Statement::If {
@@ -705,7 +719,7 @@ impl<R: Renderer> Engine<R> {
                 then_branch,
                 else_branch,
             } => {
-                let branch = if eval_bool(&condition, &self.state.vars)
+                let branch = if eval_bool(&condition, &self.vars_for_eval())
                     .map_err(|e| self.eval_err(e, "If (condition)"))?
                 {
                     then_branch
@@ -884,7 +898,7 @@ impl<R: Renderer> Engine<R> {
         }
 
         let idx = selected.min(options.len().saturating_sub(1));
-        let body = options[idx].1.clone();
+        let body = options[idx].body.clone();
         if !body.is_empty() {
             self.exec_silent(body[0].clone())?;
         } else {
@@ -957,6 +971,35 @@ impl<R: Renderer> Engine<R> {
     }
     pub fn get_var(&self, name: &str) -> Option<&Value> {
         self.state.vars.get(name)
+    }
+
+    /// Returns a merged view of regular + persistent variables for evaluation.
+    /// Persistent variables are keyed with the `persistent.` prefix.
+    fn vars_for_eval(&self) -> HashMap<String, Value> {
+        let mut merged = self.state.vars.clone();
+        for (k, v) in &self.persistent_vars {
+            merged.insert(k.clone(), v.clone());
+        }
+        merged
+    }
+
+    /// Whether a variable name targets the persistent store.
+    fn is_persistent(name: &str) -> bool {
+        name.starts_with("persistent.")
+    }
+
+    pub fn get_persistent_var(&self, name: &str) -> Option<&Value> {
+        self.persistent_vars.get(name)
+    }
+
+    /// Load persistent script variables from a PersistentData snapshot.
+    pub fn load_persistent_vars(&mut self, vars: &HashMap<String, Value>) {
+        self.persistent_vars = vars.clone();
+    }
+
+    /// Export persistent script variables for storage in PersistentData.
+    pub fn export_persistent_vars(&self) -> &HashMap<String, Value> {
+        &self.persistent_vars
     }
     pub fn get_sprite(&self, id: &str) -> Option<&SpriteState> {
         self.state.sprites.get(id)

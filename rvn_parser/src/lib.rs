@@ -156,7 +156,7 @@ mod tests {
         let Statement::Choice { options } = &s[0] else {
             panic!()
         };
-        assert!(!options[0].0.is_plain());
+        assert!(!options[0].label.is_plain());
     }
 
     #[test]
@@ -542,5 +542,43 @@ mod tests {
             &s[0],
             Statement::SpriteStopAnimation { character_id } if character_id == "eileen"
         ));
+    }
+
+    #[test]
+    fn test_choice_with_condition() {
+        let s = parse(
+            r#"label start
+    choice {
+        "Open" if has_key => { return }
+        "Force" => { return }
+    }
+"#,
+        )
+        .unwrap();
+        match &s[1] {
+            Statement::Choice { options } => {
+                assert_eq!(options.len(), 2);
+                assert!(options[0].condition.is_some());
+                assert!(options[1].condition.is_none());
+            }
+            other => panic!("expected Choice, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_escape_newline_in_dialogue() {
+        let s = parse(
+            r#"label start
+    "Line one.\nLine two."
+"#,
+        )
+        .unwrap();
+        match &s[1] {
+            Statement::Dialogue { text, .. } => {
+                let plain = text.as_plain().unwrap_or("");
+                assert!(plain.contains("\n"), "expected newline in: {plain:?}");
+            }
+            other => panic!("expected Dialogue, got {other:?}"),
+        }
     }
 }
