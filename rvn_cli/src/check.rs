@@ -2092,6 +2092,13 @@ fn expr_to_display(expr: &Expr) -> String {
             let args_str: Vec<String> = args.iter().map(expr_to_display).collect();
             format!("{}({})", name, args_str.join(", "))
         }
+        Expr::ListLit(items) => {
+            let parts: Vec<String> = items.iter().map(expr_to_display).collect();
+            format!("[{}]", parts.join(", "))
+        }
+        Expr::Index { target, index } => {
+            format!("{}[{}]", expr_to_display(target), expr_to_display(index))
+        }
         Expr::BinOp { op, left, right } => format!(
             "{} {:?} {}",
             expr_to_display(left),
