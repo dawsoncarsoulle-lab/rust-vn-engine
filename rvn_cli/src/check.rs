@@ -2331,4 +2331,216 @@ mod tests {
         assert!(!kinds.contains(&"unreferenced-label"));
         let _ = fs::remove_dir_all(root);
     }
+
+    // ── Helpers for asset/locale fixtures ─────────────────────────────
+
+    fn write_asset(root: &Path, rel: &str) {
+        let p = root.join("assets").join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, b"").unwrap();
+    }
+
+    fn write_locale(root: &Path, name: &str, body: &str) {
+        fs::write(root.join("locales").join(name), body).unwrap();
+    }
+
+    // ── Missing assets ────────────────────────────────────────────────
+
+    #[test]
+    fn reports_missing_background_asset() {
+        let root = fixture("label start\n    scene \"backgrounds/forest.png\"\n    return\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"missing-asset"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_missing_sprite_asset() {
+        let root = fixture(
+            "init { character.create(\"eileen\", \"Eileen\") }\nlabel start\n    eileen.show(\"happy\") at left\n    return\n",
+        );
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"missing-asset"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_missing_cinematic_asset() {
+        let root = fixture("label start\n    cinematic \"intro\"\n    return\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"missing-cinematic-asset"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn no_missing_asset_when_file_exists() {
+        let root = fixture("label start\n    scene \"backgrounds/forest\"\n    return\n");
+        write_asset(&root, "backgrounds/forest.png");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(!kinds(&report).contains(&"missing-asset"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    // ── Locales ───────────────────────────────────────────────────────
+
+    #[test]
+    fn reports_missing_locale_key() {
+        let root = fixture("label start\n    \"Hello world\"\n    return\n");
+        write_locale(&root, "en.toml", "");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"missing-locale-key"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_unused_locale_key() {
+        let root = fixture("label start\n    \"Hello world\"\n    return\n");
+        write_locale(&root, "en.toml", "[strings]\n\"Stale key\" = \"...\"\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"unused-locale-key"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn no_locale_diagnostics_when_covered() {
+        let root = fixture("label start\n    \"Hello world\"\n    return\n");
+        write_locale(
+            &root,
+            "en.toml",
+            "[strings]\n\"Hello world\" = \"Bonjour\"\n",
+        );
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(!kinds(&report).contains(&"missing-locale-key"));
+        assert!(!kinds(&report).contains(&"unused-locale-key"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    // ── Undefined character / unassigned variable ────────────────────
+
+    #[test]
+    fn reports_undefined_character_without_suggestion() {
+        // Declare a character so the parser treats unknown ids as character refs.
+        // "zzzzzzz" has no nearby declared character, so no fuzzy suggestion.
+        let root = fixture(
+            "init { character.create(\"eileen\", \"Eileen\") }\nlabel start\n    zzzzzzz \"Boo\"\n    return\n",
+        );
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        let diag = report
+            .diagnostics
+            .iter()
+            .find(|d| d.kind == "undefined-character")
+            .unwrap();
+        // No fuzzy match → the suggestion is the "declare it" hint, not "use <name>".
+        let suggestion = diag.suggestion.as_deref().unwrap_or("");
+        assert!(
+            !suggestion.starts_with("use `"),
+            "unexpected fuzzy suggestion: {suggestion}"
+        );
+        assert!(
+            suggestion.contains("declare"),
+            "expected declare hint, got: {suggestion}"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_unassigned_variable() {
+        let root = fixture("label start\n    set bonus = score + 1\n    return\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"unassigned-variable"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    // ── Duplicate labels ──────────────────────────────────────────────
+
+    #[test]
+    fn reports_duplicate_label() {
+        let root = fixture("label start\n    return\nlabel start\n    return\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"duplicate-label"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    // ── Orphan scripts ────────────────────────────────────────────────
+
+    #[test]
+    fn reports_orphan_script() {
+        let root = fixture("label start\n    return\n");
+        fs::write(
+            root.join("scripts/lonely.rvn"),
+            "label lonely\n    return\n",
+        )
+        .unwrap();
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"orphan-script"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    // ── Empty choice / imagemap ───────────────────────────────────────
+
+    #[test]
+    fn reports_empty_choice() {
+        let root = fixture("label start\n    choice { }\n    return\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"empty-choice"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reports_empty_imagemap() {
+        let root = fixture(
+            "label start\n    imagemap { background: \"backgrounds/map.png\" }\n    return\n",
+        );
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"empty-imagemap"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    // ── Imagemap overlap ──────────────────────────────────────────────
+
+    #[test]
+    fn reports_imagemap_overlap() {
+        let script = "label start\n    imagemap {\n        background: \"backgrounds/map.png\"\n        hotspot { area: (0,0,100,100) } => { return }\n        hotspot { area: (50,50,100,100) } => { return }\n    }\n    return\n";
+        let root = fixture(script);
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"imagemap-overlap"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    // ── Missing project dir / config ──────────────────────────────────
+
+    #[test]
+    fn reports_missing_project_dir() {
+        let root = fixture("label start\n    return\n");
+        fs::remove_dir_all(root.join("locales")).unwrap();
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"missing-project-dir"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    // ── Missing start label ───────────────────────────────────────────
+
+    #[test]
+    fn reports_missing_start_label() {
+        let root = fixture("label other\n    return\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"missing-start-label"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    // ── Clean project: no diagnostics ─────────────────────────────────
+
+    #[test]
+    fn clean_project_has_no_errors() {
+        let root = fixture("label start\n    \"Hello world\"\n    return\n");
+        write_locale(&root, "en.toml", "\"Hello world\" = \"Hello world\"\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        let errors: Vec<_> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+        let _ = fs::remove_dir_all(root);
+    }
 }
