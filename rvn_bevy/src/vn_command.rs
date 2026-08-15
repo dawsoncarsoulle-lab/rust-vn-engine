@@ -79,6 +79,10 @@ pub enum VnCommand {
     SfxStop {
         file: String,
     },
+    VoicePlay {
+        file: String,
+    },
+    VoiceStop,
 
     // ── Meta ──────────────────────────────────────────────────────────────────
     ScriptFinished,

@@ -320,6 +320,13 @@ pub enum Statement {
         transition: Transition,
     },
 
+    /// Play a voice line associated with the current dialogue.
+    VoicePlay {
+        file: String,
+    },
+    /// Stop any currently playing voice line.
+    VoiceStop,
+
     Imagemap {
         background: String,
         hover_image: Option<String>,

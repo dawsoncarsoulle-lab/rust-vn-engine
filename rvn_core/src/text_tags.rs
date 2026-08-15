@@ -7,6 +7,11 @@ pub struct RichTextSegment {
     pub speed: Option<f32>,
     pub shake: bool,
     pub pause_after: Option<f32>,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub size: Option<f32>,
+    pub alpha: Option<f32>,
 }
 
 impl RichTextSegment {
@@ -17,6 +22,11 @@ impl RichTextSegment {
             speed: style.speed,
             shake: style.shake,
             pause_after: None,
+            bold: style.bold,
+            italic: style.italic,
+            underline: style.underline,
+            size: style.size,
+            alpha: style.alpha,
         }
     }
 }
@@ -54,6 +64,11 @@ enum OpenTag {
     Color(String),
     Speed(f32),
     Shake,
+    Bold,
+    Italic,
+    Underline,
+    Size(f32),
+    Alpha(f32),
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -61,6 +76,11 @@ struct TextStyleState {
     color: Option<String>,
     speed: Option<f32>,
     shake: bool,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    size: Option<f32>,
+    alpha: Option<f32>,
 }
 
 pub fn parse_text_tags(input: &str) -> Result<RichText, TextTagError> {
@@ -139,15 +159,50 @@ fn apply_tag(
         return Ok(());
     }
 
+    if let Some(value) = tag.strip_prefix("size=") {
+        let size = parse_positive_float(value)
+            .ok_or_else(|| err(offset, format!("Valeur invalide dans {{{tag}}}")))?;
+        stack.push((OpenTag::Size(size), offset));
+        style.size = Some(size);
+        return Ok(());
+    }
+    if let Some(value) = tag.strip_prefix("alpha=") {
+        let alpha = parse_positive_float(value)
+            .ok_or_else(|| err(offset, format!("Valeur invalide dans {{{tag}}}")))?;
+        let clamped = alpha.clamp(0.0, 1.0);
+        stack.push((OpenTag::Alpha(clamped), offset));
+        style.alpha = Some(clamped);
+        return Ok(());
+    }
     match tag {
         "shake" => {
             stack.push((OpenTag::Shake, offset));
             style.shake = true;
             Ok(())
         }
+        "b" | "bold" => {
+            stack.push((OpenTag::Bold, offset));
+            style.bold = true;
+            Ok(())
+        }
+        "i" | "italic" => {
+            stack.push((OpenTag::Italic, offset));
+            style.italic = true;
+            Ok(())
+        }
+        "u" | "underline" => {
+            stack.push((OpenTag::Underline, offset));
+            style.underline = true;
+            Ok(())
+        }
         "/color" => close_tag(TagKind::Color, offset, stack, style),
         "/speed" => close_tag(TagKind::Speed, offset, stack, style),
         "/shake" => close_tag(TagKind::Shake, offset, stack, style),
+        "/b" | "/bold" => close_tag(TagKind::Bold, offset, stack, style),
+        "/i" | "/italic" => close_tag(TagKind::Italic, offset, stack, style),
+        "/u" | "/underline" => close_tag(TagKind::Underline, offset, stack, style),
+        "/size" => close_tag(TagKind::Size, offset, stack, style),
+        "/alpha" => close_tag(TagKind::Alpha, offset, stack, style),
         _ if tag.starts_with('/') => Err(err(
             offset,
             format!("Balise {{{tag}}} sans ouverture correspondante"),
@@ -161,6 +216,11 @@ enum TagKind {
     Color,
     Speed,
     Shake,
+    Bold,
+    Italic,
+    Underline,
+    Size,
+    Alpha,
 }
 
 fn close_tag(
@@ -197,6 +257,11 @@ fn rebuild_style(stack: &[(OpenTag, usize)], style: &mut TextStyleState) {
             OpenTag::Color(color) => style.color = Some(color.clone()),
             OpenTag::Speed(speed) => style.speed = Some(*speed),
             OpenTag::Shake => style.shake = true,
+            OpenTag::Bold => style.bold = true,
+            OpenTag::Italic => style.italic = true,
+            OpenTag::Underline => style.underline = true,
+            OpenTag::Size(size) => style.size = Some(*size),
+            OpenTag::Alpha(alpha) => style.alpha = Some(*alpha),
         }
     }
 }
@@ -215,6 +280,11 @@ fn tag_kind(tag: &OpenTag) -> TagKind {
         OpenTag::Color(_) => TagKind::Color,
         OpenTag::Speed(_) => TagKind::Speed,
         OpenTag::Shake => TagKind::Shake,
+        OpenTag::Bold => TagKind::Bold,
+        OpenTag::Italic => TagKind::Italic,
+        OpenTag::Underline => TagKind::Underline,
+        OpenTag::Size(_) => TagKind::Size,
+        OpenTag::Alpha(_) => TagKind::Alpha,
     }
 }
 
@@ -223,6 +293,11 @@ fn open_tag_name(tag: &TagKind) -> &'static str {
         TagKind::Color => "color",
         TagKind::Speed => "speed",
         TagKind::Shake => "shake",
+        TagKind::Bold => "b",
+        TagKind::Italic => "i",
+        TagKind::Underline => "u",
+        TagKind::Size => "size",
+        TagKind::Alpha => "alpha",
     }
 }
 
@@ -231,6 +306,11 @@ fn open_tag_display(tag: &OpenTag) -> &'static str {
         OpenTag::Color(_) => "{color}",
         OpenTag::Speed(_) => "{speed}",
         OpenTag::Shake => "{shake}",
+        OpenTag::Bold => "{b}",
+        OpenTag::Italic => "{i}",
+        OpenTag::Underline => "{u}",
+        OpenTag::Size(_) => "{size}",
+        OpenTag::Alpha(_) => "{alpha}",
     }
 }
 

@@ -15,6 +15,10 @@ pub enum Token<'a> {
     Choice,
     #[token("set")]
     Set,
+    #[token("define")]
+    Define,
+    #[token("default")]
+    Default,
     #[token("if")]
     If,
     #[token("else")]
@@ -117,6 +121,8 @@ pub enum Token<'a> {
     Typewriter,
     #[token("use")]
     Use,
+    #[token("voice")]
+    Voice,
 
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
     Ident(&'a str),

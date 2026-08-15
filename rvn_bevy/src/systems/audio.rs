@@ -78,6 +78,7 @@ pub fn audio_system(
     settings: Res<Settings>,
     sfx_query: Query<(Entity, &SfxSource)>,
     sink_query: Query<&AudioSink>,
+    voice_query: Query<(Entity, &Name)>,
 ) {
     if music_volume.is_changed() {
         if let Some(entity) = music_entity.0 {
@@ -163,6 +164,27 @@ pub fn audio_system(
                 }
             }
 
+            VnCommand::VoicePlay { file } => {
+                let path = if file.contains('.') {
+                    file.to_string()
+                } else {
+                    format!("{}.ogg", file)
+                };
+                commands.spawn((
+                    Name::new(format!("voice:{}", path)),
+                    AudioBundle {
+                        source: asset_server.load(&path),
+                        settings: PlaybackSettings::DESPAWN,
+                    },
+                ));
+            }
+            VnCommand::VoiceStop => {
+                for (entity, name) in voice_query.iter() {
+                    if name.as_str().starts_with("voice:") {
+                        commands.entity(entity).despawn();
+                    }
+                }
+            }
             _ => {}
         }
     }
