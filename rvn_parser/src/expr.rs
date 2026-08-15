@@ -49,6 +49,13 @@ pub enum Expr {
         name: String,
         args: Vec<Expr>,
     },
+    /// List literal: [1, 2, "three"]
+    ListLit(Vec<Expr>),
+    /// Index access: arr[0]
+    Index {
+        target: Box<Expr>,
+        index: Box<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

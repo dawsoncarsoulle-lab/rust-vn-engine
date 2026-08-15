@@ -48,6 +48,8 @@ pub enum SaveValue {
     Int(i64),
     Float(f32),
     Str(String),
+    /// Lists are serialized as JSON arrays of SaveValue.
+    List(Vec<SaveValue>),
 }
 
 impl From<&Value> for SaveValue {
@@ -57,6 +59,7 @@ impl From<&Value> for SaveValue {
             Value::Int(n) => SaveValue::Int(*n),
             Value::Float(f) => SaveValue::Float(*f),
             Value::Str(s) => SaveValue::Str(s.clone()),
+            Value::List(items) => SaveValue::List(items.iter().map(SaveValue::from).collect()),
         }
     }
 }
@@ -68,6 +71,7 @@ impl From<SaveValue> for Value {
             SaveValue::Int(n) => Value::Int(n),
             SaveValue::Float(f) => Value::Float(f),
             SaveValue::Str(s) => Value::Str(s),
+            SaveValue::List(items) => Value::List(items.into_iter().map(Value::from).collect()),
         }
     }
 }

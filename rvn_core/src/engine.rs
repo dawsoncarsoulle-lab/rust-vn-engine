@@ -143,6 +143,13 @@ fn expr_to_display(expr: &rvn_parser::Expr) -> String {
             let args_str: Vec<String> = args.iter().map(expr_to_display).collect();
             format!("{}({})", name, args_str.join(", "))
         }
+        Expr::ListLit(items) => {
+            let parts: Vec<String> = items.iter().map(expr_to_display).collect();
+            format!("[{}]", parts.join(", "))
+        }
+        Expr::Index { target, index } => {
+            format!("{}[{}]", expr_to_display(target), expr_to_display(index))
+        }
     }
 }
 
@@ -159,6 +166,15 @@ fn text_to_locale_key(text: &rvn_parser::InterpolatedText) -> String {
 
 // ─── MOTEUR ──────────────────────────────────────────────────────────────────
 
+/// Input state populated by the renderer for script-level input queries.
+#[derive(Debug, Clone, Default)]
+pub struct InputState {
+    pub last_key_pressed: Option<String>,
+    pub mouse_clicked: bool,
+    pub mouse_x: f32,
+    pub mouse_y: f32,
+}
+
 pub struct Engine<R: Renderer> {
     pub script: Script,
     label_table: HashMap<String, usize>,
@@ -170,6 +186,10 @@ pub struct Engine<R: Renderer> {
     /// Variables persistantes (préfixe `persistent.`). Survivent aux
     /// save/load et entre playthroughs. Stockées dans PersistentData.
     pub persistent_vars: HashMap<String, Value>,
+    /// Input state for script queries (key_pressed, mouse_clicked, etc.)
+    pub input_state: InputState,
+    /// Active timer (duration_secs, action_string, elapsed_secs).
+    pub active_timer: Option<(f32, String, f32)>,
 }
 
 impl<R: Renderer> Engine<R> {
@@ -221,6 +241,8 @@ impl<R: Renderer> Engine<R> {
             history: RollbackHistory::new(rollback_depth),
             locale: None,
             persistent_vars: HashMap::new(),
+            input_state: InputState::default(),
+            active_timer: None,
         };
 
         engine.run_init_blocks()?;
@@ -809,6 +831,17 @@ impl<R: Renderer> Engine<R> {
                 self.renderer.voice_stop();
                 self.state.pc += 1;
             }
+            Statement::Timer {
+                duration_secs,
+                action,
+            } => {
+                self.active_timer = Some((duration_secs, action.clone(), 0.0));
+                self.state.pc += 1;
+            }
+            Statement::TimerCancel => {
+                self.active_timer = None;
+                self.state.pc += 1;
+            }
             Statement::TypewriterSet { enabled } => {
                 self.state.typewriter.enabled = enabled;
                 self.renderer
@@ -1010,6 +1043,22 @@ impl<R: Renderer> Engine<R> {
         for (k, v) in &self.persistent_vars {
             merged.insert(k.clone(), v.clone());
         }
+        // Inject input state for script queries.
+        if let Some(key) = &self.input_state.last_key_pressed {
+            merged.insert("__input_key".to_string(), Value::Str(key.clone()));
+        }
+        merged.insert(
+            "__input_mouse_clicked".to_string(),
+            Value::Bool(self.input_state.mouse_clicked),
+        );
+        merged.insert(
+            "__input_mouse_x".to_string(),
+            Value::Float(self.input_state.mouse_x),
+        );
+        merged.insert(
+            "__input_mouse_y".to_string(),
+            Value::Float(self.input_state.mouse_y),
+        );
         merged
     }
 
@@ -1030,6 +1079,56 @@ impl<R: Renderer> Engine<R> {
     /// Export persistent script variables for storage in PersistentData.
     pub fn export_persistent_vars(&self) -> &HashMap<String, Value> {
         &self.persistent_vars
+    }
+
+    /// Update the input state from the renderer. Called each frame before
+    /// script execution to allow key_pressed() and mouse_clicked() queries.
+    /// Advance the active timer by delta_secs. Returns the action string
+    /// if the timer has elapsed, and clears the timer.
+    pub fn tick_timer(&mut self, delta_secs: f32) -> Option<String> {
+        if let Some((duration, action, elapsed)) = &mut self.active_timer {
+            *elapsed += delta_secs;
+            if *elapsed >= *duration {
+                let action = action.clone();
+                self.active_timer = None;
+                return Some(action);
+            }
+        }
+        None
+    }
+
+    /// Parse a timer action string ("jump label" or "call label") and execute it.
+    pub fn execute_timer_action(&mut self, action: &str) -> Result<(), RuntimeError> {
+        let parts: Vec<&str> = action.splitn(2, ' ').collect();
+        if parts.len() == 2 {
+            match parts[0] {
+                "jump" => {
+                    let target = parts[1].to_string();
+                    self.state.pc = self.resolve(&target)?;
+                }
+                "call" => {
+                    let target = parts[1].to_string();
+                    let idx = self.resolve(&target)?;
+                    self.state.call_stack.push(self.state.pc + 1);
+                    self.state.pc = idx;
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    pub fn update_input_state(
+        &mut self,
+        last_key: Option<String>,
+        mouse_clicked: bool,
+        mouse_x: f32,
+        mouse_y: f32,
+    ) {
+        self.input_state.last_key_pressed = last_key;
+        self.input_state.mouse_clicked = mouse_clicked;
+        self.input_state.mouse_x = mouse_x;
+        self.input_state.mouse_y = mouse_y;
     }
     pub fn get_sprite(&self, id: &str) -> Option<&SpriteState> {
         self.state.sprites.get(id)

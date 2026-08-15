@@ -724,7 +724,9 @@ fn collect_block(
             | Statement::TypewriterSet { .. }
             | Statement::TypewriterSpeed { .. }
             | Statement::VoiceStop
-            | Statement::SpriteEffect { .. } => {}
+            | Statement::SpriteEffect { .. }
+            | Statement::Timer { .. }
+            | Statement::TimerCancel => {}
         }
         if let Statement::SpriteAnimate {
             animation, params, ..

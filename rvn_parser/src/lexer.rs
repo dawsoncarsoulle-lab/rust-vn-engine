@@ -123,6 +123,8 @@ pub enum Token<'a> {
     Use,
     #[token("voice")]
     Voice,
+    #[token("timer")]
+    Timer,
 
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
     Ident(&'a str),
