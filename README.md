@@ -441,6 +441,14 @@ The roadmap is intentionally conservative. RVN will not promise features it cann
 
 ---
 
+## Documentation
+
+- **[Getting Started](docs/getting-started.md)** — installation, creating a project, your first scene
+- **[Language Reference](docs/language-reference.md)** — every statement, expression, and text tag
+- **[Project Structure](docs/project-structure.md)** — `rvn.toml`, `theme.toml`, assets, and locales
+
+---
+
 ## License
 
 Licensed under either of
