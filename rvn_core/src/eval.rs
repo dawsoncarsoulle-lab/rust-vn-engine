@@ -45,6 +45,115 @@ pub fn eval_expr(expr: &Expr, vars: &HashMap<String, Value>) -> EvalResult<Value
         }
 
         Expr::BinOp { op, left, right } => eval_binop(op, left, right, vars),
+        Expr::Call { name, args } => eval_call(name, args, vars),
+    }
+}
+
+fn eval_call(name: &str, args: &[Expr], vars: &HashMap<String, Value>) -> EvalResult<Value> {
+    let evaluated: Vec<Value> = args
+        .iter()
+        .map(|a| eval_expr(a, vars))
+        .collect::<Result<_, _>>()?;
+    match name {
+        "min" => {
+            let nums = expect_numbers(&evaluated, "min")?;
+            Ok(nums
+                .into_iter()
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .map(to_value)
+                .unwrap_or(Value::Int(0)))
+        }
+        "max" => {
+            let nums = expect_numbers(&evaluated, "max")?;
+            Ok(nums
+                .into_iter()
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .map(to_value)
+                .unwrap_or(Value::Int(0)))
+        }
+        "abs" => match evaluated.as_slice() {
+            [Value::Int(n)] => Ok(Value::Int(n.abs())),
+            [Value::Float(f)] => Ok(Value::Float(f.abs())),
+            _ => Err(EvalError::TypeMismatch {
+                op: "abs".into(),
+                left: "number".into(),
+                right: "".into(),
+            }),
+        },
+        "floor" => match evaluated.as_slice() {
+            [Value::Float(f)] => Ok(Value::Int(*f as i64)),
+            [Value::Int(n)] => Ok(Value::Int(*n)),
+            _ => Err(EvalError::TypeMismatch {
+                op: "floor".into(),
+                left: "number".into(),
+                right: "".into(),
+            }),
+        },
+        "ceil" => match evaluated.as_slice() {
+            [Value::Float(f)] => Ok(Value::Int(
+                (*f as i64) + if *f > 0.0 && f.fract() > 0.0 { 1 } else { 0 },
+            )),
+            [Value::Int(n)] => Ok(Value::Int(*n)),
+            _ => Err(EvalError::TypeMismatch {
+                op: "ceil".into(),
+                left: "number".into(),
+                right: "".into(),
+            }),
+        },
+        "random" | "rand" => {
+            match evaluated.as_slice() {
+                [Value::Int(lo), Value::Int(hi)] => {
+                    let lo = *lo;
+                    let hi = *hi;
+                    let range = (hi - lo + 1).max(1) as u64;
+                    // Simple LCG for determinism without external deps
+                    let seed = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_nanos() as u64)
+                        .unwrap_or(0);
+                    let val = lo + ((seed % range) as i64);
+                    Ok(Value::Int(val))
+                }
+                _ => Err(EvalError::TypeMismatch {
+                    op: "random".into(),
+                    left: "int, int".into(),
+                    right: "".into(),
+                }),
+            }
+        }
+        "len" => match evaluated.as_slice() {
+            [Value::Str(s)] => Ok(Value::Int(s.len() as i64)),
+            _ => Err(EvalError::TypeMismatch {
+                op: "len".into(),
+                left: "string".into(),
+                right: "".into(),
+            }),
+        },
+        _ => Err(EvalError::UndefinedVar(format!(
+            "unknown function `{name}`"
+        ))),
+    }
+}
+
+fn expect_numbers(vals: &[Value], _fn_name: &str) -> EvalResult<Vec<f64>> {
+    vals.iter()
+        .map(|v| match v {
+            Value::Int(n) => Ok(*n as f64),
+            Value::Float(f) => Ok(*f as f64),
+            _ => Err(EvalError::TypeMismatch {
+                op: "numeric".into(),
+                left: "number".into(),
+                right: "".into(),
+            }),
+        })
+        .collect()
+}
+
+fn to_value(f: f64) -> Value {
+    if f.fract() == 0.0 && f.is_finite() {
+        Value::Int(f as i64)
+    } else {
+        Value::Float(f as f32)
     }
 }
 

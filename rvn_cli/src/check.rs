@@ -698,7 +698,9 @@ fn collect_block(
             Statement::MusicPlay { file, .. } => {
                 symbols.music_files.push((file.clone(), loc.clone()))
             }
-            Statement::SfxPlay { file, .. } | Statement::SfxStop { file, .. } => {
+            Statement::SfxPlay { file, .. }
+            | Statement::SfxStop { file, .. }
+            | Statement::VoicePlay { file, .. } => {
                 symbols.sfx_files.push((file.clone(), loc.clone()))
             }
             Statement::Imagemap {
@@ -720,7 +722,8 @@ fn collect_block(
             | Statement::MusicStop { .. }
             | Statement::MusicVolume { .. }
             | Statement::TypewriterSet { .. }
-            | Statement::TypewriterSpeed { .. } => {}
+            | Statement::TypewriterSpeed { .. }
+            | Statement::VoiceStop => {}
         }
         if let Statement::SpriteAnimate {
             animation, params, ..
@@ -2053,6 +2056,11 @@ fn collect_expr_vars(expr: &Expr, out: &mut Vec<(String, Location)>, loc: &Locat
         }
         Expr::Neg(inner) | Expr::Not(inner) => collect_expr_vars(inner, out, loc),
         Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Str(_) => {}
+        Expr::Call { args, .. } => {
+            for arg in args {
+                collect_expr_vars(arg, out, loc);
+            }
+        }
     }
 }
 
@@ -2077,6 +2085,10 @@ fn expr_to_display(expr: &Expr) -> String {
         Expr::Not(e) => format!("not {}", expr_to_display(e)),
         Expr::And(l, r) => format!("{} and {}", expr_to_display(l), expr_to_display(r)),
         Expr::Or(l, r) => format!("{} or {}", expr_to_display(l), expr_to_display(r)),
+        Expr::Call { name, args } => {
+            let args_str: Vec<String> = args.iter().map(expr_to_display).collect();
+            format!("{}({})", name, args_str.join(", "))
+        }
         Expr::BinOp { op, left, right } => format!(
             "{} {:?} {}",
             expr_to_display(left),
@@ -2118,7 +2130,10 @@ fn locate_stmt(source: &SourceFile, stmt: &Statement) -> Location {
         Statement::MusicPlay { .. }
         | Statement::MusicStop { .. }
         | Statement::MusicVolume { .. } => vec!["music.".to_string()],
-        Statement::SfxPlay { .. } | Statement::SfxStop { .. } => vec!["sfx.".to_string()],
+        Statement::SfxPlay { .. }
+        | Statement::SfxStop { .. }
+        | Statement::VoicePlay { .. }
+        | Statement::VoiceStop => vec!["audio".to_string()],
         _ => vec![],
     };
     for needle in needles {

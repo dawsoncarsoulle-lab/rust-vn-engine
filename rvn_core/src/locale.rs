@@ -411,6 +411,10 @@ fn expr_to_display(expr: &rvn_parser::Expr) -> String {
                 expr_to_display(right)
             )
         }
+        Expr::Call { name, args } => {
+            let args_str: Vec<String> = args.iter().map(expr_to_display).collect();
+            format!("{}({})", name, args_str.join(", "))
+        }
     }
 }
 
