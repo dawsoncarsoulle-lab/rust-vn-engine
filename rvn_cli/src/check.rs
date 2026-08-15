@@ -610,8 +610,8 @@ fn collect_block(
             Statement::Choice { options } => {
                 validate_duplicate_choice_text(options, &loc, diagnostics);
                 for opt in options {
-                    collect_text_vars(label, &mut symbols.used_vars, &loc);
-                    let locale_key = text_to_locale_key(label);
+                    collect_text_vars(&opt.label, &mut symbols.used_vars, &loc);
+                    let locale_key = text_to_locale_key(&opt.label);
                     validate_text_tags(&locale_key, &loc, diagnostics);
                     symbols.locale_keys.insert(locale_key);
                     collect_block(&opt.body, source, symbols, diagnostics);
