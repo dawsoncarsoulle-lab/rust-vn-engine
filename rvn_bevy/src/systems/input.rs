@@ -6,7 +6,7 @@ use crate::components::DialogueText;
 use crate::project_paths::ProjectPaths;
 use crate::resources::{
     ChoiceFocus, DialogueHistory, ImagemapState, MenuState, PersistentDataResource,
-    ScriptErrorMessage, TypewriterState, VnEngine, VnRenderState, VnState,
+    ScriptErrorMessage, SkipMode, TypewriterState, VnEngine, VnRenderState, VnState,
 };
 use crate::systems::save_menu::{
     apply_loaded_game, record_resume_target, SaveMenuState, MAX_SLOTS,
@@ -132,7 +132,7 @@ pub fn input_system(
     }
 
     // ── Auto-advance when skip mode is active ──
-    if skip_mode.active && matches!(render_state.state, crate::resources::VnGameState::Dialogue) {
+    if skip_mode.active {
         player_events.send(PlayerInput::Advance);
     }
 

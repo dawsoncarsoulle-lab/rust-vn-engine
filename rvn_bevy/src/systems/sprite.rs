@@ -273,18 +273,18 @@ pub fn sprite_system(
                 tint,
             } => {
                 for (sprite, mut transform, mut sprite_vis) in queries.p2().iter_mut() {
-                    if sprite.id != *id {
+                    if sprite.id != id {
                         continue;
                     }
                     if let Some(fx) = flip_x {
-                        transform.scale.x = transform.scale.x.abs() * if *fx { -1.0 } else { 1.0 };
+                        transform.scale.x = transform.scale.x.abs() * if fx { -1.0 } else { 1.0 };
                     }
                     if let Some(fy) = flip_y {
-                        transform.scale.y = transform.scale.y.abs() * if *fy { -1.0 } else { 1.0 };
+                        transform.scale.y = transform.scale.y.abs() * if fy { -1.0 } else { 1.0 };
                     }
                     if let Some(sc) = scale {
-                        transform.scale.x = transform.scale.x.signum() * *sc;
-                        transform.scale.y = transform.scale.y.signum() * *sc;
+                        transform.scale.x = transform.scale.x.signum() * sc;
+                        transform.scale.y = transform.scale.y.signum() * sc;
                     }
                     if let Some(deg) = rotation {
                         transform.rotation = Quat::from_rotation_z(deg.to_radians());
