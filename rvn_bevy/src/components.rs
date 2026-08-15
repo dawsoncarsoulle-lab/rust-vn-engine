@@ -58,8 +58,9 @@ pub struct SfxSource {
 
 /// Kind of visual transition. Determines how the entity animates
 /// in addition to (or instead of) a simple alpha fade.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TransitionKind {
+    #[default]
     Fade,
     Dissolve,
     SlideLeft,
@@ -70,12 +71,6 @@ pub enum TransitionKind {
     ZoomOut,
     Wipe,
     Blur,
-}
-
-impl Default for TransitionKind {
-    fn default() -> Self {
-        TransitionKind::Fade
-    }
 }
 
 /// Animation d'opacité et/ou de transform sur un sprite ou un fond (visuel).
