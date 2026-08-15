@@ -104,6 +104,13 @@ impl CharacterRegistry {
 
 // ─── VnRenderState ────────────────────────────────────────────────────────────
 
+/// Skip mode: when active, the engine auto-advances dialogue
+/// without waiting for player input. Toggle with a key (e.g. Ctrl).
+#[derive(Resource, Default, Debug)]
+pub struct SkipMode {
+    pub active: bool,
+}
+
 #[derive(Resource, Default)]
 pub struct VnRenderState {
     pub background: Option<String>,

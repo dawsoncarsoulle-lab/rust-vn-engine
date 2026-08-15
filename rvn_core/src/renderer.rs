@@ -32,6 +32,16 @@ pub trait Renderer {
 
     /// Arrête l'animation en cours sur un sprite et restaure sa transform de base.
     fn stop_sprite_animation(&mut self, _id: &str) {}
+    fn set_sprite_effect(
+        &mut self,
+        _id: &str,
+        _flip_x: Option<bool>,
+        _flip_y: Option<bool>,
+        _scale: Option<f32>,
+        _rotation: Option<f32>,
+        _tint: Option<&str>,
+    ) {
+    }
 
     fn show_dialogue(&mut self, character: Option<&str>, text: &str);
     fn show_choice(&mut self, options: &[String]) -> usize;

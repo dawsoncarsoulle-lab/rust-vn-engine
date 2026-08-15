@@ -720,7 +720,9 @@ fn collect_block(
             | Statement::MusicStop { .. }
             | Statement::MusicVolume { .. }
             | Statement::TypewriterSet { .. }
-            | Statement::TypewriterSpeed { .. } => {}
+            | Statement::TypewriterSpeed { .. }
+            | Statement::VoiceStop
+            | Statement::SpriteEffect { .. } => {}
         }
         if let Statement::SpriteAnimate {
             animation, params, ..

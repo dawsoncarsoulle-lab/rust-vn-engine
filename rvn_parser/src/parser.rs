@@ -551,7 +551,7 @@ impl<'a> Parser<'a> {
             Some(Token::String(_)) => {
                 let tok = self.expect("chemin de fichier après `use`")?;
                 Ok(Statement::Use {
-                    paths: vec![Self::unwrap_string(&tok).to_string()],
+                    paths: vec![Parser::unwrap_string(&tok).to_string()],
                 })
             }
             Some(Token::BraceOpen) => {
@@ -566,7 +566,7 @@ impl<'a> Parser<'a> {
                         }
                         Some(Token::String(_)) => {
                             let tok = self.expect("chemin de fichier dans `use { ... }`")?;
-                            paths.push(Self::unwrap_string(&tok).to_string());
+                            paths.push(Parser::unwrap_string(&tok).to_string());
                             match self.peek().cloned() {
                                 Some(Token::Comma) => {
                                     self.advance();
@@ -739,7 +739,7 @@ impl<'a> Parser<'a> {
                     match key.as_str() {
                         "name" => {
                             let tok = self.expect("string pour name")?.clone();
-                            name = Some(Self::unwrap_string(&tok).to_string());
+                            name = Some(Parser::unwrap_string(&tok).to_string());
                         }
                         "area" => area = Some(self.parse_rect()?),
                         "hover_area" => hover_area = Some(self.parse_rect()?),
@@ -857,7 +857,7 @@ impl<'a> Parser<'a> {
                 let tok = self.expect("valeur de config")?.clone();
                 Ok(Statement::Config {
                     key: ident,
-                    value: Self::unwrap_string(&tok).to_string(),
+                    value: Parser::unwrap_string(&tok).to_string(),
                 })
             }
             Some(Token::String(raw)) => {
@@ -885,6 +885,9 @@ impl<'a> Parser<'a> {
         let method = self.expect_ident("nom de méthode")?;
         self.expect("(")?;
 
+        if method == "effect" {
+            return self.parse_effect_call(target);
+        }
         if method == "animate" {
             return self.parse_animate_call(target);
         }
@@ -1208,6 +1211,78 @@ impl<'a> Parser<'a> {
     }
 
     /// `set nom = expr`
+    fn parse_effect_call(&mut self, target: String) -> ParseResult<Statement> {
+        // `char.effect(flip_x: true, scale: 1.5, rotation: 45, tint: "#ff0000")`
+        let mut flip_x = None;
+        let mut flip_y = None;
+        let mut scale = None;
+        let mut rotation = None;
+        let mut tint = None;
+        loop {
+            let loc = self.current_location();
+            match self.peek().cloned() {
+                Some(Token::ParenClose) => {
+                    self.advance();
+                    break;
+                }
+                Some(Token::Ident(_)) => {
+                    let key = self.expect_ident("effect parameter name")?;
+                    self.expect(":")?;
+                    match key.as_str() {
+                        "flip_x" => {
+                            let tok = self.advance().cloned();
+                            flip_x = Some(matches!(tok, Some(Token::True)));
+                        }
+                        "flip_y" => {
+                            let tok = self.advance().cloned();
+                            flip_y = Some(matches!(tok, Some(Token::True)));
+                        }
+                        "scale" => {
+                            let tok = self.advance().cloned();
+                            scale = match tok {
+                                Some(Token::Int(n)) => Some(n as f32),
+                                Some(Token::Float(f)) => Some(f),
+                                _ => None,
+                            };
+                        }
+                        "rotation" => {
+                            let tok = self.advance().cloned();
+                            rotation = match tok {
+                                Some(Token::Int(n)) => Some(n as f32),
+                                Some(Token::Float(f)) => Some(f),
+                                _ => None,
+                            };
+                        }
+                        "tint" => {
+                            let tok = self.expect("string color for tint")?.clone();
+                            tint = Some(Parser::unwrap_string(&tok).to_string());
+                        }
+                        _ => {
+                            return Err(self.err_msg(
+                                loc,
+                                format!("unknown effect parameter `{key}`"),
+                                "flip_x, flip_y, scale, rotation, tint",
+                            ))
+                        }
+                    }
+                    if matches!(self.peek(), Some(Token::Comma)) {
+                        self.advance();
+                    }
+                }
+                Some(tok) => return Err(self.err_token(loc, &tok, "effect parameter or )")),
+                None => return Err(self.err_eof(loc, ") pour fermer effect")),
+            }
+        }
+        Ok(Statement::SpriteEffect {
+            character_id: target,
+            flip_x,
+            flip_y,
+            scale,
+            rotation,
+            tint,
+        })
+    }
+
     fn parse_set(&mut self) -> ParseResult<Statement> {
         self.advance();
         let mut name = self.expect_ident("nom de variable")?;
@@ -1275,7 +1350,7 @@ impl<'a> Parser<'a> {
         let mut args = Vec::new();
         while let Some(Token::String(_)) = self.peek() {
             let tok = self.advance().unwrap().clone();
-            args.push(Self::unwrap_string(&tok).to_string());
+            args.push(Parser::unwrap_string(&tok).to_string());
             if matches!(self.peek(), Some(Token::Comma)) {
                 self.advance();
             }

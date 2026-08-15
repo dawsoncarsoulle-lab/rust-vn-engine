@@ -25,6 +25,7 @@ pub fn input_system(
     imagemap_state: Res<ImagemapState>,
     tw_state: Res<TypewriterState>,
     mut choice_focus: ResMut<ChoiceFocus>,
+    mut skip_mode: ResMut<SkipMode>,
     mut player_events: EventWriter<PlayerInput>,
 ) {
     // ── Escape → menu ────────────────────────────────────────────────────────
@@ -123,6 +124,16 @@ pub fn input_system(
     if scrolled_up || keys.just_pressed(KeyCode::ArrowUp) {
         player_events.send(PlayerInput::OpenHistory);
         return;
+    }
+
+    // ── Toggle skip mode (Ctrl) ──────────────────────────────────────
+    if keys.just_pressed(KeyCode::ControlLeft) || keys.just_pressed(KeyCode::ControlRight) {
+        skip_mode.active = !skip_mode.active;
+    }
+
+    // ── Auto-advance when skip mode is active ──
+    if skip_mode.active && matches!(render_state.state, crate::resources::VnGameState::Dialogue) {
+        player_events.send(PlayerInput::Advance);
     }
 
     // ── Avancer / skip typewriter ─────────────────────────────────────────────

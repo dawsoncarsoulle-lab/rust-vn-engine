@@ -371,6 +371,7 @@ fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
         .insert_resource(theme_watcher)
         .insert_resource(VnEngine(engine))
         .insert_resource(VnRenderState::default())
+        .insert_resource(crate::resources::SkipMode::default())
         .insert_resource(ImagemapState::default())
         .insert_resource(MusicEntity::default())
         .insert_resource(MusicPlaybackState::default())

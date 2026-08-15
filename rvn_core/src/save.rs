@@ -190,6 +190,8 @@ pub struct SaveData {
     pub label: String,
     pub timestamp: u64,
     pub script_name: String,
+    #[serde(default)]
+    pub thumbnail: Option<String>,
     pub pc: usize,
     pub background_image: String,
     pub call_stack: Vec<usize>,
@@ -209,6 +211,11 @@ impl SaveData {
             label,
             timestamp: current_unix_timestamp_secs(),
             script_name,
+            thumbnail: if state.background_image.is_empty() {
+                None
+            } else {
+                Some(state.background_image.clone())
+            },
             pc: state.current_interactive_pc,
             background_image: state.background_image.clone(),
             call_stack: state.call_stack.clone(),

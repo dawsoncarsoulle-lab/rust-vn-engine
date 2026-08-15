@@ -285,6 +285,15 @@ pub enum Statement {
     SpriteStopAnimation {
         character_id: String,
     },
+    /// Apply visual effects to a sprite: flip, scale, rotation, tint.
+    SpriteEffect {
+        character_id: String,
+        flip_x: Option<bool>,
+        flip_y: Option<bool>,
+        scale: Option<f32>,
+        rotation: Option<f32>,
+        tint: Option<String>,
+    },
     MethodCall {
         target: String,
         method: String,

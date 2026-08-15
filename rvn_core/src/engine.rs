@@ -687,6 +687,24 @@ impl<R: Renderer> Engine<R> {
                 self.renderer.stop_sprite_animation(&character_id);
                 self.state.pc += 1;
             }
+            Statement::SpriteEffect {
+                character_id,
+                flip_x,
+                flip_y,
+                scale,
+                rotation,
+                tint,
+            } => {
+                self.renderer.set_sprite_effect(
+                    &character_id,
+                    flip_x,
+                    flip_y,
+                    scale,
+                    rotation,
+                    tint.as_deref(),
+                );
+                self.state.pc += 1;
+            }
             Statement::MethodCall {
                 target,
                 method,
