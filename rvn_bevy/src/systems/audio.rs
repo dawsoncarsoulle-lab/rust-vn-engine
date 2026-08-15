@@ -173,7 +173,7 @@ pub fn audio_system(
                 commands.spawn((
                     Name::new(format!("voice:{}", path)),
                     AudioBundle {
-                        source: asset_server.load(path.as_str()),
+                        source: asset_server.load(&path),
                         settings: PlaybackSettings::DESPAWN,
                     },
                 ));
