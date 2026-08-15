@@ -724,7 +724,9 @@ fn collect_block(
             | Statement::TypewriterSet { .. }
             | Statement::TypewriterSpeed { .. }
             | Statement::VoiceStop
-            | Statement::SpriteEffect { .. } => {}
+            | Statement::SpriteEffect { .. }
+            | Statement::Timer { .. }
+            | Statement::TimerCancel => {}
         }
         if let Statement::SpriteAnimate {
             animation, params, ..
@@ -2062,6 +2064,15 @@ fn collect_expr_vars(expr: &Expr, out: &mut Vec<(String, Location)>, loc: &Locat
                 collect_expr_vars(arg, out, loc);
             }
         }
+        Expr::ListLit(items) => {
+            for item in items {
+                collect_expr_vars(item, out, loc);
+            }
+        }
+        Expr::Index { target, index } => {
+            collect_expr_vars(target, out, loc);
+            collect_expr_vars(index, out, loc);
+        }
     }
 }
 
@@ -2089,6 +2100,13 @@ fn expr_to_display(expr: &Expr) -> String {
         Expr::Call { name, args } => {
             let args_str: Vec<String> = args.iter().map(expr_to_display).collect();
             format!("{}({})", name, args_str.join(", "))
+        }
+        Expr::ListLit(items) => {
+            let parts: Vec<String> = items.iter().map(expr_to_display).collect();
+            format!("[{}]", parts.join(", "))
+        }
+        Expr::Index { target, index } => {
+            format!("{}[{}]", expr_to_display(target), expr_to_display(index))
         }
         Expr::BinOp { op, left, right } => format!(
             "{} {:?} {}",

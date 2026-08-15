@@ -113,6 +113,7 @@ pub enum Value {
     Int(i64),
     Float(f32),
     Str(String),
+    List(Vec<Value>),
 }
 
 impl std::fmt::Display for Value {
@@ -122,6 +123,10 @@ impl std::fmt::Display for Value {
             Value::Int(n) => write!(f, "{n}"),
             Value::Float(x) => write!(f, "{x}"),
             Value::Str(s) => write!(f, "{s}"),
+            Value::List(items) => {
+                let parts: Vec<String> = items.iter().map(|v| v.to_string()).collect();
+                write!(f, "[{}]", parts.join(", "))
+            }
         }
     }
 }
@@ -294,6 +299,14 @@ pub enum Statement {
         rotation: Option<f32>,
         tint: Option<String>,
     },
+    /// Set a timer that triggers a label after N seconds.
+    /// `timer 5.0 => jump escape_failed`
+    Timer {
+        duration_secs: f32,
+        action: String,
+    },
+    /// Cancel any active timer.
+    TimerCancel,
     MethodCall {
         target: String,
         method: String,

@@ -340,7 +340,7 @@ impl<'a> Parser<'a> {
 
     fn parse_atom(&mut self) -> ParseResult<Expr> {
         let loc = self.current_location();
-        match self.advance().cloned() {
+        let mut expr = match self.advance().cloned() {
             Some(Token::Int(n)) => Ok(Expr::Int(n)),
             Some(Token::Float(f)) => Ok(Expr::Float(f)),
             Some(Token::True) => Ok(Expr::Bool(true)),
@@ -383,9 +383,37 @@ impl<'a> Parser<'a> {
                     None => Err(self.err_eof(loc2, "`)`")),
                 }
             }
-            Some(tok) => Err(self.err_token(loc, &tok, "valeur, variable ou `(expr)`")),
+            Some(Token::BracketOpen) => {
+                // List literal: [a, b, c]
+                self.advance();
+                let mut items = Vec::new();
+                if !matches!(self.peek(), Some(Token::BracketClose)) {
+                    items.push(self.parse_expr()?);
+                    while matches!(self.peek(), Some(Token::Comma)) {
+                        self.advance();
+                        if matches!(self.peek(), Some(Token::BracketClose)) {
+                            break; // trailing comma
+                        }
+                        items.push(self.parse_expr()?);
+                    }
+                }
+                self.expect("]")?;
+                Ok(Expr::ListLit(items))
+            }
+            Some(tok) => Err(self.err_token(loc, &tok, "valeur, variable, `(expr)` ou `[list]`")),
             None => Err(self.err_eof(loc, "expression")),
+        }?;
+        // Check for index access: expr[0], arr[i]
+        while matches!(self.peek(), Some(Token::BracketOpen)) {
+            self.advance();
+            let index = self.parse_expr()?;
+            self.expect("]")?;
+            expr = Expr::Index {
+                target: Box::new(expr),
+                index: Box::new(index),
+            };
         }
+        Ok(expr)
     }
 
     // ── INTERPOLATION ─────────────────────────────────────────────────────────
@@ -537,6 +565,7 @@ impl<'a> Parser<'a> {
             Some(Token::Choice) => self.parse_choice(),
             Some(Token::Set) | Some(Token::Define) | Some(Token::Default) => self.parse_set(),
             Some(Token::Voice) => self.parse_voice(),
+            Some(Token::Timer) => self.parse_timer(),
             Some(Token::If) => self.parse_if(),
             Some(Token::Label) => self.parse_label(),
             Some(Token::Jump) => self.parse_jump(),
@@ -1331,6 +1360,45 @@ impl<'a> Parser<'a> {
         let tok = self.expect("string filename for voice")?.clone();
         let file = Self::unwrap_string(&tok).to_string();
         Ok(Statement::VoicePlay { file })
+    }
+
+    /// `timer 5.0 => jump label` or `timer cancel`
+    fn parse_timer(&mut self) -> ParseResult<Statement> {
+        self.advance();
+        // `timer cancel` cancels any active timer.
+        if matches!(self.peek(), Some(Token::Ident(_))) {
+            let id = self.expect_ident("timer command")?;
+            if id == "cancel" {
+                return Ok(Statement::TimerCancel);
+            }
+            return Err(self.err_msg(
+                self.current_location(),
+                format!("unknown timer subcommand `{id}`"),
+                "`cancel` or a number",
+            ));
+        }
+        // Parse duration (int or float).
+        let duration = match self.advance().cloned() {
+            Some(Token::Int(n)) => n as f32,
+            Some(Token::Float(f)) => f,
+            Some(tok) => {
+                return Err(self.err_token(
+                    self.current_location(),
+                    &tok,
+                    "number (duration in seconds)",
+                ))
+            }
+            None => return Err(self.err_eof(self.current_location(), "duration")),
+        };
+        // Expect => then action (jump or call).
+        self.expect("=>")?;
+        let action_kind = self.expect_ident("jump or call after =>")?;
+        let target = self.expect_ident("label name")?;
+        let action = format!("{} {}", action_kind, target);
+        Ok(Statement::Timer {
+            duration_secs: duration,
+            action,
+        })
     }
 
     /// `if expr { … } [else { … }]`

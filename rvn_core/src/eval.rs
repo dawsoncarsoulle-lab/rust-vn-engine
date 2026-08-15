@@ -46,6 +46,47 @@ pub fn eval_expr(expr: &Expr, vars: &HashMap<String, Value>) -> EvalResult<Value
 
         Expr::BinOp { op, left, right } => eval_binop(op, left, right, vars),
         Expr::Call { name, args } => eval_call(name, args, vars),
+        Expr::ListLit(items) => {
+            let evaluated: Vec<Value> = items
+                .iter()
+                .map(|e| eval_expr(e, vars))
+                .collect::<Result<_, _>>()?;
+            Ok(Value::List(evaluated))
+        }
+        Expr::Index { target, index } => {
+            let target_val = eval_expr(target, vars)?;
+            let index_val = eval_expr(index, vars)?;
+            match (&target_val, &index_val) {
+                (Value::List(items), Value::Int(i)) => {
+                    let idx = *i as usize;
+                    items
+                        .get(idx)
+                        .cloned()
+                        .ok_or_else(|| EvalError::TypeMismatch {
+                            op: "index".into(),
+                            left: format!("index {} out of bounds (len {})", idx, items.len()),
+                            right: "".into(),
+                        })
+                }
+                (Value::Str(string), Value::Int(i)) => {
+                    let chars: Vec<char> = string.chars().collect();
+                    let idx = *i as usize;
+                    chars
+                        .get(idx)
+                        .map(|c| Value::Str(c.to_string()))
+                        .ok_or_else(|| EvalError::TypeMismatch {
+                            op: "index".into(),
+                            left: format!("index {} out of bounds (len {})", idx, chars.len()),
+                            right: "".into(),
+                        })
+                }
+                _ => Err(EvalError::TypeMismatch {
+                    op: "index".into(),
+                    left: "list or string".into(),
+                    right: "int".into(),
+                }),
+            }
+        }
     }
 }
 
@@ -123,12 +164,155 @@ fn eval_call(name: &str, args: &[Expr], vars: &HashMap<String, Value>) -> EvalRe
         }
         "len" => match evaluated.as_slice() {
             [Value::Str(s)] => Ok(Value::Int(s.len() as i64)),
+            [Value::List(items)] => Ok(Value::Int(items.len() as i64)),
             _ => Err(EvalError::TypeMismatch {
                 op: "len".into(),
+                left: "string or list".into(),
+                right: "".into(),
+            }),
+        },
+        "contains" => match evaluated.as_slice() {
+            [Value::List(items), item] => Ok(Value::Bool(items.iter().any(|i| i == item))),
+            [Value::Str(haystack), Value::Str(needle)] => {
+                Ok(Value::Bool(haystack.contains(needle.as_str())))
+            }
+            _ => Err(EvalError::TypeMismatch {
+                op: "contains".into(),
+                left: "list+value or string+string".into(),
+                right: "".into(),
+            }),
+        },
+        "upper" => match evaluated.as_slice() {
+            [Value::Str(s)] => Ok(Value::Str(s.to_uppercase())),
+            _ => Err(EvalError::TypeMismatch {
+                op: "upper".into(),
                 left: "string".into(),
                 right: "".into(),
             }),
         },
+        "lower" => match evaluated.as_slice() {
+            [Value::Str(s)] => Ok(Value::Str(s.to_lowercase())),
+            _ => Err(EvalError::TypeMismatch {
+                op: "lower".into(),
+                left: "string".into(),
+                right: "".into(),
+            }),
+        },
+        "capitalize" => match evaluated.as_slice() {
+            [Value::Str(s)] => {
+                let mut c = s.chars();
+                match c.next() {
+                    Some(first) => Ok(Value::Str(
+                        first.to_uppercase().collect::<String>() + c.as_str(),
+                    )),
+                    None => Ok(Value::Str(String::new())),
+                }
+            }
+            _ => Err(EvalError::TypeMismatch {
+                op: "capitalize".into(),
+                left: "string".into(),
+                right: "".into(),
+            }),
+        },
+        "trim" => match evaluated.as_slice() {
+            [Value::Str(s)] => Ok(Value::Str(s.trim().to_string())),
+            _ => Err(EvalError::TypeMismatch {
+                op: "trim".into(),
+                left: "string".into(),
+                right: "".into(),
+            }),
+        },
+        "replace" => match evaluated.as_slice() {
+            [Value::Str(s), Value::Str(from), Value::Str(to)] => {
+                Ok(Value::Str(s.replace(from.as_str(), to.as_str())))
+            }
+            _ => Err(EvalError::TypeMismatch {
+                op: "replace".into(),
+                left: "string, string, string".into(),
+                right: "".into(),
+            }),
+        },
+        "substring" => match evaluated.as_slice() {
+            [Value::Str(s), Value::Int(start), Value::Int(end)] => {
+                let chars: Vec<char> = s.chars().collect();
+                let start = (*start as usize).min(chars.len());
+                let end = (*end as usize).min(chars.len());
+                if start <= end {
+                    Ok(Value::Str(chars[start..end].iter().collect()))
+                } else {
+                    Ok(Value::Str(String::new()))
+                }
+            }
+            _ => Err(EvalError::TypeMismatch {
+                op: "substring".into(),
+                left: "string, int, int".into(),
+                right: "".into(),
+            }),
+        },
+        "split" => match evaluated.as_slice() {
+            [Value::Str(s), Value::Str(sep)] => {
+                let parts: Vec<Value> = s
+                    .split(sep.as_str())
+                    .map(|p| Value::Str(p.to_string()))
+                    .collect();
+                Ok(Value::List(parts))
+            }
+            _ => Err(EvalError::TypeMismatch {
+                op: "split".into(),
+                left: "string, string".into(),
+                right: "".into(),
+            }),
+        },
+        "key_pressed" => match evaluated.as_slice() {
+            [Value::Str(key)] => {
+                let input_key = vars.get("__input_key");
+                Ok(Value::Bool(input_key == Some(&Value::Str(key.clone()))))
+            }
+            _ => Err(EvalError::TypeMismatch {
+                op: "key_pressed".into(),
+                left: "string".into(),
+                right: "".into(),
+            }),
+        },
+        "mouse_clicked" => {
+            let clicked = vars
+                .get("__input_mouse_clicked")
+                .and_then(|v| {
+                    if let Value::Bool(b) = v {
+                        Some(*b)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(false);
+            Ok(Value::Bool(clicked))
+        }
+        "mouse_x" => {
+            let x = vars
+                .get("__input_mouse_x")
+                .and_then(|v| {
+                    if let Value::Float(f) = v {
+                        Some(*f)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0.0);
+            Ok(Value::Float(x))
+        }
+        "mouse_y" => {
+            let y = vars
+                .get("__input_mouse_y")
+                .and_then(|v| {
+                    if let Value::Float(f) = v {
+                        Some(*f)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0.0);
+            Ok(Value::Float(y))
+        }
         _ => Err(EvalError::UndefinedVar(format!(
             "unknown function `{name}`"
         ))),
@@ -163,6 +347,7 @@ pub fn eval_bool(expr: &Expr, vars: &HashMap<String, Value>) -> EvalResult<bool>
         Value::Int(n) => Ok(n != 0),
         Value::Float(f) => Ok(f != 0.0),
         Value::Str(s) => Ok(!s.is_empty()),
+        Value::List(items) => Ok(!items.is_empty()),
     }
 }
 
@@ -242,6 +427,7 @@ fn values_eq(a: &Value, b: &Value) -> bool {
         (Value::Float(x), Value::Int(y)) => *x == (*y as f32),
         (Value::Bool(x), Value::Bool(y)) => x == y,
         (Value::Str(x), Value::Str(y)) => x == y,
+        (Value::List(a), Value::List(b)) => a == b,
         _ => false,
     }
 }
@@ -277,6 +463,7 @@ fn type_name(v: &Value) -> &'static str {
         Value::Int(_) => "int",
         Value::Float(_) => "float",
         Value::Str(_) => "string",
+        Value::List(_) => "list",
     }
 }
 
