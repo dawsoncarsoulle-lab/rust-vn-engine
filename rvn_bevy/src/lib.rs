@@ -3,7 +3,8 @@
 #![allow(
     clippy::too_many_arguments,
     clippy::type_complexity,
-    clippy::clone_on_copy
+    clippy::clone_on_copy,
+    dead_code,
 )]
 //! Library interface for the RVN Bevy runtime.
 //!
