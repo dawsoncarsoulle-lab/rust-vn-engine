@@ -56,7 +56,29 @@ pub struct SfxSource {
     pub file: String,
 }
 
-/// Animation d'opacité sur un sprite ou un fond (visuel).
+/// Kind of visual transition. Determines how the entity animates
+/// in addition to (or instead of) a simple alpha fade.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransitionKind {
+    Fade,
+    Dissolve,
+    SlideLeft,
+    SlideRight,
+    SlideUp,
+    SlideDown,
+    ZoomIn,
+    ZoomOut,
+    Wipe,
+    Blur,
+}
+
+impl Default for TransitionKind {
+    fn default() -> Self {
+        TransitionKind::Fade
+    }
+}
+
+/// Animation d'opacité et/ou de transform sur un sprite ou un fond (visuel).
 #[derive(Component)]
 pub struct FadeAnim {
     pub from: f32,
@@ -64,6 +86,9 @@ pub struct FadeAnim {
     pub duration_secs: f32,
     pub elapsed_secs: f32,
     pub despawn_on_finish: bool,
+    /// Visual transition style. When not Fade/Dissolve, the entity
+    /// also animates its transform (slide/zoom) in addition to alpha.
+    pub kind: TransitionKind,
 }
 
 /// Crossfade de volume sur une entité audio.

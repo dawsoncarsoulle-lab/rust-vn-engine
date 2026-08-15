@@ -1113,7 +1113,39 @@ impl<'a> Parser<'a> {
                 let d = self.try_parse_duration(Transition::DEFAULT_DISSOLVE_MS)?;
                 Ok(Transition::Dissolve { duration_ms: d })
             }
-            Some(tok) => Err(self.err_token(loc, &tok, "`fade` ou `dissolve` après `with`")),
+            Some(Token::SlideLeft) => {
+                let d = self.try_parse_duration(Transition::DEFAULT_SLIDE_MS)?;
+                Ok(Transition::SlideLeft { duration_ms: d })
+            }
+            Some(Token::SlideRight) => {
+                let d = self.try_parse_duration(Transition::DEFAULT_SLIDE_MS)?;
+                Ok(Transition::SlideRight { duration_ms: d })
+            }
+            Some(Token::SlideUp) => {
+                let d = self.try_parse_duration(Transition::DEFAULT_SLIDE_MS)?;
+                Ok(Transition::SlideUp { duration_ms: d })
+            }
+            Some(Token::SlideDown) => {
+                let d = self.try_parse_duration(Transition::DEFAULT_SLIDE_MS)?;
+                Ok(Transition::SlideDown { duration_ms: d })
+            }
+            Some(Token::ZoomIn) => {
+                let d = self.try_parse_duration(Transition::DEFAULT_ZOOM_MS)?;
+                Ok(Transition::ZoomIn { duration_ms: d })
+            }
+            Some(Token::ZoomOut) => {
+                let d = self.try_parse_duration(Transition::DEFAULT_ZOOM_MS)?;
+                Ok(Transition::ZoomOut { duration_ms: d })
+            }
+            Some(Token::Wipe) => {
+                let d = self.try_parse_duration(Transition::DEFAULT_WIPE_MS)?;
+                Ok(Transition::Wipe { duration_ms: d })
+            }
+            Some(Token::Blur) => {
+                let d = self.try_parse_duration(Transition::DEFAULT_BLUR_MS)?;
+                Ok(Transition::Blur { duration_ms: d })
+            }
+            Some(tok) => Err(self.err_token(loc, &tok, "`fade`, `dissolve`, `slideleft`, `slideright`, `slideup`, `slidedown`, `zoomin`, `zoomout`, `wipe` ou `blur` après `with`")),
             None => Err(self.err_eof(loc, "nom de transition")),
         }
     }

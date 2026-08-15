@@ -2006,14 +2006,26 @@ fn validate_cinematic_transition(
     let Some(transition) = transition else {
         return;
     };
-    if !matches!(transition, "fade" | "dissolve") {
+    if !matches!(
+        transition,
+        "fade"
+            | "dissolve"
+            | "slideleft"
+            | "slideright"
+            | "slideup"
+            | "slidedown"
+            | "zoomin"
+            | "zoomout"
+            | "wipe"
+            | "blur"
+    ) {
         diagnostics.push(
             Diagnostic::error(
                 "invalid-transition",
                 format!("cinematic transition '{transition}' is not supported"),
             )
             .at(Some(loc.clone()))
-            .suggest("use `with fade`, `with dissolve`, or omit the transition"),
+            .suggest("use `with fade`, `with dissolve`, `with slideleft`, `with zoomin`, etc."),
         );
     }
 }

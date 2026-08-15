@@ -501,6 +501,14 @@ Transitions control how visual changes (scenes, sprites, music) appear:
 |---|---|---|
 | `fade` | Fade to/from black | 500 ms |
 | `dissolve` | Cross-fade between states | 300 ms |
+| `slideleft` | Slide in from the right / out to the left | 400 ms |
+| `slideright` | Slide in from the left / out to the right | 400 ms |
+| `slideup` | Slide in from the bottom / out to the top | 400 ms |
+| `slidedown` | Slide in from the top / out to the bottom | 400 ms |
+| `zoomin` | Scale up from small to normal | 400 ms |
+| `zoomout` | Scale from normal to large and fade | 400 ms |
+| `wipe` | Wipe transition (alpha-based) | 500 ms |
+| `blur` | Blur transition (alpha-based) | 400 ms |
 | *(none)* | Instant change | — |
 
 ```rvn

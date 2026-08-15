@@ -106,9 +106,18 @@ impl From<SavePosition> for Position {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum SaveTransition {
-    Fade { duration_ms: u32 },
-    Dissolve { duration_ms: u32 },
+    Fade {
+        duration_ms: u32,
+    },
+    Dissolve {
+        duration_ms: u32,
+    },
     None,
+    /// Catch-all for extended transitions (slide, zoom, wipe, blur).
+    Other {
+        kind: String,
+        duration_ms: u32,
+    },
 }
 
 impl From<&Transition> for SaveTransition {
@@ -121,6 +130,16 @@ impl From<&Transition> for SaveTransition {
                 duration_ms: *duration_ms,
             },
             Transition::None => SaveTransition::None,
+            // All new transitions are serialized generically.
+            other => SaveTransition::Other {
+                kind: other
+                    .to_string()
+                    .split('(')
+                    .next()
+                    .unwrap_or("fade")
+                    .to_string(),
+                duration_ms: other.duration_ms(),
+            },
         }
     }
 }
@@ -131,6 +150,9 @@ impl From<SaveTransition> for Transition {
             SaveTransition::Fade { duration_ms } => Transition::Fade { duration_ms },
             SaveTransition::Dissolve { duration_ms } => Transition::Dissolve { duration_ms },
             SaveTransition::None => Transition::None,
+            // Extended transitions fall back to Fade on load (the visual
+            // difference is transient; saved state just needs a valid transition).
+            SaveTransition::Other { duration_ms, .. } => Transition::Fade { duration_ms },
         }
     }
 }

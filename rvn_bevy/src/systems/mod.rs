@@ -32,7 +32,7 @@ pub mod save_menu;
 // Overlay de debug : PC, statement courant et variables runtime.
 pub mod debug_overlay;
 
-use crate::components::FadeAnim;
+use crate::components::{FadeAnim, TransitionKind};
 use rvn_parser::Transition;
 
 /// Largeur de la fenêtre de rendu (pixels logiques).
@@ -42,19 +42,39 @@ pub const WIN_H: f32 = 720.0;
 /// Marge entre le haut de la textbox et le bas des boutons de choix.
 pub const CHOICE_MARGIN_ABOVE_BOX: f32 = 12.0;
 
+/// Maps a `Transition` to its `TransitionKind` for animation.
+pub fn transition_kind(t: &Transition) -> Option<TransitionKind> {
+    use crate::components::TransitionKind as TK;
+    Some(match t {
+        Transition::Fade { .. } => TK::Fade,
+        Transition::Dissolve { .. } => TK::Dissolve,
+        Transition::SlideLeft { .. } => TK::SlideLeft,
+        Transition::SlideRight { .. } => TK::SlideRight,
+        Transition::SlideUp { .. } => TK::SlideUp,
+        Transition::SlideDown { .. } => TK::SlideDown,
+        Transition::ZoomIn { .. } => TK::ZoomIn,
+        Transition::ZoomOut { .. } => TK::ZoomOut,
+        Transition::Wipe { .. } => TK::Wipe,
+        Transition::Blur { .. } => TK::Blur,
+        Transition::None => return None,
+    })
+}
+
 /// Crée un `FadeAnim` fade-in depuis la transition fournie.
 /// Retourne `None` si la transition est `Transition::None`.
 pub fn make_fade_in(t: &Transition) -> Option<FadeAnim> {
     let dur_ms = match t {
-        Transition::Fade { duration_ms } | Transition::Dissolve { duration_ms } => *duration_ms,
         Transition::None => return None,
+        _ => t.duration_ms(),
     };
+    let kind = transition_kind(t)?;
     Some(FadeAnim {
         from: 0.0,
         to: 1.0,
         duration_secs: dur_ms as f32 / 1000.0,
         elapsed_secs: 0.0,
         despawn_on_finish: false,
+        kind,
     })
 }
 
@@ -63,15 +83,17 @@ pub fn make_fade_in(t: &Transition) -> Option<FadeAnim> {
 /// Retourne `None` si la transition est `Transition::None`.
 pub fn make_fade_out(t: &Transition) -> Option<FadeAnim> {
     let dur_ms = match t {
-        Transition::Fade { duration_ms } | Transition::Dissolve { duration_ms } => *duration_ms,
         Transition::None => return None,
+        _ => t.duration_ms(),
     };
+    let kind = transition_kind(t)?;
     Some(FadeAnim {
         from: 1.0,
         to: 0.0,
         duration_secs: dur_ms as f32 / 1000.0,
         elapsed_secs: 0.0,
         despawn_on_finish: true,
+        kind,
     })
 }
 

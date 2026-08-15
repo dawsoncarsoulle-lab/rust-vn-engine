@@ -49,12 +49,41 @@ impl std::fmt::Display for Position {
 pub enum Transition {
     Fade { duration_ms: u32 },
     Dissolve { duration_ms: u32 },
+    SlideLeft { duration_ms: u32 },
+    SlideRight { duration_ms: u32 },
+    SlideUp { duration_ms: u32 },
+    SlideDown { duration_ms: u32 },
+    ZoomIn { duration_ms: u32 },
+    ZoomOut { duration_ms: u32 },
+    Wipe { duration_ms: u32 },
+    Blur { duration_ms: u32 },
     None,
 }
 
 impl Transition {
     pub const DEFAULT_FADE_MS: u32 = 500;
     pub const DEFAULT_DISSOLVE_MS: u32 = 300;
+    pub const DEFAULT_SLIDE_MS: u32 = 400;
+    pub const DEFAULT_ZOOM_MS: u32 = 400;
+    pub const DEFAULT_WIPE_MS: u32 = 500;
+    pub const DEFAULT_BLUR_MS: u32 = 400;
+
+    /// Returns the duration in milliseconds for any non-None transition.
+    pub fn duration_ms(&self) -> u32 {
+        match self {
+            Transition::Fade { duration_ms }
+            | Transition::Dissolve { duration_ms }
+            | Transition::SlideLeft { duration_ms }
+            | Transition::SlideRight { duration_ms }
+            | Transition::SlideUp { duration_ms }
+            | Transition::SlideDown { duration_ms }
+            | Transition::ZoomIn { duration_ms }
+            | Transition::ZoomOut { duration_ms }
+            | Transition::Wipe { duration_ms }
+            | Transition::Blur { duration_ms } => *duration_ms,
+            Transition::None => 0,
+        }
+    }
 }
 
 impl std::fmt::Display for Transition {
@@ -62,6 +91,14 @@ impl std::fmt::Display for Transition {
         match self {
             Transition::Fade { duration_ms } => write!(f, "fade({}ms)", duration_ms),
             Transition::Dissolve { duration_ms } => write!(f, "dissolve({}ms)", duration_ms),
+            Transition::SlideLeft { duration_ms } => write!(f, "slideleft({}ms)", duration_ms),
+            Transition::SlideRight { duration_ms } => write!(f, "slideright({}ms)", duration_ms),
+            Transition::SlideUp { duration_ms } => write!(f, "slideup({}ms)", duration_ms),
+            Transition::SlideDown { duration_ms } => write!(f, "slidedown({}ms)", duration_ms),
+            Transition::ZoomIn { duration_ms } => write!(f, "zoomin({}ms)", duration_ms),
+            Transition::ZoomOut { duration_ms } => write!(f, "zoomout({}ms)", duration_ms),
+            Transition::Wipe { duration_ms } => write!(f, "wipe({}ms)", duration_ms),
+            Transition::Blur { duration_ms } => write!(f, "blur({}ms)", duration_ms),
             Transition::None => write!(f, "none"),
         }
     }

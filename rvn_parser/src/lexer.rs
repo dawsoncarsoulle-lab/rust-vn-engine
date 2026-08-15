@@ -49,6 +49,22 @@ pub enum Token<'a> {
     Fade,
     #[token("dissolve")]
     Dissolve,
+    #[token("slideleft")]
+    SlideLeft,
+    #[token("slideright")]
+    SlideRight,
+    #[token("slideup")]
+    SlideUp,
+    #[token("slidedown")]
+    SlideDown,
+    #[token("zoomin")]
+    ZoomIn,
+    #[token("zoomout")]
+    ZoomOut,
+    #[token("wipe")]
+    Wipe,
+    #[token("blur")]
+    Blur,
     #[token("imagemap")]
     Imagemap,
     #[token("hotspot")]
