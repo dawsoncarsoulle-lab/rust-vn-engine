@@ -346,7 +346,20 @@ impl<'a> Parser<'a> {
             Some(Token::True) => Ok(Expr::Bool(true)),
             Some(Token::False) => Ok(Expr::Bool(false)),
             Some(Token::String(s)) => Ok(Expr::Str(s[1..s.len() - 1].to_string())),
-            Some(Token::Ident(s)) => Ok(Expr::Var(s.to_string())),
+            Some(Token::Ident(s)) => {
+                let mut name = s.to_string();
+                while matches!(self.peek(), Some(Token::Dot)) {
+                    self.advance();
+                    if let Some(Token::Ident(part)) = &self.peek().cloned() {
+                        self.advance();
+                        name.push('.');
+                        name.push_str(&part[..]);
+                    } else {
+                        break;
+                    }
+                }
+                Ok(Expr::Var(name))
+            }
             Some(Token::ParenOpen) => {
                 let inner = self.parse_expr()?;
                 let loc2 = self.current_location();
@@ -435,6 +448,20 @@ impl<'a> Parser<'a> {
                         lit.push(']');
                     } else {
                         lit.push(']');
+                    }
+                }
+                '\\' => {
+                    // Escape sequences: \n → newline, \t → tab, \" → quote, \\ → backslash
+                    match chars.next().map(|(_, c)| c) {
+                        Some('n') => lit.push('\n'),
+                        Some('t') => lit.push('\t'),
+                        Some('"') => lit.push('"'),
+                        Some('\\') => lit.push('\\'),
+                        Some(other) => {
+                            lit.push('\\');
+                            lit.push(other);
+                        }
+                        None => lit.push('\\'),
                     }
                 }
                 _ => lit.push(c),
@@ -1151,7 +1178,14 @@ impl<'a> Parser<'a> {
     /// `set nom = expr`
     fn parse_set(&mut self) -> ParseResult<Statement> {
         self.advance();
-        let name = self.expect_ident("nom de variable")?;
+        let mut name = self.expect_ident("nom de variable")?;
+        // Allow dotted names like `persistent.flag` for persistent variables.
+        while matches!(self.peek(), Some(Token::Dot)) {
+            self.advance();
+            let part = self.expect_ident("nom de variable après `.`")?;
+            name.push('.');
+            name.push_str(&part[..]);
+        }
         self.expect("=")?;
         let value = self.parse_expr()?;
         Ok(Statement::SetVar { name, value })
@@ -1232,9 +1266,20 @@ impl<'a> Parser<'a> {
                     let raw = raw.to_string();
                     self.advance();
                     let label = Self::parse_interpolated_str(&raw[1..raw.len() - 1])?;
+                    // Optional condition: `"option" if condition => { ... }`
+                    let condition = if matches!(self.peek(), Some(Token::If)) {
+                        self.advance();
+                        Some(self.parse_expr()?)
+                    } else {
+                        None
+                    };
                     self.expect("=>")?;
                     self.expect("{")?;
-                    options.push((label, self.parse_block()?));
+                    options.push(ChoiceOption {
+                        label,
+                        condition,
+                        body: self.parse_block()?,
+                    });
                 }
                 Some(tok) => return Err(self.err_token(loc, &tok, "string ou } dans choice")),
                 None => return Err(self.err_eof(loc, "} pour fermer choice")),

@@ -146,6 +146,26 @@ set has_clue = found_clue and trust
 
 Bare assignments without `set` (`route = "light"`) are a parse error; `rvn check` suggests adding `set`.
 
+### Persistent Variables
+
+Variables prefixed with `persistent.` are stored separately and survive across save/load cycles and playthroughs. Use them for unlockable routes, playthrough counters, true-ending flags, and any state that should persist between games.
+
+```rvn
+set persistent.playthroughs = 1
+set persistent.trust_route_unlocked = true
+set persistent.total_endings_seen = persistent.total_endings_seen + 1
+```
+
+Persistent variables can be read in any expression:
+
+```rvn
+if persistent.trust_route_unlocked {
+    eileen "You've been here before."
+}
+```
+
+They are stored in `persistent.json` alongside the engine's internal persistent data (seen CGs, endings, settings). Regular variables (without the `persistent.` prefix) are reset on each new game or load.
+
 ---
 
 ## Expressions
@@ -215,6 +235,21 @@ choice {
 ```
 
 - Choice labels can contain [interpolation](#text-interpolation): `"Open the [color] door"`.
+- An optional `if condition` after the label makes the choice appear only when the condition is true:
+
+```rvn
+choice {
+    "Enter the vault" if has_key => {
+        jump vault
+    }
+    "Force the lock" => {
+        jump lockpick
+    }
+}
+```
+
+  If `has_key` is false, only "Force the lock" appears. If all options are filtered out, the choice is skipped entirely.
+
 - `rvn check` flags duplicate choice text within the same `choice` block and empty `choice` blocks.
 
 ---
@@ -243,6 +278,24 @@ Square brackets `[...]` inside a dialogue string are evaluated as expressions an
 eileen "Current route: [route]."
 eileen "Your score is [score * 2 + bonus] points."
 ```
+
+### Escape Sequences
+
+The following escape sequences are supported inside dialogue strings:
+
+| Escape | Result |
+|---|---|
+| `\n` | Newline (line break within the dialogue) |
+| `\t` | Tab |
+| `\"` | Literal double quote |
+| `\\` | Literal backslash |
+
+```rvn
+eileen "Line one.\nLine two."
+eileen "She said \"hello\" and left."
+```
+
+Bevy's text rendering handles word-wrapped line breaks automatically based on the textbox width. Explicit `\n` forces a line break at that position.
 
 ### Text Tags
 

@@ -382,4 +382,39 @@ mod tests {
             .iter()
             .any(|s| s == "stop_animation:eileen"));
     }
+
+    #[test]
+    fn test_persistent_variable_survives_load() {
+        let src = r#"set persistent.playthroughs = 1"#;
+        let mut e = engine(src);
+        step(&mut e);
+        assert_eq!(
+            e.get_persistent_var("persistent.playthroughs"),
+            Some(&Value::Int(1))
+        );
+        // Export, create a fresh engine, load — persistent vars survive.
+        let exported = e.export_persistent_vars().clone();
+        let src2 = r#"set persistent.playthroughs = 2"#;
+        let mut e2 = engine(src2);
+        e2.load_persistent_vars(&exported);
+        step(&mut e2);
+        assert_eq!(
+            e2.get_persistent_var("persistent.playthroughs"),
+            Some(&Value::Int(2))
+        );
+    }
+
+    #[test]
+    fn test_persistent_variable_read_in_expression() {
+        let src = r#"set persistent.count = 5
+set total = persistent.count + 10"#;
+        let mut e = engine(src);
+        step(&mut e);
+        step(&mut e);
+        assert_eq!(e.get_var("total"), Some(&Value::Int(15)));
+        assert_eq!(
+            e.get_persistent_var("persistent.count"),
+            Some(&Value::Int(5))
+        );
+    }
 }

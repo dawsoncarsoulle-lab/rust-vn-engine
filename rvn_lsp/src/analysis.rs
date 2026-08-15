@@ -814,9 +814,9 @@ fn collect_block(
                 collect_text_exprs(text, source, semantic);
             }
             Statement::Choice { options } => {
-                for (label, body) in options {
-                    collect_text_exprs(label, source, semantic);
-                    collect_block(source, ranges, body, semantic, diagnostics);
+                for opt in options {
+                    collect_text_exprs(&opt.label, source, semantic);
+                    collect_block(source, ranges, &opt.body, semantic, diagnostics);
                 }
             }
             Statement::If {

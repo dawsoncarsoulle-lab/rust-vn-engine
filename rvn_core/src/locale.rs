@@ -331,8 +331,8 @@ pub fn collect_strings_from_flat_script(script: &rvn_parser::Script) -> Vec<Stri
                 strings.push(text_to_locale_key(text));
             }
             rvn_parser::Statement::Choice { options } => {
-                for (label, _) in options {
-                    strings.push(text_to_locale_key(label));
+                for opt in options {
+                    strings.push(text_to_locale_key(&opt.label));
                 }
             }
             _ => {}
@@ -351,9 +351,9 @@ fn collect_recursive(stmts: &[rvn_parser::Statement], out: &mut Vec<String>) {
                 out.push(text_to_locale_key(text));
             }
             Statement::Choice { options } => {
-                for (label, body) in options {
-                    out.push(text_to_locale_key(label));
-                    collect_recursive(body, out);
+                for opt in options {
+                    out.push(text_to_locale_key(&opt.label));
+                    collect_recursive(&opt.body, out);
                 }
             }
             Statement::Use { .. } => {}

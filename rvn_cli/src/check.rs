@@ -609,12 +609,12 @@ fn collect_block(
             }
             Statement::Choice { options } => {
                 validate_duplicate_choice_text(options, &loc, diagnostics);
-                for (label, body) in options {
-                    collect_text_vars(label, &mut symbols.used_vars, &loc);
-                    let locale_key = text_to_locale_key(label);
+                for opt in options {
+                    collect_text_vars(&opt.label, &mut symbols.used_vars, &loc);
+                    let locale_key = text_to_locale_key(&opt.label);
                     validate_text_tags(&locale_key, &loc, diagnostics);
                     symbols.locale_keys.insert(locale_key);
-                    collect_block(body, source, symbols, diagnostics);
+                    collect_block(&opt.body, source, symbols, diagnostics);
                 }
             }
             Statement::SetVar { name, value } => {
@@ -1006,8 +1006,8 @@ fn collect_flow_targets(
                 return;
             }
             Statement::Choice { options } => {
-                for (_, body) in options {
-                    collect_nested_flow_targets(body, targets);
+                for opt in options {
+                    collect_nested_flow_targets(&opt.body, targets);
                 }
             }
             Statement::If {
@@ -1035,8 +1035,8 @@ fn collect_nested_flow_targets(stmts: &[Statement], targets: &mut HashSet<String
                 targets.insert(target.clone());
             }
             Statement::Choice { options } => {
-                for (_, body) in options {
-                    collect_nested_flow_targets(body, targets);
+                for opt in options {
+                    collect_nested_flow_targets(&opt.body, targets);
                 }
             }
             Statement::If {
@@ -1082,13 +1082,13 @@ fn detect_dead_code(stmts: &[Statement], source: &SourceFile, diagnostics: &mut 
 }
 
 fn validate_duplicate_choice_text(
-    options: &[(InterpolatedText, Vec<Statement>)],
+    options: &[rvn_parser::ChoiceOption],
     loc: &Location,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let mut seen = HashSet::new();
-    for (label, _) in options {
-        let text = text_to_locale_key(label);
+    for opt in options {
+        let text = text_to_locale_key(&opt.label);
         if !seen.insert(text.clone()) {
             diagnostics.push(
                 Diagnostic::warning(

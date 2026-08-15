@@ -149,6 +149,15 @@ pub struct AnimationParam {
 
 // ─── AST ─────────────────────────────────────────────────────────────────────
 
+/// A single option within a `choice` block.
+/// `condition` is optional — when present, the option only appears if it evaluates to true.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChoiceOption {
+    pub label: InterpolatedText,
+    pub condition: Option<Condition>,
+    pub body: Vec<Statement>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     /// Charge un ou plusieurs fichiers .rvn avant exécution.
@@ -176,7 +185,7 @@ pub enum Statement {
 
     /// Labels de choix interpolés aussi.
     Choice {
-        options: Vec<(InterpolatedText, Vec<Statement>)>,
+        options: Vec<ChoiceOption>,
     },
 
     /// La valeur est une expression complète (pas juste un littéral).
