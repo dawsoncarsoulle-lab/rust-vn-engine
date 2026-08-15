@@ -272,8 +272,9 @@ pub fn sprite_system(
                 rotation,
                 tint,
             } => {
+                let id = &*id;
                 for (sprite, mut transform, mut sprite_vis) in queries.p2().iter_mut() {
-                    if sprite.id != id {
+                    if &sprite.id != id {
                         continue;
                     }
                     if let Some(fx) = flip_x {
