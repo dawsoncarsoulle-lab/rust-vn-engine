@@ -93,10 +93,8 @@ pub fn audio_system(
         match cmd {
             VnCommand::MusicPlay { file, transition } => {
                 let fade_ms = match &transition {
-                    Transition::Fade { duration_ms } | Transition::Dissolve { duration_ms } => {
-                        Some(*duration_ms)
-                    }
                     Transition::None => None,
+                    other => Some(other.duration_ms()),
                 };
                 #[cfg(target_arch = "wasm32")]
                 {
