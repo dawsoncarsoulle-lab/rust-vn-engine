@@ -5,7 +5,6 @@ members = [
     "rvn_bevy",
     "rvn_cli",
     "rvn_lsp",
-    "r_blueprint",
 ]
 resolver = "2"
 
