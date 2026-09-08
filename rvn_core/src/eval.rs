@@ -96,6 +96,17 @@ fn eval_call(name: &str, args: &[Expr], vars: &HashMap<String, Value>) -> EvalRe
         .map(|a| eval_expr(a, vars))
         .collect::<Result<_, _>>()?;
     match name {
+        "make_color" | "make_color_rgb" => {
+            let nums = expect_numbers(&evaluated, "make_color")?;
+            if nums.len() != 4 || nums.iter().any(|n| !n.is_finite()) {
+                return Err(EvalError::TypeMismatch { op: "make_color".into(), left: "4 finite RGBA numbers".into(), right: "".into() });
+            }
+            let bytes: Vec<_> = nums.into_iter().enumerate().map(|(channel, n)| {
+                let maximum = if name == "make_color_rgb" && channel < 3 { 255.0 } else { 1.0 };
+                (n.clamp(0.0, maximum) / maximum * 255.0).round() as u8
+            }).collect();
+            Ok(Value::Str(format!("#{:02x}{:02x}{:02x}{:02x}", bytes[0], bytes[1], bytes[2], bytes[3])))
+        }
         "min" => {
             let nums = expect_numbers(&evaluated, "min")?;
             Ok(nums
@@ -128,6 +139,18 @@ fn eval_call(name: &str, args: &[Expr], vars: &HashMap<String, Value>) -> EvalRe
                 op: "floor".into(),
                 left: "number".into(),
                 right: "".into(),
+            }),
+        },
+        "to_int" => match evaluated.as_slice() {
+            // Comme la conversion String → Integer de Blueprint, un texte
+            // vide ou non numérique produit 0 plutôt qu’une erreur fatale.
+            [Value::Str(value)] => Ok(Value::Int(value.trim().parse::<i64>().unwrap_or(0))),
+            [Value::Int(value)] => Ok(Value::Int(*value)),
+            [Value::Float(value)] => Ok(Value::Int(*value as i64)),
+            _ => Err(EvalError::TypeMismatch {
+                op: "to_int".into(),
+                left: "string or number".into(),
+                right: "int".into(),
             }),
         },
         "ceil" => match evaluated.as_slice() {
@@ -498,6 +521,20 @@ mod tests {
             eval_expr(&Expr::Str("hi".into()), &vars(&[])),
             Ok(Value::Str("hi".into()))
         );
+    }
+
+    #[test]
+    fn test_text_to_integer_conversion() {
+        let expression = Expr::Call {
+            name: "to_int".into(),
+            args: vec![Expr::Str(" 15 ".into())],
+        };
+        assert_eq!(eval_expr(&expression, &vars(&[])), Ok(Value::Int(15)));
+        let invalid = Expr::Call {
+            name: "to_int".into(),
+            args: vec![Expr::Str("pas un nombre".into())],
+        };
+        assert_eq!(eval_expr(&invalid, &vars(&[])), Ok(Value::Int(0)));
     }
 
     #[test]

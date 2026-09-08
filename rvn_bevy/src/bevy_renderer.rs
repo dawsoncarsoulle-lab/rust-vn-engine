@@ -168,7 +168,7 @@ impl Renderer for BevyRenderer {
         } else {
             let hs = hotspots
                 .iter()
-                .map(|h| (h.name.clone(), (h.area.x1, h.area.y1, h.area.x2, h.area.y2)))
+                .map(crate::vn_command::ImagemapZone::from)
                 .collect();
             self.pending.push(VnCommand::ShowImagemap {
                 background: background.to_string(),

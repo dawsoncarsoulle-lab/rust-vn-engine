@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "rvn_parser",
+    "rvn_graph",
+    "rvn_ui",
     "rvn_core",
     "rvn_bevy",
     "rvn_cli",

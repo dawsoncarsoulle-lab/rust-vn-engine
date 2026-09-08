@@ -1,0 +1,1215 @@
+{
+  "schema_version": 2,
+  "graph_id": 1,
+  "kind": {
+    "label": {
+      "name": "start"
+    }
+  },
+  "nodes": {
+    "115": {
+      "id": 115,
+      "kind": "label",
+      "position": [
+        -768.0,
+        -256.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        274
+      ]
+    },
+    "116": {
+      "id": 116,
+      "kind": "dialogue",
+      "position": [
+        -384.1357875513891,
+        -258.4400928830049
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        275,
+        276,
+        277,
+        278
+      ]
+    },
+    "117": {
+      "id": 117,
+      "kind": "character_value",
+      "position": [
+        -768.0,
+        -160.0
+      ],
+      "title_override": "Narrateur",
+      "properties": {
+        "character": {
+          "type": "string",
+          "value": ""
+        },
+        "emotion": {
+          "type": "string",
+          "value": ""
+        }
+      },
+      "pins": [
+        279,
+        280
+      ]
+    },
+    "118": {
+      "id": 118,
+      "kind": "text_value",
+      "position": [
+        -768.0,
+        -64.0
+      ],
+      "title_override": null,
+      "properties": {
+        "value": {
+          "type": "string",
+          "value": "salut ! bien RVN!"
+        }
+      },
+      "pins": [
+        281
+      ]
+    },
+    "119": {
+      "id": 119,
+      "kind": "reroute",
+      "position": [
+        -480.0,
+        -48.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        282,
+        283
+      ]
+    },
+    "123": {
+      "id": 123,
+      "kind": "scene",
+      "position": [
+        0.357305463576177,
+        -256.10255149227646
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        301,
+        302,
+        303,
+        304
+      ]
+    },
+    "124": {
+      "id": 124,
+      "kind": "config",
+      "position": [
+        0.0,
+        -96.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        305,
+        306,
+        307,
+        308
+      ]
+    },
+    "125": {
+      "id": 125,
+      "kind": "scene",
+      "position": [
+        240.0,
+        -96.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        309,
+        310,
+        311,
+        312
+      ]
+    },
+    "126": {
+      "id": 126,
+      "kind": "cinematic_show",
+      "position": [
+        464.0,
+        -96.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        313,
+        314,
+        315,
+        316
+      ]
+    },
+    "127": {
+      "id": 127,
+      "kind": "sprite_animate",
+      "position": [
+        482.5717414764091,
+        -313.10295265785317
+      ],
+      "title_override": null,
+      "properties": {
+        "params": {
+          "type": "string_list",
+          "value": []
+        }
+      },
+      "pins": [
+        317,
+        318,
+        319,
+        320
+      ]
+    },
+    "128": {
+      "id": 128,
+      "kind": "sprite_effect",
+      "position": [
+        272.0,
+        -1024.0
+      ],
+      "title_override": null,
+      "properties": {
+        "apply_flip_x": {
+          "type": "bool",
+          "value": false
+        },
+        "apply_flip_y": {
+          "type": "bool",
+          "value": false
+        },
+        "apply_rotation": {
+          "type": "bool",
+          "value": false
+        },
+        "apply_scale": {
+          "type": "bool",
+          "value": false
+        },
+        "apply_tint": {
+          "type": "bool",
+          "value": false
+        }
+      },
+      "pins": [
+        321,
+        322,
+        323,
+        324,
+        325,
+        326,
+        327,
+        328
+      ]
+    },
+    "130": {
+      "id": 130,
+      "kind": "transition_none",
+      "position": [
+        -320.0,
+        -80.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        330
+      ]
+    },
+    "131": {
+      "id": 131,
+      "kind": "transition_none",
+      "position": [
+        240.0,
+        64.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        331
+      ]
+    },
+    "132": {
+      "id": 132,
+      "kind": "transition_none",
+      "position": [
+        240.0,
+        128.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        332
+      ]
+    },
+    "143": {
+      "id": 143,
+      "kind": "set_variable",
+      "position": [
+        -291.3417073594208,
+        -518.4463838931331
+      ],
+      "title_override": null,
+      "properties": {
+        "name": {
+          "type": "string",
+          "value": "NewVar2"
+        }
+      },
+      "pins": [
+        353,
+        354,
+        355,
+        356,
+        357
+      ]
+    },
+    "144": {
+      "id": 144,
+      "kind": "literal",
+      "position": [
+        -520.1646585183613,
+        -368.40137147591446
+      ],
+      "title_override": null,
+      "properties": {
+        "value": {
+          "type": "bool",
+          "value": false
+        }
+      },
+      "pins": [
+        358
+      ]
+    },
+    "145": {
+      "id": 145,
+      "kind": "make_color",
+      "position": [
+        -48.0,
+        -784.0
+      ],
+      "title_override": null,
+      "properties": {
+        "rgb_max": {
+          "type": "int",
+          "value": 255
+        }
+      },
+      "pins": [
+        359,
+        360,
+        361,
+        362,
+        363
+      ]
+    },
+    "146": {
+      "id": 146,
+      "kind": "set_variable",
+      "position": [
+        1024.0,
+        -112.0
+      ],
+      "title_override": null,
+      "properties": {
+        "name": {
+          "type": "string",
+          "value": "score"
+        }
+      },
+      "pins": [
+        364,
+        365,
+        366,
+        367,
+        368
+      ]
+    },
+    "147": {
+      "id": 147,
+      "kind": "set_variable",
+      "position": [
+        1024.0,
+        0.0
+      ],
+      "title_override": null,
+      "properties": {
+        "name": {
+          "type": "string",
+          "value": "test"
+        }
+      },
+      "pins": [
+        369,
+        370,
+        371,
+        372,
+        373
+      ]
+    },
+    "148": {
+      "id": 148,
+      "kind": "variable_get",
+      "position": [
+        -617.7748179023931,
+        -493.09219719478705
+      ],
+      "title_override": null,
+      "properties": {
+        "name": {
+          "type": "string",
+          "value": "nombre10"
+        }
+      },
+      "pins": [
+        374
+      ]
+    }
+  },
+  "pins": {
+    "274": {
+      "id": 274,
+      "node": 115,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "275": {
+      "id": 275,
+      "node": 116,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "276": {
+      "id": 276,
+      "node": 116,
+      "key": "character",
+      "label": "Personnage",
+      "direction": "input",
+      "value_type": "character",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "277": {
+      "id": 277,
+      "node": 116,
+      "key": "text",
+      "label": "Texte",
+      "direction": "input",
+      "value_type": "interpolated_text",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "278": {
+      "id": 278,
+      "node": 116,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "279": {
+      "id": 279,
+      "node": 117,
+      "key": "sprite",
+      "label": "Sprite",
+      "direction": "input",
+      "value_type": {
+        "asset": "sprite"
+      },
+      "cardinality": "one",
+      "default_value": null
+    },
+    "280": {
+      "id": 280,
+      "node": 117,
+      "key": "value",
+      "label": "Personnage",
+      "direction": "output",
+      "value_type": "character",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "281": {
+      "id": 281,
+      "node": 118,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "interpolated_text",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "282": {
+      "id": 282,
+      "node": 119,
+      "key": "value",
+      "label": "",
+      "direction": "input",
+      "value_type": "interpolated_text",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "283": {
+      "id": 283,
+      "node": 119,
+      "key": "value_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "interpolated_text",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "301": {
+      "id": 301,
+      "node": 123,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "302": {
+      "id": 302,
+      "node": 123,
+      "key": "background",
+      "label": "Arrière-plan",
+      "direction": "input",
+      "value_type": {
+        "asset": "background"
+      },
+      "cardinality": "one",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    },
+    "303": {
+      "id": 303,
+      "node": 123,
+      "key": "transition",
+      "label": "Transition",
+      "direction": "input",
+      "value_type": "transition",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "304": {
+      "id": 304,
+      "node": 123,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "305": {
+      "id": 305,
+      "node": 124,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "306": {
+      "id": 306,
+      "node": 124,
+      "key": "key",
+      "label": "Clé",
+      "direction": "input",
+      "value_type": "string",
+      "cardinality": "one",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    },
+    "307": {
+      "id": 307,
+      "node": 124,
+      "key": "value",
+      "label": "Valeur",
+      "direction": "input",
+      "value_type": "string",
+      "cardinality": "one",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    },
+    "308": {
+      "id": 308,
+      "node": 124,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "309": {
+      "id": 309,
+      "node": 125,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "310": {
+      "id": 310,
+      "node": 125,
+      "key": "background",
+      "label": "Arrière-plan",
+      "direction": "input",
+      "value_type": {
+        "asset": "background"
+      },
+      "cardinality": "one",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    },
+    "311": {
+      "id": 311,
+      "node": 125,
+      "key": "transition",
+      "label": "Transition",
+      "direction": "input",
+      "value_type": "transition",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "312": {
+      "id": 312,
+      "node": 125,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "313": {
+      "id": 313,
+      "node": 126,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "314": {
+      "id": 314,
+      "node": 126,
+      "key": "cinematic",
+      "label": "Cinématique",
+      "direction": "input",
+      "value_type": {
+        "asset": "cinematic"
+      },
+      "cardinality": "one",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    },
+    "315": {
+      "id": 315,
+      "node": 126,
+      "key": "transition",
+      "label": "Transition",
+      "direction": "input",
+      "value_type": "transition",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "316": {
+      "id": 316,
+      "node": 126,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "317": {
+      "id": 317,
+      "node": 127,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "318": {
+      "id": 318,
+      "node": 127,
+      "key": "character",
+      "label": "Personnage",
+      "direction": "input",
+      "value_type": "character",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "319": {
+      "id": 319,
+      "node": 127,
+      "key": "animation",
+      "label": "Animation",
+      "direction": "input",
+      "value_type": "string",
+      "cardinality": "one",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    },
+    "320": {
+      "id": 320,
+      "node": 127,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "321": {
+      "id": 321,
+      "node": 128,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "322": {
+      "id": 322,
+      "node": 128,
+      "key": "character",
+      "label": "Personnage",
+      "direction": "input",
+      "value_type": "character",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "323": {
+      "id": 323,
+      "node": 128,
+      "key": "flip_x",
+      "label": "Miroir X",
+      "direction": "input",
+      "value_type": "bool",
+      "cardinality": "one",
+      "default_value": {
+        "type": "bool",
+        "value": false
+      }
+    },
+    "324": {
+      "id": 324,
+      "node": 128,
+      "key": "flip_y",
+      "label": "Miroir Y",
+      "direction": "input",
+      "value_type": "bool",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "325": {
+      "id": 325,
+      "node": 128,
+      "key": "scale",
+      "label": "Échelle",
+      "direction": "input",
+      "value_type": "float",
+      "cardinality": "one",
+      "default_value": {
+        "type": "float",
+        "value": 1.0
+      }
+    },
+    "326": {
+      "id": 326,
+      "node": 128,
+      "key": "rotation",
+      "label": "Rotation",
+      "direction": "input",
+      "value_type": "float",
+      "cardinality": "one",
+      "default_value": {
+        "type": "float",
+        "value": 0.0
+      }
+    },
+    "327": {
+      "id": 327,
+      "node": 128,
+      "key": "tint",
+      "label": "Teinte",
+      "direction": "input",
+      "value_type": "string",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "328": {
+      "id": 328,
+      "node": 128,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "330": {
+      "id": 330,
+      "node": 130,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "transition",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "331": {
+      "id": 331,
+      "node": 131,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "transition",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "332": {
+      "id": 332,
+      "node": 132,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "transition",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "353": {
+      "id": 353,
+      "node": 143,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "354": {
+      "id": 354,
+      "node": 143,
+      "key": "name",
+      "label": "Variable",
+      "direction": "input",
+      "value_type": "string",
+      "cardinality": "one",
+      "default_value": {
+        "type": "string",
+        "value": "NewVar2"
+      }
+    },
+    "355": {
+      "id": 355,
+      "node": 143,
+      "key": "value",
+      "label": "NewVar2",
+      "direction": "input",
+      "value_type": "bool",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "356": {
+      "id": 356,
+      "node": 143,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "357": {
+      "id": 357,
+      "node": 143,
+      "key": "value_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "bool",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "358": {
+      "id": 358,
+      "node": 144,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "bool",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "359": {
+      "id": 359,
+      "node": 145,
+      "key": "r",
+      "label": "R",
+      "direction": "input",
+      "value_type": "float",
+      "cardinality": "one",
+      "default_value": {
+        "type": "float",
+        "value": 0.0
+      }
+    },
+    "360": {
+      "id": 360,
+      "node": 145,
+      "key": "g",
+      "label": "G",
+      "direction": "input",
+      "value_type": "float",
+      "cardinality": "one",
+      "default_value": {
+        "type": "float",
+        "value": 0.0
+      }
+    },
+    "361": {
+      "id": 361,
+      "node": 145,
+      "key": "b",
+      "label": "B",
+      "direction": "input",
+      "value_type": "float",
+      "cardinality": "one",
+      "default_value": {
+        "type": "float",
+        "value": 0.0
+      }
+    },
+    "362": {
+      "id": 362,
+      "node": 145,
+      "key": "a",
+      "label": "A",
+      "direction": "input",
+      "value_type": "float",
+      "cardinality": "one",
+      "default_value": {
+        "type": "float",
+        "value": 1.0
+      }
+    },
+    "363": {
+      "id": 363,
+      "node": 145,
+      "key": "result",
+      "label": "Return Value",
+      "direction": "output",
+      "value_type": "string",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "364": {
+      "id": 364,
+      "node": 146,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "365": {
+      "id": 365,
+      "node": 146,
+      "key": "name",
+      "label": "Variable",
+      "direction": "input",
+      "value_type": "string",
+      "cardinality": "one",
+      "default_value": {
+        "type": "string",
+        "value": "score"
+      }
+    },
+    "366": {
+      "id": 366,
+      "node": 146,
+      "key": "value",
+      "label": "score",
+      "direction": "input",
+      "value_type": "int",
+      "cardinality": "one",
+      "default_value": {
+        "type": "int",
+        "value": 0
+      }
+    },
+    "367": {
+      "id": 367,
+      "node": 146,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "368": {
+      "id": 368,
+      "node": 146,
+      "key": "value_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "int",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "369": {
+      "id": 369,
+      "node": 147,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "370": {
+      "id": 370,
+      "node": 147,
+      "key": "name",
+      "label": "Variable",
+      "direction": "input",
+      "value_type": "string",
+      "cardinality": "one",
+      "default_value": {
+        "type": "string",
+        "value": "test"
+      }
+    },
+    "371": {
+      "id": 371,
+      "node": 147,
+      "key": "value",
+      "label": "test",
+      "direction": "input",
+      "value_type": "float",
+      "cardinality": "one",
+      "default_value": {
+        "type": "float",
+        "value": 0.0
+      }
+    },
+    "372": {
+      "id": 372,
+      "node": 147,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "373": {
+      "id": 373,
+      "node": 147,
+      "key": "value_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "float",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "374": {
+      "id": 374,
+      "node": 148,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "int",
+      "cardinality": "many",
+      "default_value": null
+    }
+  },
+  "edges": {
+    "134": {
+      "id": 134,
+      "output": 274,
+      "input": 275
+    },
+    "135": {
+      "id": 135,
+      "output": 280,
+      "input": 276
+    },
+    "137": {
+      "id": 137,
+      "output": 281,
+      "input": 282
+    },
+    "138": {
+      "id": 138,
+      "output": 283,
+      "input": 277
+    },
+    "141": {
+      "id": 141,
+      "output": 278,
+      "input": 301
+    },
+    "143": {
+      "id": 143,
+      "output": 330,
+      "input": 303
+    },
+    "144": {
+      "id": 144,
+      "output": 331,
+      "input": 311
+    },
+    "145": {
+      "id": 145,
+      "output": 332,
+      "input": 315
+    },
+    "149": {
+      "id": 149,
+      "output": 304,
+      "input": 317
+    },
+    "154": {
+      "id": 154,
+      "output": 358,
+      "input": 355
+    },
+    "155": {
+      "id": 155,
+      "output": 363,
+      "input": 327
+    }
+  },
+  "variables": {
+    "NewVar": {
+      "name": "NewVar",
+      "value_type": "bool",
+      "default_value": {
+        "type": "bool",
+        "value": false
+      }
+    },
+    "NewVar2": {
+      "name": "NewVar2",
+      "value_type": "bool",
+      "default_value": {
+        "type": "bool",
+        "value": false
+      }
+    },
+    "dialogue1": {
+      "name": "dialogue1",
+      "value_type": "string",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    },
+    "nombre10": {
+      "name": "nombre10",
+      "value_type": "int",
+      "default_value": {
+        "type": "int",
+        "value": 0
+      }
+    },
+    "score": {
+      "name": "score",
+      "value_type": "int",
+      "default_value": {
+        "type": "int",
+        "value": 0
+      }
+    },
+    "score_text": {
+      "name": "score_text",
+      "value_type": "string",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    },
+    "test": {
+      "name": "test",
+      "value_type": "float",
+      "default_value": {
+        "type": "float",
+        "value": 0.0
+      }
+    },
+    "texterep": {
+      "name": "texterep",
+      "value_type": "string",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    },
+    "var": {
+      "name": "var",
+      "value_type": "float",
+      "default_value": {
+        "type": "float",
+        "value": 0.0
+      }
+    }
+  },
+  "characters": {
+    "erzy": "erzy le grand"
+  },
+  "next_node_id": 149,
+  "next_pin_id": 375,
+  "next_edge_id": 156
+}

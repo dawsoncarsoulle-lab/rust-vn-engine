@@ -1230,6 +1230,7 @@ fn validate_assets(
     let sprite_exts = ["png", "jpg", "jpeg", "webp"];
     for (character_id, emotion, loc) in &symbols.sprites {
         let sprite_path = match emotion {
+            Some(path) if path.contains('/') => path.strip_prefix("assets/").unwrap_or(path).to_owned(),
             Some(emotion) => format!("sprites/{character_id}/{emotion}"),
             None => format!("sprites/{character_id}/default"),
         };

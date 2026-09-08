@@ -26,6 +26,8 @@ use rvn_parser::Transition;
 pub enum SaveMenuMode {
     Save,
     Load,
+    Delete,
+    ToggleProtection,
 }
 
 /// Origin of the save/load overlay.
@@ -39,6 +41,7 @@ pub enum SaveMenuOrigin {
 /// Resource tracking whether the save menu is active and which mode it is in.
 #[derive(Resource, Debug)]
 pub struct SaveMenuState {
+    pub revision:u64,
     pub active: bool,
     pub mode: SaveMenuMode,
     pub origin: SaveMenuOrigin,
@@ -47,6 +50,7 @@ pub struct SaveMenuState {
 impl Default for SaveMenuState {
     fn default() -> Self {
         Self {
+            revision:0,
             active: false,
             mode: SaveMenuMode::Save,
             origin: SaveMenuOrigin::InGame,
@@ -74,6 +78,18 @@ pub struct SaveMenuOverlay;
 /// Component on each save slot button.  Holds the slot index (starting at 1).
 #[derive(Component)]
 pub struct SaveSlotButton(pub usize);
+#[derive(Component)]pub(crate) struct SaveSlotMode(pub SaveMenuMode);
+
+/// Approval is transient and bound to one exact slot and operation.
+#[derive(Resource,Default)]
+pub(crate) struct SaveConfirmation {
+    pub pending:Option<(usize,SaveMenuMode)>,
+    pub approved:Option<(usize,SaveMenuMode)>,
+    /// Slot zero is reserved for quickload, never a manual save slot.
+    pub quick_return:Option<VnState>,
+    pub action_pending:Option<(rvn_ui::Action,String,VnState)>,
+}
+impl SaveConfirmation{pub fn active(&self)->bool{self.pending.is_some()||self.action_pending.is_some()}}
 
 /// Component on the cancel button.
 #[derive(Component)]
@@ -81,6 +97,8 @@ pub struct SaveMenuCancelButton;
 
 /// Maximum number of save slots to display.
 pub const MAX_SLOTS: usize = 5;
+pub const SUPPORTED_SLOTS:u32=1000;
+#[derive(Component)]pub struct SaveSlotColors{pub normal:Color,pub hover:Color,pub pressed:Color}
 
 pub fn apply_loaded_game(
     engine: &mut VnEngine,
@@ -134,7 +152,7 @@ pub fn spawn_save_menu_overlay(
     }
 
     // Build a SaveManager to list existing saves
-    let save_mgr = match SaveManager::new(&project_paths.saves, MAX_SLOTS as u32) {
+    let save_mgr = match SaveManager::new(&project_paths.saves, crate::systems::save_menu::SUPPORTED_SLOTS) {
         Ok(mgr) => mgr,
         Err(e) => {
             error!("[save_menu] failed to create SaveManager: {e}");
@@ -176,6 +194,8 @@ pub fn spawn_save_menu_overlay(
             let title_text = match save_state.mode {
                 SaveMenuMode::Save => "Sauvegarder",
                 SaveMenuMode::Load => "Charger",
+                SaveMenuMode::Delete => "Supprimer",
+                SaveMenuMode::ToggleProtection => "Protéger",
             };
             parent.spawn(TextBundle::from_section(
                 title_text,
@@ -279,6 +299,8 @@ pub fn save_menu_interaction_system(
             Option<&SaveSlotButton>,
             Option<&SaveMenuCancelButton>,
             &mut BackgroundColor,
+            Option<&SaveSlotColors>,
+            Option<&SaveSlotMode>,
         ),
         Changed<Interaction>,
     >,
@@ -293,22 +315,26 @@ pub fn save_menu_interaction_system(
     mut history: ResMut<DialogueHistory>,
     mut persistent: ResMut<PersistentDataResource>,
     mut vn_events: EventWriter<VnCommand>,
+    mut confirmation: ResMut<SaveConfirmation>,
+    thumbnails:Res<crate::save_thumbnails::SaveThumbnails>,
 ) {
-    if !save_state.active {
+    if !save_state.active || confirmation.action_pending.is_some() {
         return;
     }
 
-    for (interaction, slot_comp, cancel_comp, mut bg_color) in interaction_query.iter_mut() {
+    for (interaction, slot_comp, cancel_comp, mut bg_color, colors, mode_override) in interaction_query.iter_mut() {
+        if slot_comp.is_none() && cancel_comp.is_none() {continue;}
         match interaction {
             Interaction::Hovered => {
-                *bg_color = Color::srgba(0.20, 0.20, 0.40, 0.95).into();
+                *bg_color = colors.map(|v|v.hover).unwrap_or(Color::srgba(0.20, 0.20, 0.40, 0.95)).into();
             }
             Interaction::None => {
-                *bg_color = Color::srgba(0.10, 0.10, 0.25, 0.95).into();
+                *bg_color = colors.map(|v|v.normal).unwrap_or(Color::srgba(0.10, 0.10, 0.25, 0.95)).into();
             }
             Interaction::Pressed => {
-                *bg_color = Color::srgba(0.30, 0.30, 0.50, 0.95).into();
+                *bg_color = colors.map(|v|v.pressed).unwrap_or(Color::srgba(0.30, 0.30, 0.50, 0.95)).into();
                 if cancel_comp.is_some() {
+                    if confirmation.pending.take().is_some(){return;}
                     let origin = save_state.origin;
                     save_state.close();
                     if origin == SaveMenuOrigin::TitleScreen {
@@ -318,15 +344,46 @@ pub fn save_menu_interaction_system(
                     return;
                 }
                 if let Some(slot) = slot_comp {
+                    if confirmation.pending.is_some(){return;}
                     let slot_index = slot.0;
+                    let mode=mode_override.map(|m|m.0).unwrap_or(save_state.mode);
+                    let operation=(slot_index,mode);
+                    let approved=confirmation.approved==Some(operation);
+                    if approved{confirmation.approved=None;}
+                    info!("[save_menu] activation {operation:?}, approved={approved}");
+                    let occupied=SaveManager::new(&project_paths.saves,SUPPORTED_SLOTS).ok().is_some_and(|m|m.load(slot_index as u32).is_ok());
+                    if !approved&&occupied&&mode!=SaveMenuMode::ToggleProtection&&(matches!(mode,SaveMenuMode::Save|SaveMenuMode::Delete)||save_state.origin==SaveMenuOrigin::InGame){confirmation.pending=Some(operation);return;}
                     // Create SaveManager
-                    match SaveManager::new(&project_paths.saves, MAX_SLOTS as u32) {
-                        Ok(mgr) => match save_state.mode {
+                    match SaveManager::new(&project_paths.saves, crate::systems::save_menu::SUPPORTED_SLOTS) {
+                        Ok(mgr) => match mode {
+                            SaveMenuMode::ToggleProtection => {
+                                if occupied {
+                                    match mgr.is_protected(slot_index as u32).and_then(|locked|mgr.set_protected(slot_index as u32,!locked)) {
+                                        Ok(()) => info!("[save_menu] protection changed for slot {slot_index}"),
+                                        Err(e) => error!("[save_menu] protection: {e}"),
+                                    }
+                                }
+                                save_state.revision=save_state.revision.wrapping_add(1);
+                            }
+                            SaveMenuMode::Delete => {
+                                match mgr.delete(slot_index as u32) {
+                                    Ok(()) => {
+                                        if persistent.data.last_resume_target.as_ref().is_some_and(|target|target.kind==rvn_core::persistent::ResumeSaveKind::Manual&&target.slot==Some(slot_index as u32)) {
+                                            persistent.data.last_resume_target=None;
+                                            if let Err(e)=persistent.manager.save(&persistent.data){error!("[save_menu] resume target: {e}");}
+                                        }
+                                        info!("[save_menu] deleted slot {slot_index}");
+                                    }
+                                    Err(e)=>error!("[save_menu] delete: {e}"),
+                                }
+                                save_state.revision=save_state.revision.wrapping_add(1);
+                            }
                             SaveMenuMode::Save => {
                                 let label = format!("Sauvegarde {}", slot_index);
                                 let script_name = "script.rvn".to_string();
                                 match engine.0.save(&mgr, slot_index as u32, label, script_name) {
                                     Ok(_) => {
+                                        if let Err(e)=thumbnails.persist(&engine,&mgr,&project_paths.saves,slot_index as u32){warn!("[save_menu] miniature : {e}");}
                                         if let Ok(data) = mgr.load(slot_index as u32) {
                                             record_resume_target(
                                                 &mut persistent,
@@ -401,6 +458,65 @@ mod tests {
     use super::*;
 
     #[test]
+    fn existing_save_requires_exact_one_shot_approval(){
+        let root=std::env::temp_dir().join(format!("rvn-confirm-test-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&root).unwrap();
+        let manager=SaveManager::new(&root,SUPPORTED_SLOTS).unwrap();
+        let engine=rvn_core::Engine::new(rvn_parser::parse("label start\n\"Original\"\n").unwrap(),crate::bevy_renderer::BevyRenderer::new(),64).unwrap();
+        engine.save(&manager,1,"Original protégé".into(),"test.rvn".into()).unwrap();
+        let mut app=App::new();
+        app.insert_resource(VnEngine(engine)).insert_resource(ProjectPaths::new(root.clone(),root.clone(),root.clone(),root.clone(),root.clone()))
+            .insert_resource(PersistentDataResource{manager:rvn_core::PersistentDataManager::new(&root).unwrap(),data:Default::default()})
+            .init_resource::<crate::save_thumbnails::SaveThumbnails>().init_resource::<SaveMenuState>().init_resource::<SaveConfirmation>().init_resource::<MenuState>().init_resource::<VnRenderState>().init_resource::<ImagemapState>().init_resource::<TypewriterState>().init_resource::<DialogueHistory>()
+            .insert_resource(NextState::<VnState>::default()).add_event::<VnCommand>().add_systems(Update,save_menu_interaction_system);
+        app.world_mut().resource_mut::<SaveMenuState>().open(SaveMenuMode::Save,SaveMenuOrigin::InGame);
+        let button=app.world_mut().spawn((SaveSlotButton(1),Interaction::Pressed,BackgroundColor::default())).id();
+        app.update();
+        assert_eq!(app.world().resource::<SaveConfirmation>().pending,Some((1,SaveMenuMode::Save)));
+        assert_eq!(manager.load(1).unwrap().label,"Original protégé");
+        // Cancelling does not close the originating page or replace the save.
+        app.world_mut().spawn((SaveMenuCancelButton,Interaction::Pressed,BackgroundColor::default()));app.update();
+        assert!(app.world().resource::<SaveMenuState>().active);
+        assert!(app.world().resource::<SaveConfirmation>().pending.is_none());
+        assert_eq!(manager.load(1).unwrap().label,"Original protégé");
+        app.world_mut().resource_mut::<SaveConfirmation>().approved=Some((2,SaveMenuMode::Save));
+        app.world_mut().entity_mut(button).insert(Interaction::Pressed);app.update();
+        assert_eq!(manager.load(1).unwrap().label,"Original protégé");
+        {let mut confirm=app.world_mut().resource_mut::<SaveConfirmation>();confirm.pending=None;confirm.approved=Some((1,SaveMenuMode::Save));}
+        app.world_mut().entity_mut(button).insert(Interaction::Pressed);app.update();
+        assert_eq!(manager.load(1).unwrap().label,"Sauvegarde 1");
+        assert!(app.world().resource::<SaveConfirmation>().approved.is_none());
+        // A per-card Load button does not inherit the surrounding Save page mode.
+        app.world_mut().resource_mut::<SaveMenuState>().open(SaveMenuMode::Save,SaveMenuOrigin::InGame);
+        app.world_mut().resource_mut::<VnEngine>().0.state.pc=1;
+        app.world_mut().resource_mut::<SaveConfirmation>().approved=Some((1,SaveMenuMode::Load));
+        app.world_mut().entity_mut(button).insert((Interaction::Pressed,SaveSlotMode(SaveMenuMode::Load)));app.update();
+        assert_eq!(app.world().resource::<VnEngine>().0.state.pc,0);
+        assert_eq!(manager.load(1).unwrap().label,"Sauvegarde 1");
+        // Per-card protection never navigates or changes the narrative.
+        app.world_mut().resource_mut::<SaveMenuState>().open(SaveMenuMode::Save,SaveMenuOrigin::InGame);
+        app.world_mut().entity_mut(button).insert((Interaction::Pressed,SaveSlotMode(SaveMenuMode::ToggleProtection)));app.update();
+        assert!(manager.is_protected(1).unwrap());
+        assert!(app.world().resource::<SaveConfirmation>().pending.is_none());
+        app.world_mut().resource_mut::<SaveConfirmation>().approved=Some((1,SaveMenuMode::Delete));
+        app.world_mut().entity_mut(button).insert((Interaction::Pressed,SaveSlotMode(SaveMenuMode::Delete)));app.update();
+        assert!(manager.slot_occupied(1));
+        app.world_mut().entity_mut(button).insert((Interaction::Pressed,SaveSlotMode(SaveMenuMode::ToggleProtection)));app.update();
+        assert!(!manager.is_protected(1).unwrap());
+        app.world_mut().entity_mut(button).insert((Interaction::Pressed,SaveSlotMode(SaveMenuMode::Delete)));app.update();
+        assert_eq!(app.world().resource::<SaveConfirmation>().pending,Some((1,SaveMenuMode::Delete)));
+        assert!(manager.slot_occupied(1));
+        {let mut confirm=app.world_mut().resource_mut::<SaveConfirmation>();confirm.pending=None;confirm.approved=Some((1,SaveMenuMode::Delete));}
+        let pc=app.world().resource::<VnEngine>().0.state.pc;
+        app.world_mut().entity_mut(button).insert(Interaction::Pressed);app.update();
+        assert!(!manager.slot_occupied(1));
+        assert_eq!(app.world().resource::<VnEngine>().0.state.pc,pc);
+        assert!(app.world().resource::<PersistentDataResource>().data.last_resume_target.is_none());
+        assert!(app.world().resource::<SaveMenuState>().active);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn open_records_mode_origin_and_active_flag() {
         let mut state = SaveMenuState::default();
 
@@ -414,6 +530,7 @@ mod tests {
     #[test]
     fn close_resets_to_ingame_origin() {
         let mut state = SaveMenuState {
+            revision:0,
             active: true,
             mode: SaveMenuMode::Load,
             origin: SaveMenuOrigin::TitleScreen,

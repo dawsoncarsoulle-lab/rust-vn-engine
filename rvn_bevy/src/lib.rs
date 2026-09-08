@@ -22,7 +22,13 @@ mod project_paths;
 mod resources;
 mod systems;
 mod vn_command;
+#[cfg(not(target_arch = "wasm32"))]
+mod qa_playthrough;
 use crate::bevy_renderer::BevyRenderer;
+mod menu_documents;
+mod save_thumbnails;
+#[cfg(not(target_arch = "wasm32"))]
+mod menu_preview_data;
 use crate::project_paths::ProjectPaths;
 use crate::resources::{
     CgAssetRegistry, CharacterRegistry, ChoiceFocus, DialogueHistory, GalleryState, ImagemapState,
@@ -95,6 +101,19 @@ fn default_main_script() -> String {
 struct WindowSection {
     width: Option<u32>,
     height: Option<u32>,
+    resizable: Option<bool>,
+}
+
+#[cfg(test)]
+mod window_configuration_tests {
+    use super::WindowSection;
+    #[test]
+    fn legacy_windows_allow_resize_and_explicit_fixed_windows_remain_supported() {
+        let legacy:WindowSection=toml::from_str("width = 1280\nheight = 720\n").unwrap();
+        assert!(legacy.resizable.unwrap_or(true));
+        let fixed:WindowSection=toml::from_str("resizable = false\n").unwrap();
+        assert!(!fixed.resizable.unwrap_or(true));
+    }
 }
 
 /// Paths to various asset directories and files.
@@ -173,6 +192,8 @@ impl Default for LocaleConfigFile {
 }
 
 struct RuntimeLaunch {
+    #[cfg(target_arch = "wasm32")]
+    menus: Option<rvn_ui::Document>,
     cfg: RvnToml,
     engine: Engine<BevyRenderer>,
     locale_cfg: LocaleConfigFile,
@@ -222,7 +243,11 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
     let locales_dir: PathBuf = project_dir.join(&cfg.paths.locales);
     let theme_path: PathBuf = project_dir.join(&cfg.paths.theme);
     // Build saves directory path relative to project dir
-    let saves_dir: PathBuf = project_dir.join(&cfg.paths.saves);
+    let saves_dir: PathBuf = if let Some(directory) = std::env::var_os("RVN_QA_OUTPUT") {
+        let directory = PathBuf::from(directory);
+        if !directory.is_dir() { return Err("RVN_QA_OUTPUT must be an existing directory".into()); }
+        directory.join("saves")
+    } else { project_dir.join(&cfg.paths.saves) };
 
     // 4. Load locale configuration from config.toml in the assets directory if present.
     let config_toml_path = assets_dir.join("config.toml");
@@ -283,12 +308,14 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
         project_dir.join(&cfg.paths.assets),
         project_dir.join(&cfg.paths.locales),
         theme_path.clone(),
-        project_dir.join(&cfg.paths.saves),
+        saves_dir,
     );
     let cg_registry = build_cg_asset_registry(&assets_dir);
     let music_registry = build_music_asset_registry(&assets_dir);
 
     run_loaded_game(RuntimeLaunch {
+        #[cfg(target_arch = "wasm32")]
+        menus: None,
         cfg,
         engine,
         locale_cfg,
@@ -305,6 +332,8 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
 
 fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
     let RuntimeLaunch {
+        #[cfg(target_arch = "wasm32")]
+        menus,
         cfg,
         engine,
         locale_cfg,
@@ -348,8 +377,14 @@ fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
         data: persistent_data,
     };
 
-    App::new()
-        .add_plugins(
+    let mut app = App::new();
+    #[cfg(target_arch = "wasm32")]
+    app.insert_resource(menu_documents::web_menus(menus)?);
+    #[cfg(not(target_arch = "wasm32"))]
+    app.add_plugins(qa_playthrough::QaPlugin);
+    #[cfg(not(target_arch = "wasm32"))]
+    app.add_plugins(menu_preview_data::MenuPreviewDataPlugin);
+    app.add_plugins(
             DefaultPlugins
                 .set(AssetPlugin {
                     file_path: asset_root,
@@ -360,7 +395,7 @@ fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
                     primary_window: Some(Window {
                         title: cfg.project.title.clone(),
                         resolution: (window_width, window_height).into(),
-                        resizable: false,
+                        resizable: cfg.window.resizable.unwrap_or(true),
                         ..default()
                     }),
                     ..default()
@@ -400,6 +435,7 @@ fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
         .insert_resource(DebugOverlayState::default())
         .insert_resource(DebugStepRequest::default())
         // Events & States
+        .add_plugins(menu_documents::MenuDocumentsPlugin)
         .add_event::<VnCommand>()
         .add_event::<PlayerInput>()
         .init_state::<VnState>()
@@ -635,6 +671,14 @@ pub async fn run_game_web(project_root: &str) -> Result<(), String> {
     );
     let engine = build_engine(script, &cfg, &cfg.project.main_script, locale_mgr)?;
 
+    let raw_config:toml::Value=toml::from_str(&rvn_toml_content).map_err(|e|format!("Configuration : {e}"))?;
+    let menu_source=if let Some(path)=raw_config.get("paths").and_then(|p|p.get("menus")).and_then(toml::Value::as_str){
+        Some(fetch_text(&format!("{root}/{path}")).await?)
+    }else{fetch_optional_text(&format!("{root}/menus.rvnui")).await};
+    let menus=if let Some(source)=menu_source{
+        let doc=rvn_ui::Document::from_json(&source)?;
+        doc.validate()?;Some(doc)
+    }else{None};
     let theme_content = fetch_optional_text(&format!("{root}/{}", cfg.paths.theme))
         .await
         .unwrap_or_default();
@@ -653,6 +697,7 @@ pub async fn run_game_web(project_root: &str) -> Result<(), String> {
     );
 
     run_loaded_game(RuntimeLaunch {
+        menus,
         cfg,
         engine,
         locale_cfg,

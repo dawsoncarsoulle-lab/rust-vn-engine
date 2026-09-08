@@ -36,6 +36,20 @@ mod tests {
         pub visible: Vec<String>,
     }
 
+    #[test]
+    fn restarting_prepared_choices_preserves_destinations(){
+        let original=Engine::new(parse("label start\nchoice {\n\"A\" => { \"first\" }\n\"B\" => { \"second\" }\n}\n").unwrap(),Mock::default(),32).unwrap();
+        let mut fresh=original.fresh(Mock::default(),32).unwrap();
+        assert_eq!(fresh.script,original.script);
+        assert!(matches!(fresh.step_until_interaction().unwrap(),Some(crate::Interaction::Choice{..})));
+        fresh.submit_selection(1).unwrap();
+        assert!(matches!(fresh.step_until_interaction().unwrap(),Some(crate::Interaction::Dialogue{text,..}) if text=="second"));
+        fresh.advance_dialogue().unwrap();
+        assert!(fresh.step_until_interaction().unwrap().is_none());
+        assert!(fresh.is_finished());
+        assert!(original.state.call_stack.is_empty());
+    }
+
     impl Renderer for Mock {
         fn set_background(&mut self, p: &str, t: &Transition) {
             self.events.push(format!("bg:{p}:{t}"));

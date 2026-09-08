@@ -31,6 +31,7 @@ pub fn background_system(
             }
         }
 
+        if path.is_empty(){render_state.background=None;continue;}
         render_state.background = Some(path.clone());
         let full_path = ensure_extension(&path);
         let texture: Handle<Image> = asset_server.load(full_path);

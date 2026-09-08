@@ -30,8 +30,12 @@ pub fn update_choice_buttons(
     choice_focus: Res<ChoiceFocus>,
     existing: Query<Entity, With<ChoiceButton>>,
     container_query: Query<Entity, With<ChoiceContainer>>,
+    custom: Res<crate::menu_documents::Menus>,
+    mut customized: Local<bool>,
 ) {
-    if !render_state.is_changed() && !theme.is_changed() && !choice_focus.is_changed() {
+    let role_changed=*customized!=custom.custom_choices();*customized=custom.custom_choices();
+    if *customized{return;}
+    if !role_changed && !render_state.is_changed() && !theme.is_changed() && !choice_focus.is_changed() {
         return;
     }
     for entity in existing.iter() {
@@ -129,6 +133,7 @@ pub fn update_choice_buttons(
 }
 
 pub fn choice_interaction_system(
+    custom_menus:Res<crate::menu_documents::Menus>,
     mut interaction_query: Query<
         (&Interaction, &ChoiceButton),
         (Changed<Interaction>, With<Button>, With<ChoiceButton>),
@@ -136,6 +141,7 @@ pub fn choice_interaction_system(
     mut choice_focus: ResMut<ChoiceFocus>,
     mut player_events: EventWriter<PlayerInput>,
 ) {
+    if !custom_menus.choices_interactive(){return;}
     for (interaction, choice_button) in interaction_query.iter_mut() {
         if *interaction == Interaction::Pressed {
             choice_focus.clear();

@@ -12,7 +12,7 @@ use crate::resources::{
 };
 use crate::systems::audio::spawn_music;
 use crate::systems::save_menu::{
-    apply_loaded_game, record_resume_target, SaveMenuMode, SaveMenuOrigin, SaveMenuState, MAX_SLOTS,
+    apply_loaded_game, record_resume_target, SaveMenuMode, SaveMenuOrigin, SaveMenuState,
 };
 use crate::systems::settings_menu::SettingsMenuState;
 use crate::vn_command::VnCommand;
@@ -31,9 +31,9 @@ pub struct TitleBackgroundSprite {
 
 #[derive(Component, Clone, Copy)]
 pub struct TitleButtonColors {
-    normal: Color,
-    hover: Color,
-    pressed: Color,
+    pub(crate) normal: Color,
+    pub(crate) hover: Color,
+    pub(crate) pressed: Color,
 }
 
 #[derive(Component, Clone, PartialEq)]
@@ -527,12 +527,12 @@ fn title_continue_available(
     project_paths: &ProjectPaths,
     persistent: &PersistentDataResource,
 ) -> bool {
-    SaveManager::new(&project_paths.saves, MAX_SLOTS as u32)
+    SaveManager::new(&project_paths.saves, crate::systems::save_menu::SUPPORTED_SLOTS)
         .map(|mgr| resolve_continue_data(&mgr, persistent).is_ok())
         .unwrap_or(false)
 }
 
-fn resolve_continue_data(
+pub(crate) fn resolve_continue_data(
     mgr: &SaveManager,
     persistent: &PersistentDataResource,
 ) -> Result<(SaveData, Option<LastResumeTarget>), SaveError> {
@@ -716,7 +716,7 @@ pub fn title_interaction_system(
 
                 match button {
                     TitleButton::Continue => {
-                        match SaveManager::new(&project_paths.saves, MAX_SLOTS as u32) {
+                        match SaveManager::new(&project_paths.saves, crate::systems::save_menu::SUPPORTED_SLOTS) {
                             Ok(mgr) => match resolve_continue_data(&mgr, &persistent) {
                                 Ok((data, target)) => {
                                     if let Some(target) = target {

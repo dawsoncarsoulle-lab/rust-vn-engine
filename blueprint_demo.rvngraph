@@ -1,0 +1,1635 @@
+{
+  "schema_version": 2,
+  "graph_id": 1,
+  "kind": {
+    "label": {
+      "name": "start"
+    }
+  },
+  "nodes": {
+    "1": {
+      "id": 1,
+      "kind": "label",
+      "position": [
+        -416.0,
+        96.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        1
+      ]
+    },
+    "2": {
+      "id": 2,
+      "kind": "dialogue",
+      "position": [
+        323.8687207943925,
+        90.58352803738318
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "3": {
+      "id": 3,
+      "kind": "set_variable",
+      "position": [
+        562.6663259345794,
+        91.88069509345794
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        6,
+        7,
+        8,
+        9
+      ]
+    },
+    "4": {
+      "id": 4,
+      "kind": "literal",
+      "position": [
+        320.04716705607467,
+        233.428738317757
+      ],
+      "title_override": null,
+      "properties": {
+        "value": {
+          "type": "int",
+          "value": 2
+        }
+      },
+      "pins": [
+        10
+      ]
+    },
+    "5": {
+      "id": 5,
+      "kind": "if",
+      "position": [
+        880.0,
+        -16.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        11,
+        12,
+        13,
+        14,
+        15
+      ]
+    },
+    "6": {
+      "id": 6,
+      "kind": "variable_get",
+      "position": [
+        256.0,
+        464.0
+      ],
+      "title_override": null,
+      "properties": {
+        "name": {
+          "type": "string",
+          "value": "score"
+        }
+      },
+      "pins": [
+        16
+      ]
+    },
+    "8": {
+      "id": 8,
+      "kind": "math_greater_equal",
+      "position": [
+        656.0,
+        240.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        18,
+        19,
+        20
+      ]
+    },
+    "9": {
+      "id": 9,
+      "kind": "dialogue",
+      "position": [
+        1168.0,
+        0.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        21,
+        22,
+        23,
+        24
+      ]
+    },
+    "10": {
+      "id": 10,
+      "kind": "dialogue",
+      "position": [
+        1184.0,
+        144.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        25,
+        26,
+        27,
+        28
+      ]
+    },
+    "11": {
+      "id": 11,
+      "kind": "branch_end",
+      "position": [
+        1390.0,
+        35.0
+      ],
+      "title_override": null,
+      "properties": {
+        "owner": {
+          "type": "int",
+          "value": 5
+        }
+      },
+      "pins": [
+        29
+      ]
+    },
+    "12": {
+      "id": 12,
+      "kind": "branch_end",
+      "position": [
+        1390.0,
+        175.0
+      ],
+      "title_override": null,
+      "properties": {
+        "owner": {
+          "type": "int",
+          "value": 5
+        }
+      },
+      "pins": [
+        30
+      ]
+    },
+    "13": {
+      "id": 13,
+      "kind": "choice",
+      "position": [
+        1440.0,
+        90.0
+      ],
+      "title_override": null,
+      "properties": {
+        "options": {
+          "type": "string_list",
+          "value": [
+            "Continuer",
+            "Partir"
+          ]
+        }
+      },
+      "pins": [
+        31,
+        32,
+        33,
+        34,
+        35,
+        36
+      ]
+    },
+    "14": {
+      "id": 14,
+      "kind": "dialogue",
+      "position": [
+        1760.0,
+        -64.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        37,
+        38,
+        39,
+        40
+      ]
+    },
+    "15": {
+      "id": 15,
+      "kind": "dialogue",
+      "position": [
+        1710.0,
+        180.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        41,
+        42,
+        43,
+        44
+      ]
+    },
+    "16": {
+      "id": 16,
+      "kind": "branch_end",
+      "position": [
+        1980.0,
+        35.0
+      ],
+      "title_override": null,
+      "properties": {
+        "owner": {
+          "type": "int",
+          "value": 13
+        }
+      },
+      "pins": [
+        45
+      ]
+    },
+    "17": {
+      "id": 17,
+      "kind": "branch_end",
+      "position": [
+        1980.0,
+        180.0
+      ],
+      "title_override": null,
+      "properties": {
+        "owner": {
+          "type": "int",
+          "value": 13
+        }
+      },
+      "pins": [
+        46
+      ]
+    },
+    "18": {
+      "id": 18,
+      "kind": "scene",
+      "position": [
+        2050.0,
+        90.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        47,
+        48,
+        49,
+        50
+      ]
+    },
+    "20": {
+      "id": 20,
+      "kind": "init",
+      "position": [
+        50.372205245363105,
+        366.0938054568548
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        52
+      ]
+    },
+    "21": {
+      "id": 21,
+      "kind": "character_value",
+      "position": [
+        -96.0,
+        192.0
+      ],
+      "title_override": null,
+      "properties": {
+        "character": {
+          "type": "string",
+          "value": "alice"
+        },
+        "emotion": {
+          "type": "string",
+          "value": ""
+        }
+      },
+      "pins": [
+        53
+      ]
+    },
+    "23": {
+      "id": 23,
+      "kind": "variable_reference",
+      "position": [
+        327.6663259345794,
+        299.428738317757
+      ],
+      "title_override": null,
+      "properties": {
+        "name": {
+          "type": "string",
+          "value": "score"
+        }
+      },
+      "pins": [
+        55
+      ]
+    },
+    "24": {
+      "id": 24,
+      "kind": "character_value",
+      "position": [
+        880.0,
+        96.0
+      ],
+      "title_override": null,
+      "properties": {
+        "character": {
+          "type": "string",
+          "value": "alice"
+        },
+        "emotion": {
+          "type": "string",
+          "value": ""
+        }
+      },
+      "pins": [
+        56
+      ]
+    },
+    "25": {
+      "id": 25,
+      "kind": "text_value",
+      "position": [
+        880.0,
+        192.0
+      ],
+      "title_override": null,
+      "properties": {
+        "value": {
+          "type": "string",
+          "value": "La condition est vraie."
+        }
+      },
+      "pins": [
+        57
+      ]
+    },
+    "26": {
+      "id": 26,
+      "kind": "character_value",
+      "position": [
+        880.0,
+        272.0
+      ],
+      "title_override": null,
+      "properties": {
+        "character": {
+          "type": "string",
+          "value": "alice"
+        },
+        "emotion": {
+          "type": "string",
+          "value": ""
+        }
+      },
+      "pins": [
+        58
+      ]
+    },
+    "27": {
+      "id": 27,
+      "kind": "text_value",
+      "position": [
+        880.0,
+        368.0
+      ],
+      "title_override": null,
+      "properties": {
+        "value": {
+          "type": "string",
+          "value": "La condition est fausse."
+        }
+      },
+      "pins": [
+        59
+      ]
+    },
+    "28": {
+      "id": 28,
+      "kind": "text_value",
+      "position": [
+        1760.0,
+        80.0
+      ],
+      "title_override": null,
+      "properties": {
+        "value": {
+          "type": "string",
+          "value": "Continuons !"
+        }
+      },
+      "pins": [
+        60
+      ]
+    },
+    "29": {
+      "id": 29,
+      "kind": "text_value",
+      "position": [
+        -384.0,
+        416.0
+      ],
+      "title_override": null,
+      "properties": {
+        "value": {
+          "type": "string",
+          "value": "À bientôt."
+        }
+      },
+      "pins": [
+        61
+      ]
+    },
+    "30": {
+      "id": 30,
+      "kind": "scene_asset",
+      "position": [
+        2144.0,
+        304.0
+      ],
+      "title_override": null,
+      "properties": {
+        "path": {
+          "type": "string",
+          "value": "station"
+        }
+      },
+      "pins": [
+        62
+      ]
+    },
+    "31": {
+      "id": 31,
+      "kind": "transition_fade",
+      "position": [
+        2032.0,
+        448.0
+      ],
+      "title_override": null,
+      "properties": {
+        "duration_ms": {
+          "type": "int",
+          "value": 500
+        }
+      },
+      "pins": [
+        63
+      ]
+    },
+    "32": {
+      "id": 32,
+      "kind": "logic_or",
+      "position": [
+        1296.0,
+        352.0
+      ],
+      "title_override": null,
+      "properties": {
+        "comment": {
+          "type": "string",
+          "value": ""
+        }
+      },
+      "pins": [
+        64,
+        65,
+        66,
+        67
+      ]
+    },
+    "34": {
+      "id": 34,
+      "kind": "text_value",
+      "position": [
+        48.0,
+        464.0
+      ],
+      "title_override": null,
+      "properties": {
+        "value": {
+          "type": "string",
+          "value": ""
+        }
+      },
+      "pins": [
+        69
+      ]
+    },
+    "35": {
+      "id": 35,
+      "kind": "set_variable",
+      "position": [
+        -192.0,
+        96.0
+      ],
+      "title_override": null,
+      "properties": {
+        "name": {
+          "type": "string",
+          "value": "testVar"
+        }
+      },
+      "pins": [
+        70,
+        71,
+        72,
+        73,
+        74
+      ]
+    },
+    "36": {
+      "id": 36,
+      "kind": "variable_get",
+      "position": [
+        -80.0,
+        288.0
+      ],
+      "title_override": null,
+      "properties": {
+        "name": {
+          "type": "string",
+          "value": "testVar"
+        }
+      },
+      "pins": [
+        75
+      ]
+    },
+    "38": {
+      "id": 38,
+      "kind": "literal",
+      "position": [
+        -427.0,
+        304.0
+      ],
+      "title_override": null,
+      "properties": {
+        "value": {
+          "type": "string",
+          "value": "texte ici"
+        }
+      },
+      "pins": [
+        77
+      ]
+    },
+    "39": {
+      "id": 39,
+      "kind": "variable_reference",
+      "position": [
+        -427.0,
+        208.0
+      ],
+      "title_override": null,
+      "properties": {
+        "name": {
+          "type": "string",
+          "value": "testVar"
+        }
+      },
+      "pins": [
+        78
+      ]
+    },
+    "40": {
+      "id": 40,
+      "kind": "set_variable",
+      "position": [
+        512.0,
+        432.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        79,
+        80,
+        81,
+        82,
+        83
+      ]
+    }
+  },
+  "pins": {
+    "1": {
+      "id": 1,
+      "node": 1,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "2": {
+      "id": 2,
+      "node": 2,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "3": {
+      "id": 3,
+      "node": 2,
+      "key": "character",
+      "label": "Personnage",
+      "direction": "input",
+      "value_type": "character",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "4": {
+      "id": 4,
+      "node": 2,
+      "key": "text",
+      "label": "Texte",
+      "direction": "input",
+      "value_type": "interpolated_text",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "5": {
+      "id": 5,
+      "node": 2,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "6": {
+      "id": 6,
+      "node": 3,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "7": {
+      "id": 7,
+      "node": 3,
+      "key": "name",
+      "label": "Variable",
+      "direction": "input",
+      "value_type": "string",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "8": {
+      "id": 8,
+      "node": 3,
+      "key": "value",
+      "label": "Valeur",
+      "direction": "input",
+      "value_type": "any",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "9": {
+      "id": 9,
+      "node": 3,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "10": {
+      "id": 10,
+      "node": 4,
+      "key": "value",
+      "label": "Valeur",
+      "direction": "output",
+      "value_type": "any",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "11": {
+      "id": 11,
+      "node": 5,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "12": {
+      "id": 12,
+      "node": 5,
+      "key": "condition",
+      "label": "Condition",
+      "direction": "input",
+      "value_type": "bool",
+      "cardinality": "one",
+      "default_value": {
+        "type": "bool",
+        "value": false
+      }
+    },
+    "13": {
+      "id": 13,
+      "node": 5,
+      "key": "then",
+      "label": "Vrai",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "14": {
+      "id": 14,
+      "node": 5,
+      "key": "else",
+      "label": "Faux",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "15": {
+      "id": 15,
+      "node": 5,
+      "key": "completed",
+      "label": "Terminé",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "16": {
+      "id": 16,
+      "node": 6,
+      "key": "value",
+      "label": "Valeur",
+      "direction": "output",
+      "value_type": "int",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "18": {
+      "id": 18,
+      "node": 8,
+      "key": "left",
+      "label": "A",
+      "direction": "input",
+      "value_type": "any",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "19": {
+      "id": 19,
+      "node": 8,
+      "key": "right",
+      "label": "B",
+      "direction": "input",
+      "value_type": "any",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "20": {
+      "id": 20,
+      "node": 8,
+      "key": "value",
+      "label": "Résultat",
+      "direction": "output",
+      "value_type": "bool",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "21": {
+      "id": 21,
+      "node": 9,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "22": {
+      "id": 22,
+      "node": 9,
+      "key": "character",
+      "label": "Personnage",
+      "direction": "input",
+      "value_type": "character",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "23": {
+      "id": 23,
+      "node": 9,
+      "key": "text",
+      "label": "Texte",
+      "direction": "input",
+      "value_type": "interpolated_text",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "24": {
+      "id": 24,
+      "node": 9,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "25": {
+      "id": 25,
+      "node": 10,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "26": {
+      "id": 26,
+      "node": 10,
+      "key": "character",
+      "label": "Personnage",
+      "direction": "input",
+      "value_type": "character",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "27": {
+      "id": 27,
+      "node": 10,
+      "key": "text",
+      "label": "Texte",
+      "direction": "input",
+      "value_type": "interpolated_text",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "28": {
+      "id": 28,
+      "node": 10,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "29": {
+      "id": 29,
+      "node": 11,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "30": {
+      "id": 30,
+      "node": 12,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "31": {
+      "id": 31,
+      "node": 13,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "32": {
+      "id": 32,
+      "node": 13,
+      "key": "completed",
+      "label": "Terminé",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "33": {
+      "id": 33,
+      "node": 13,
+      "key": "option_0",
+      "label": "Continuer",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "34": {
+      "id": 34,
+      "node": 13,
+      "key": "option_0_condition",
+      "label": "Condition",
+      "direction": "input",
+      "value_type": "bool",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "35": {
+      "id": 35,
+      "node": 13,
+      "key": "option_1",
+      "label": "Partir",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "36": {
+      "id": 36,
+      "node": 13,
+      "key": "option_1_condition",
+      "label": "Condition",
+      "direction": "input",
+      "value_type": "bool",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "37": {
+      "id": 37,
+      "node": 14,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "38": {
+      "id": 38,
+      "node": 14,
+      "key": "character",
+      "label": "Personnage",
+      "direction": "input",
+      "value_type": "character",
+      "cardinality": "one",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    },
+    "39": {
+      "id": 39,
+      "node": 14,
+      "key": "text",
+      "label": "Texte",
+      "direction": "input",
+      "value_type": "interpolated_text",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "40": {
+      "id": 40,
+      "node": 14,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "41": {
+      "id": 41,
+      "node": 15,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "42": {
+      "id": 42,
+      "node": 15,
+      "key": "character",
+      "label": "Personnage",
+      "direction": "input",
+      "value_type": "character",
+      "cardinality": "one",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    },
+    "43": {
+      "id": 43,
+      "node": 15,
+      "key": "text",
+      "label": "Texte",
+      "direction": "input",
+      "value_type": "interpolated_text",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "44": {
+      "id": 44,
+      "node": 15,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "45": {
+      "id": 45,
+      "node": 16,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "46": {
+      "id": 46,
+      "node": 17,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "47": {
+      "id": 47,
+      "node": 18,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "48": {
+      "id": 48,
+      "node": 18,
+      "key": "background",
+      "label": "Arrière-plan",
+      "direction": "input",
+      "value_type": {
+        "asset": "background"
+      },
+      "cardinality": "one",
+      "default_value": null
+    },
+    "49": {
+      "id": 49,
+      "node": 18,
+      "key": "transition",
+      "label": "Transition",
+      "direction": "input",
+      "value_type": "transition",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "50": {
+      "id": 50,
+      "node": 18,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "52": {
+      "id": 52,
+      "node": 20,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "53": {
+      "id": 53,
+      "node": 21,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "character",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "55": {
+      "id": 55,
+      "node": 23,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "string",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "56": {
+      "id": 56,
+      "node": 24,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "character",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "57": {
+      "id": 57,
+      "node": 25,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "interpolated_text",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "58": {
+      "id": 58,
+      "node": 26,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "character",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "59": {
+      "id": 59,
+      "node": 27,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "interpolated_text",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "60": {
+      "id": 60,
+      "node": 28,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "interpolated_text",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "61": {
+      "id": 61,
+      "node": 29,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "interpolated_text",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "62": {
+      "id": 62,
+      "node": 30,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": {
+        "asset": "background"
+      },
+      "cardinality": "many",
+      "default_value": null
+    },
+    "63": {
+      "id": 63,
+      "node": 31,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "transition",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "64": {
+      "id": 64,
+      "node": 32,
+      "key": "left",
+      "label": "A",
+      "direction": "input",
+      "value_type": "bool",
+      "cardinality": "one",
+      "default_value": {
+        "type": "bool",
+        "value": false
+      }
+    },
+    "65": {
+      "id": 65,
+      "node": 32,
+      "key": "right",
+      "label": "B",
+      "direction": "input",
+      "value_type": "bool",
+      "cardinality": "one",
+      "default_value": {
+        "type": "bool",
+        "value": false
+      }
+    },
+    "66": {
+      "id": 66,
+      "node": 32,
+      "key": "value",
+      "label": "Résultat",
+      "direction": "output",
+      "value_type": "bool",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "67": {
+      "id": 67,
+      "node": 32,
+      "key": "operand_2",
+      "label": "Entrée 3",
+      "direction": "input",
+      "value_type": "bool",
+      "cardinality": "one",
+      "default_value": {
+        "type": "bool",
+        "value": false
+      }
+    },
+    "69": {
+      "id": 69,
+      "node": 34,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "interpolated_text",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "70": {
+      "id": 70,
+      "node": 35,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "71": {
+      "id": 71,
+      "node": 35,
+      "key": "name",
+      "label": "Variable",
+      "direction": "input",
+      "value_type": "string",
+      "cardinality": "one",
+      "default_value": {
+        "type": "string",
+        "value": "testVar"
+      }
+    },
+    "72": {
+      "id": 72,
+      "node": 35,
+      "key": "value",
+      "label": "testVar",
+      "direction": "input",
+      "value_type": "string",
+      "cardinality": "one",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    },
+    "73": {
+      "id": 73,
+      "node": 35,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "74": {
+      "id": 74,
+      "node": 35,
+      "key": "value_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "string",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "75": {
+      "id": 75,
+      "node": 36,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "string",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "77": {
+      "id": 77,
+      "node": 38,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "any",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "78": {
+      "id": 78,
+      "node": 39,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "string",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "79": {
+      "id": 79,
+      "node": 40,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "80": {
+      "id": 80,
+      "node": 40,
+      "key": "name",
+      "label": "Variable",
+      "direction": "input",
+      "value_type": "string",
+      "cardinality": "one",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    },
+    "81": {
+      "id": 81,
+      "node": 40,
+      "key": "value",
+      "label": "Valeur",
+      "direction": "input",
+      "value_type": "any",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "82": {
+      "id": 82,
+      "node": 40,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "83": {
+      "id": 83,
+      "node": 40,
+      "key": "value_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "any",
+      "cardinality": "many",
+      "default_value": null
+    }
+  },
+  "edges": {
+    "2": {
+      "id": 2,
+      "output": 5,
+      "input": 6
+    },
+    "3": {
+      "id": 3,
+      "output": 10,
+      "input": 8
+    },
+    "4": {
+      "id": 4,
+      "output": 9,
+      "input": 11
+    },
+    "7": {
+      "id": 7,
+      "output": 20,
+      "input": 12
+    },
+    "8": {
+      "id": 8,
+      "output": 13,
+      "input": 21
+    },
+    "9": {
+      "id": 9,
+      "output": 24,
+      "input": 29
+    },
+    "10": {
+      "id": 10,
+      "output": 14,
+      "input": 25
+    },
+    "11": {
+      "id": 11,
+      "output": 28,
+      "input": 30
+    },
+    "12": {
+      "id": 12,
+      "output": 15,
+      "input": 31
+    },
+    "13": {
+      "id": 13,
+      "output": 33,
+      "input": 37
+    },
+    "14": {
+      "id": 14,
+      "output": 40,
+      "input": 45
+    },
+    "15": {
+      "id": 15,
+      "output": 35,
+      "input": 41
+    },
+    "16": {
+      "id": 16,
+      "output": 44,
+      "input": 46
+    },
+    "17": {
+      "id": 17,
+      "output": 32,
+      "input": 47
+    },
+    "18": {
+      "id": 18,
+      "output": 53,
+      "input": 3
+    },
+    "20": {
+      "id": 20,
+      "output": 55,
+      "input": 7
+    },
+    "21": {
+      "id": 21,
+      "output": 56,
+      "input": 22
+    },
+    "22": {
+      "id": 22,
+      "output": 57,
+      "input": 23
+    },
+    "23": {
+      "id": 23,
+      "output": 58,
+      "input": 26
+    },
+    "24": {
+      "id": 24,
+      "output": 59,
+      "input": 27
+    },
+    "25": {
+      "id": 25,
+      "output": 60,
+      "input": 39
+    },
+    "26": {
+      "id": 26,
+      "output": 61,
+      "input": 43
+    },
+    "27": {
+      "id": 27,
+      "output": 62,
+      "input": 48
+    },
+    "28": {
+      "id": 28,
+      "output": 63,
+      "input": 49
+    },
+    "29": {
+      "id": 29,
+      "output": 16,
+      "input": 18
+    },
+    "31": {
+      "id": 31,
+      "output": 1,
+      "input": 70
+    },
+    "32": {
+      "id": 32,
+      "output": 73,
+      "input": 2
+    },
+    "33": {
+      "id": 33,
+      "output": 75,
+      "input": 4
+    },
+    "35": {
+      "id": 35,
+      "output": 77,
+      "input": 72
+    },
+    "36": {
+      "id": 36,
+      "output": 78,
+      "input": 71
+    },
+    "37": {
+      "id": 37,
+      "output": 83,
+      "input": 19
+    },
+    "38": {
+      "id": 38,
+      "output": 16,
+      "input": 81
+    }
+  },
+  "variables": {
+    "score": {
+      "name": "score",
+      "value_type": "int",
+      "default_value": {
+        "type": "int",
+        "value": 0
+      }
+    },
+    "testVar": {
+      "name": "testVar",
+      "value_type": "string",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    }
+  },
+  "next_node_id": 41,
+  "next_pin_id": 84,
+  "next_edge_id": 39
+}

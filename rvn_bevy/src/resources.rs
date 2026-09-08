@@ -166,7 +166,7 @@ impl ChoiceFocus {
 
 #[derive(Resource, Default)]
 pub struct ImagemapState {
-    pub hotspots: Vec<(usize, i32, i32, i32, i32)>,
+    pub hotspots: Vec<crate::vn_command::ImagemapZone>,
     pub source_w: f32,
     pub source_h: f32,
     pub active: bool,
@@ -182,17 +182,17 @@ impl ImagemapState {
         self.bg_handle = None;
     }
 
-    pub fn hit_test(&self, cursor_x: f32, cursor_y: f32, win_w: f32, win_h: f32) -> Option<usize> {
+    pub fn hit_test_world(&self, world: Vec2) -> Option<usize> {
         if !self.active || self.hotspots.is_empty() || self.source_w == 0.0 || self.source_h == 0.0
         {
             return None;
         }
-        let nx = cursor_x / win_w;
-        let ny = cursor_y / win_h;
-        let src_x = (nx * self.source_w) as i32;
-        let src_y = (ny * self.source_h) as i32;
-        for &(idx, x1, y1, x2, y2) in &self.hotspots {
-            if src_x >= x1 && src_x < x2 && src_y >= y1 && src_y < y2 {
+        let src_x = (world.x / crate::systems::WIN_W + 0.5) * self.source_w;
+        let src_y = (0.5 - world.y / crate::systems::WIN_H) * self.source_h;
+        if !src_x.is_finite() || !src_y.is_finite() || src_x < 0.0 || src_y < 0.0 || src_x >= self.source_w || src_y >= self.source_h {return None;}
+        for (idx, zone) in self.hotspots.iter().enumerate() {
+            let r=&zone.area;
+            if src_x >= r.x1 as f32 && src_x < r.x2 as f32 && src_y >= r.y1 as f32 && src_y < r.y2 as f32 {
                 return Some(idx);
             }
         }

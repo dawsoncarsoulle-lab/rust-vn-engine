@@ -210,6 +210,18 @@ impl<R: Renderer> Engine<R> {
             name: "__script_end".to_string(),
         });
 
+        Self::from_prepared_script(script, renderer, rollback_depth)
+    }
+
+    /// Start a clean game from this engine's already lowered script. Passing
+    /// `self.script` back through `new` would lower choice calls twice and reuse
+    /// internal labels, creating recursive calls instead of the original branch.
+    pub fn fresh(&self, renderer:R, rollback_depth:usize)->Result<Self,RuntimeError>{
+        Self::from_prepared_script(self.script.clone(),renderer,rollback_depth)
+    }
+
+    fn from_prepared_script(script:Script,renderer:R,rollback_depth:usize)->Result<Self,RuntimeError>{
+
         let label_table = script
             .iter()
             .enumerate()
@@ -330,13 +342,9 @@ impl<R: Renderer> Engine<R> {
             .sprites
             .get(id)
             .filter(|s| s.visible)
-            .cloned()
-            .ok_or_else(|| {
-                RuntimeError::no_stmt(
-                    crate::error::RuntimeErrorKind::SpriteNotVisible(id.to_string()),
-                    self.state.pc,
-                )
-            })?;
+            .cloned();
+        // Explicit removal is idempotent, including before the first appearance.
+        let Some(from) = from else { return Ok(()) };
         self.state.last_transition = transition.clone();
         self.renderer.hide_sprite(id, &transition, &from);
         if let Some(s) = self.state.sprites.get_mut(id) {
@@ -721,6 +729,11 @@ impl<R: Renderer> Engine<R> {
                 rotation,
                 tint,
             } => {
+                let tint = tint.map(|text| {
+                    let parsed = rvn_parser::parse_interpolated_str(&text).map_err(|_| self.eval_err(
+                        EvalError::TypeMismatch { op: "tint".into(), left: "color expression".into(), right: text.clone() }, "SpriteEffect"))?;
+                    eval_interpolated(&parsed, &self.vars_for_eval()).map_err(|e| self.eval_err(e, "SpriteEffect"))
+                }).transpose()?;
                 self.renderer.set_sprite_effect(
                     &character_id,
                     flip_x,

@@ -89,16 +89,16 @@ impl Transition {
 impl std::fmt::Display for Transition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Transition::Fade { duration_ms } => write!(f, "fade({}ms)", duration_ms),
-            Transition::Dissolve { duration_ms } => write!(f, "dissolve({}ms)", duration_ms),
-            Transition::SlideLeft { duration_ms } => write!(f, "slideleft({}ms)", duration_ms),
-            Transition::SlideRight { duration_ms } => write!(f, "slideright({}ms)", duration_ms),
-            Transition::SlideUp { duration_ms } => write!(f, "slideup({}ms)", duration_ms),
-            Transition::SlideDown { duration_ms } => write!(f, "slidedown({}ms)", duration_ms),
-            Transition::ZoomIn { duration_ms } => write!(f, "zoomin({}ms)", duration_ms),
-            Transition::ZoomOut { duration_ms } => write!(f, "zoomout({}ms)", duration_ms),
-            Transition::Wipe { duration_ms } => write!(f, "wipe({}ms)", duration_ms),
-            Transition::Blur { duration_ms } => write!(f, "blur({}ms)", duration_ms),
+            Transition::Fade { duration_ms } => write!(f, "fade({duration_ms})"),
+            Transition::Dissolve { duration_ms } => write!(f, "dissolve({duration_ms})"),
+            Transition::SlideLeft { duration_ms } => write!(f, "slideleft({duration_ms})"),
+            Transition::SlideRight { duration_ms } => write!(f, "slideright({duration_ms})"),
+            Transition::SlideUp { duration_ms } => write!(f, "slideup({duration_ms})"),
+            Transition::SlideDown { duration_ms } => write!(f, "slidedown({duration_ms})"),
+            Transition::ZoomIn { duration_ms } => write!(f, "zoomin({duration_ms})"),
+            Transition::ZoomOut { duration_ms } => write!(f, "zoomout({duration_ms})"),
+            Transition::Wipe { duration_ms } => write!(f, "wipe({duration_ms})"),
+            Transition::Blur { duration_ms } => write!(f, "blur({duration_ms})"),
             Transition::None => write!(f, "none"),
         }
     }

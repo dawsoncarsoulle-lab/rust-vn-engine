@@ -18,7 +18,9 @@ use owo_colors::OwoColorize;
 use rvn_bevy::run_game;
 use serde::Deserialize;
 
+mod blueprint;
 mod check;
+use blueprint::transpile_blueprint;
 use check::{check_project, CheckOptions};
 
 static DEFAULT_TEMPLATE: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/template/default");
@@ -72,6 +74,28 @@ enum Commands {
         /// Path to the project directory.
         #[arg(value_name = "PROJECT_DIR", default_value = ".")]
         project: String,
+    },
+
+    /// Work with visual Blueprint graph documents.
+    Blueprint {
+        #[command(subcommand)]
+        command: BlueprintCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum BlueprintCommands {
+    /// Validate and transpile a .rvngraph document into native .rvn source.
+    Transpile {
+        /// Path to the versioned Blueprint graph document.
+        #[arg(value_name = "GRAPH.rvngraph")]
+        graph: PathBuf,
+        /// Destination script (defaults to the graph path with a .rvn extension).
+        #[arg(short, long, value_name = "SCRIPT.rvn", conflicts_with = "stdout")]
+        output: Option<PathBuf>,
+        /// Print the generated source instead of writing it to disk.
+        #[arg(long)]
+        stdout: bool,
     },
 }
 
@@ -141,6 +165,22 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
+        Commands::Blueprint { command } => match command {
+            BlueprintCommands::Transpile {
+                graph,
+                output,
+                stdout,
+            } => {
+                let result = transpile_blueprint(&graph, output.as_deref(), stdout)?;
+                if let Some(output) = result {
+                    println!(
+                        "Blueprint '{}' transpiled to '{}'.",
+                        graph.display(),
+                        output.display()
+                    );
+                }
+            }
+        },
     }
 
     Ok(())
@@ -506,6 +546,10 @@ fn create_dist_structure(project_dir: &Path, game_name: &str, platform: &str) ->
 }
 
 fn build_runtime() -> Result<PathBuf> {
+    if let Ok(exe) = std::env::current_exe() {
+        let bundled = exe.with_file_name("rvn_bevy");
+        if bundled.is_file() { return Ok(bundled); }
+    }
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .context("unable to resolve RVN workspace root")?;
@@ -535,10 +579,14 @@ fn build_web_project(project_dir: &Path, cfg: &ProjectConfig, game_name: &str) -
     let dist_dir = create_web_dist_structure(project_dir, game_name)?;
 
     println!("Build web runtime...");
-    let wasm_input = build_web_runtime()?;
-
-    println!("Génération JS/WASM...");
-    run_wasm_bindgen(&wasm_input, &dist_dir)?;
+    let bundled = std::env::current_exe()?.with_file_name("web-runtime");
+    if bundled.join("game.js").is_file() && bundled.join("game_bg.wasm").is_file() {
+        copy_dir_all(&bundled, &dist_dir)?;
+    } else {
+        let wasm_input = build_web_runtime()?;
+        println!("Génération JS/WASM...");
+        run_wasm_bindgen(&wasm_input, &dist_dir)?;
+    }
 
     println!("Copie fichiers...");
     copy_web_project_files(project_dir, &dist_dir, cfg)?;
@@ -633,6 +681,7 @@ fn run_wasm_bindgen(wasm_input: &Path, dist_dir: &Path) -> Result<()> {
 
 fn copy_web_project_files(project_dir: &Path, dist_dir: &Path, cfg: &ProjectConfig) -> Result<()> {
     copy_file_relative(project_dir, dist_dir, Path::new("rvn.toml"))?;
+    copy_custom_menus(project_dir, dist_dir)?;
     copy_optional_file_relative(project_dir, dist_dir, Path::new(&cfg.paths.theme))?;
     copy_dir_relative(project_dir, dist_dir, Path::new(&cfg.paths.assets))?;
     copy_dir_relative(project_dir, dist_dir, Path::new(&cfg.paths.locales))?;
@@ -658,8 +707,14 @@ fn write_web_script_manifest(
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("scripts"));
-    let mut scripts = Vec::new();
-    collect_rvn_files_relative(project_dir, scripts_dir, &mut scripts)?;
+    let mut scripts = vec![path_to_web_string(main_script)];
+    if project_dir.join(scripts_dir).is_dir() {
+        collect_rvn_files_relative(project_dir, scripts_dir, &mut scripts)?;
+        // Root-level Blueprint exports may still import a scripts directory.
+        if scripts_dir != main_script.parent().unwrap_or(Path::new("")) {
+            copy_dir_relative(project_dir, dist_dir, scripts_dir)?;
+        }
+    }
     scripts.sort();
     scripts.dedup();
 
@@ -910,6 +965,7 @@ fn html_escape(value: &str) -> String {
 fn copy_project_files(project_dir: &Path, dist_dir: &Path, cfg: &ProjectConfig) -> Result<()> {
     let data_dir = dist_dir.join("data");
     copy_file_relative(project_dir, &data_dir, Path::new("rvn.toml"))?;
+    copy_custom_menus(project_dir, &data_dir)?;
     copy_optional_file_relative(project_dir, &data_dir, Path::new(&cfg.paths.theme))?;
     copy_dir_relative(project_dir, &data_dir, Path::new(&cfg.paths.assets))?;
     copy_dir_relative(project_dir, &data_dir, Path::new(&cfg.paths.locales))?;
@@ -928,6 +984,41 @@ fn copy_project_files(project_dir: &Path, dist_dir: &Path, cfg: &ProjectConfig) 
         )
     })?;
     Ok(())
+}
+
+fn copy_custom_menus(project_dir: &Path, dist_dir: &Path) -> Result<()> {
+    let config: toml::Value = toml::from_str(&fs::read_to_string(project_dir.join("rvn.toml"))?)?;
+    let configured=config.get("paths").and_then(|p|p.get("menus")).and_then(toml::Value::as_str);
+    if let Some(menus) = configured.or_else(||project_dir.join("menus.rvnui").is_file().then_some("menus.rvnui")) {
+        let relative = Path::new(menus);
+        anyhow::ensure!(!relative.is_absolute() && !relative.components().any(|c|matches!(c,std::path::Component::ParentDir)), "Le fichier de menus doit être dans le projet");
+        let doc=rvn_ui::Document::from_json(&fs::read_to_string(project_dir.join(relative))?).map_err(anyhow::Error::msg)?;
+        doc.validate().map_err(anyhow::Error::msg)?;
+        let assets=config.get("paths").and_then(|p|p.get("assets")).and_then(toml::Value::as_str).unwrap_or("assets");
+        doc.validate_resources(&project_dir.join(assets)).map_err(anyhow::Error::msg)?;
+        copy_file_relative(project_dir, dist_dir, relative)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod distribution_regressions {
+    use super::*;
+    #[test]
+    fn root_blueprint_script_and_custom_menus_are_packaged() {
+        let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root=std::env::temp_dir().join(format!("rvn-package-test-{stamp}"));
+        let dist=root.join("out");fs::create_dir_all(&dist).unwrap();
+        fs::write(root.join("rvn.toml"),"[paths]\nmenus='menus.rvnui'\n").unwrap();
+        let menu=rvn_ui::Document::defaults().to_json().unwrap();
+        fs::write(root.join("menus.rvnui"),&menu).unwrap();
+        copy_custom_menus(&root,&dist).unwrap();
+        assert_eq!(fs::read_to_string(dist.join("menus.rvnui")).unwrap(),menu);
+        write_web_script_manifest(&root,&dist,Path::new("project.generated.rvn")).unwrap();
+        assert!(fs::read_to_string(dist.join("rvn_web_manifest.toml")).unwrap().contains("project.generated.rvn"));
+        fs::write(root.join("rvn.toml"),"[paths]\nmenus='../outside'\n").unwrap();
+        assert!(copy_custom_menus(&root,&dist).is_err());fs::remove_dir_all(root).unwrap();
+    }
 }
 
 fn copy_file_relative(project_dir: &Path, dist_dir: &Path, relative: &Path) -> Result<()> {

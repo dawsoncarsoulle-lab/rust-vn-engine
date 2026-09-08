@@ -6,6 +6,7 @@ use crate::resources::{
 
 #[derive(Component)]
 pub struct GalleryOverlay;
+#[derive(Component)]pub(crate) struct GalleryColors{pub normal:Color,pub hover:Color,pub pressed:Color}
 
 #[derive(Component, Clone)]
 pub enum GalleryButton {
@@ -298,23 +299,23 @@ fn spawn_gallery_button(parent: &mut ChildBuilder, label: &str, action: GalleryB
 pub fn gallery_interaction_system(
     mut commands: Commands,
     mut interaction_query: Query<
-        (&Interaction, &GalleryButton, &mut BackgroundColor),
+        (&Interaction, &GalleryButton, &mut BackgroundColor,Option<&GalleryColors>),
         (Changed<Interaction>, With<Button>),
     >,
     overlay_query: Query<Entity, With<GalleryOverlay>>,
     mut state: ResMut<GalleryState>,
     mut next_state: ResMut<NextState<VnState>>,
 ) {
-    for (interaction, button, mut bg_color) in interaction_query.iter_mut() {
+    for (interaction, button, mut bg_color,colors) in interaction_query.iter_mut() {
         match interaction {
             Interaction::Hovered => {
-                *bg_color = Color::srgba(0.25, 0.25, 0.45, 1.0).into();
+                *bg_color = colors.map(|c|c.hover).unwrap_or(Color::srgba(0.25, 0.25, 0.45, 1.0)).into();
             }
             Interaction::None => {
-                *bg_color = gallery_button_color(button, &state).into();
+                *bg_color = colors.map(|c|c.normal).unwrap_or_else(||gallery_button_color(button, &state)).into();
             }
             Interaction::Pressed => {
-                *bg_color = Color::srgba(0.35, 0.35, 0.65, 1.0).into();
+                *bg_color = colors.map(|c|c.pressed).unwrap_or(Color::srgba(0.35, 0.35, 0.65, 1.0)).into();
                 match button {
                     GalleryButton::Back if state.selected_cg.is_some() => {
                         state.selected_cg = None;

@@ -12,6 +12,8 @@ toml = "0.8"
 rvn_bevy = { path = "../rvn_bevy" }
 rvn_core = { path = "../rvn_core" }
 rvn_parser = { path = "../rvn_parser" }
+rvn_graph = { path = "../rvn_graph" }
+rvn_ui = { path = "../rvn_ui" }
 notify = "6"
 owo-colors = "4.2"
 

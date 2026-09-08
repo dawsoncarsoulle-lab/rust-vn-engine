@@ -370,9 +370,10 @@ impl<'a> Parser<'a> {
                         }
                     }
                     self.expect(")")?;
-                    return Ok(Expr::Call { name, args });
+                    Ok(Expr::Call { name, args })
+                } else {
+                    Ok(Expr::Var(name))
                 }
-                Ok(Expr::Var(name))
             }
             Some(Token::ParenOpen) => {
                 let inner = self.parse_expr()?;
@@ -385,7 +386,6 @@ impl<'a> Parser<'a> {
             }
             Some(Token::BracketOpen) => {
                 // List literal: [a, b, c]
-                self.advance();
                 let mut items = Vec::new();
                 if !matches!(self.peek(), Some(Token::BracketClose)) {
                     items.push(self.parse_expr()?);
@@ -1392,7 +1392,14 @@ impl<'a> Parser<'a> {
         };
         // Expect => then action (jump or call).
         self.expect("=>")?;
-        let action_kind = self.expect_ident("jump or call after =>")?;
+        let action_kind = match self.advance().cloned() {
+            Some(Token::Jump) => "jump",
+            Some(Token::Call) => "call",
+            Some(tok) => {
+                return Err(self.err_token(self.current_location(), &tok, "jump or call after =>"))
+            }
+            None => return Err(self.err_eof(self.current_location(), "jump or call after =>")),
+        };
         let target = self.expect_ident("label name")?;
         let action = format!("{} {}", action_kind, target);
         Ok(Statement::Timer {

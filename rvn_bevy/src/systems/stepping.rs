@@ -6,7 +6,7 @@ use crate::project_paths::ProjectPaths;
 use crate::resources::{
     PersistentDataResource, ScriptErrorMessage, VnEngine, VnRenderState, VnState,
 };
-use crate::systems::save_menu::{record_resume_target, MAX_SLOTS};
+use crate::systems::save_menu::record_resume_target;
 use crate::vn_command::VnCommand;
 use rvn_core::persistent::LastResumeTarget;
 use rvn_core::{error::ScriptError, Interaction};
@@ -23,6 +23,7 @@ pub fn stepping_system(
     mut step_req: ResMut<DebugStepRequest>,
     project_paths: Res<ProjectPaths>,
     mut persistent: ResMut<PersistentDataResource>,
+    mut thumbnails:ResMut<crate::save_thumbnails::SaveThumbnails>,
 ) {
     // En mode debug, on ne progresse que si un step a été demandé (touche F10).
     if debug_state.visible {
@@ -59,7 +60,7 @@ pub fn stepping_system(
         || matches!(interaction, Some(Interaction::Choice { .. }));
 
     if should_autosave {
-        match SaveManager::new(&project_paths.saves, MAX_SLOTS as u32) {
+        match SaveManager::new(&project_paths.saves, crate::systems::save_menu::SUPPORTED_SLOTS) {
             Ok(mgr) => {
                 if let Err(e) = mgr.save_autosave(
                     &engine.0.state,
@@ -72,6 +73,7 @@ pub fn stepping_system(
                         &mut persistent,
                         LastResumeTarget::autosave(data.timestamp),
                     );
+                    thumbnails.request_resume(rvn_core::save::ResumeSlot::Auto,&engine,data);
                 }
             }
             Err(e) => error!("[autosave] SaveManager indisponible: {e}"),
@@ -92,8 +94,8 @@ pub fn stepping_system(
                 hotspots,
             } => {
                 let hotspots = hotspots
-                    .into_iter()
-                    .map(|h| (h.name, (h.area.x1, h.area.y1, h.area.x2, h.area.y2)))
+                    .iter()
+                    .map(crate::vn_command::ImagemapZone::from)
                     .collect();
                 pending.push(VnCommand::ShowImagemap {
                     background,

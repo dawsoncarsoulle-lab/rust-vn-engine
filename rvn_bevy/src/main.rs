@@ -2,7 +2,12 @@
 fn main() {
     let path = std::env::args()
         .nth(1)
-        .unwrap_or_else(|| "./data".to_string());
+        .unwrap_or_else(|| {
+            std::env::current_exe().ok().map(|p|p.with_file_name("data"))
+                .filter(|p|p.join("rvn.toml").is_file())
+                .unwrap_or_else(||std::path::PathBuf::from("./data"))
+                .to_string_lossy().into_owned()
+        });
 
     if let Err(e) = rvn_bevy::run_game_from_path(path) {
         eprintln!("{e}");

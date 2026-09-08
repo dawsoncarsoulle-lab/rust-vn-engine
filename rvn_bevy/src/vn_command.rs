@@ -1,6 +1,18 @@
 use bevy::prelude::*;
 use rvn_parser::{AnimationParam, Position, Transition};
 
+#[derive(Debug, Clone)]
+pub struct ImagemapZone {
+    pub area: rvn_parser::Rect,
+    pub hover_area: rvn_parser::Rect,
+}
+
+impl From<&rvn_parser::Hotspot> for ImagemapZone {
+    fn from(value: &rvn_parser::Hotspot) -> Self {
+        Self { area: value.area.clone(), hover_area: value.hover_area.clone().unwrap_or_else(|| value.area.clone()) }
+    }
+}
+
 #[derive(Event, Debug, Clone)]
 pub enum VnCommand {
     // ── Visuels ───────────────────────────────────────────────────────────────
@@ -60,7 +72,7 @@ pub enum VnCommand {
     ShowImagemap {
         background: String,
         hover_image: Option<String>,
-        hotspots: Vec<(Option<String>, (i32, i32, i32, i32))>,
+        hotspots: Vec<ImagemapZone>,
     },
 
     // ── Audio ─────────────────────────────────────────────────────────────────

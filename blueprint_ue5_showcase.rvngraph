@@ -1,0 +1,534 @@
+{
+  "schema_version": 2,
+  "graph_id": 1,
+  "kind": {
+    "label": {
+      "name": "start"
+    }
+  },
+  "nodes": {
+    "115": {
+      "id": 115,
+      "kind": "label",
+      "position": [
+        -768.0,
+        -256.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        274
+      ]
+    },
+    "116": {
+      "id": 116,
+      "kind": "dialogue",
+      "position": [
+        -384.1357875513891,
+        -258.4400928830049
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        275,
+        276,
+        277,
+        278
+      ]
+    },
+    "117": {
+      "id": 117,
+      "kind": "character_value",
+      "position": [
+        -768.0,
+        -160.0
+      ],
+      "title_override": "Narrateur",
+      "properties": {
+        "character": {
+          "type": "string",
+          "value": ""
+        },
+        "emotion": {
+          "type": "string",
+          "value": ""
+        }
+      },
+      "pins": [
+        279,
+        280
+      ]
+    },
+    "118": {
+      "id": 118,
+      "kind": "text_value",
+      "position": [
+        -768.0,
+        -64.0
+      ],
+      "title_override": null,
+      "properties": {
+        "value": {
+          "type": "string",
+          "value": "salut ! bien RVN!"
+        }
+      },
+      "pins": [
+        281
+      ]
+    },
+    "119": {
+      "id": 119,
+      "kind": "reroute",
+      "position": [
+        -480.0,
+        -48.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        282,
+        283
+      ]
+    },
+    "120": {
+      "id": 120,
+      "kind": "choice",
+      "position": [
+        -0.42084912124707696,
+        -254.30748627322103
+      ],
+      "title_override": null,
+      "properties": {
+        "options": {
+          "type": "string_list",
+          "value": [
+            "Nouveau choix 1",
+            "Nouveau choix 2",
+            "Nouveau choix 3",
+            "Nouveau choix 4",
+            "Nouveau choix 5"
+          ]
+        }
+      },
+      "pins": [
+        284,
+        285,
+        286,
+        287,
+        288,
+        289,
+        290,
+        291,
+        292,
+        293,
+        294,
+        295
+      ]
+    },
+    "122": {
+      "id": 122,
+      "kind": "imagemap",
+      "position": [
+        385.7963778631855,
+        -257.20010802641156
+      ],
+      "title_override": null,
+      "properties": {
+        "hotspots": {
+          "type": "string_list",
+          "value": []
+        }
+      },
+      "pins": [
+        297,
+        298,
+        299,
+        300
+      ]
+    }
+  },
+  "pins": {
+    "274": {
+      "id": 274,
+      "node": 115,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "275": {
+      "id": 275,
+      "node": 116,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "276": {
+      "id": 276,
+      "node": 116,
+      "key": "character",
+      "label": "Personnage",
+      "direction": "input",
+      "value_type": "character",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "277": {
+      "id": 277,
+      "node": 116,
+      "key": "text",
+      "label": "Texte",
+      "direction": "input",
+      "value_type": "interpolated_text",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "278": {
+      "id": 278,
+      "node": 116,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "279": {
+      "id": 279,
+      "node": 117,
+      "key": "sprite",
+      "label": "Sprite",
+      "direction": "input",
+      "value_type": {
+        "asset": "sprite"
+      },
+      "cardinality": "one",
+      "default_value": null
+    },
+    "280": {
+      "id": 280,
+      "node": 117,
+      "key": "value",
+      "label": "Personnage",
+      "direction": "output",
+      "value_type": "character",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "281": {
+      "id": 281,
+      "node": 118,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "interpolated_text",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "282": {
+      "id": 282,
+      "node": 119,
+      "key": "value",
+      "label": "",
+      "direction": "input",
+      "value_type": "interpolated_text",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "283": {
+      "id": 283,
+      "node": 119,
+      "key": "value_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "interpolated_text",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "284": {
+      "id": 284,
+      "node": 120,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "285": {
+      "id": 285,
+      "node": 120,
+      "key": "completed",
+      "label": "Terminé",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "286": {
+      "id": 286,
+      "node": 120,
+      "key": "option_0",
+      "label": "Nouveau choix 1",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "287": {
+      "id": 287,
+      "node": 120,
+      "key": "option_0_condition",
+      "label": "Condition",
+      "direction": "input",
+      "value_type": "bool",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "288": {
+      "id": 288,
+      "node": 120,
+      "key": "option_1",
+      "label": "Nouveau choix 2",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "289": {
+      "id": 289,
+      "node": 120,
+      "key": "option_1_condition",
+      "label": "Condition",
+      "direction": "input",
+      "value_type": "bool",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "290": {
+      "id": 290,
+      "node": 120,
+      "key": "option_2",
+      "label": "Nouveau choix 3",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "291": {
+      "id": 291,
+      "node": 120,
+      "key": "option_2_condition",
+      "label": "Condition",
+      "direction": "input",
+      "value_type": "bool",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "292": {
+      "id": 292,
+      "node": 120,
+      "key": "option_3",
+      "label": "Nouveau choix 4",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "293": {
+      "id": 293,
+      "node": 120,
+      "key": "option_3_condition",
+      "label": "Condition",
+      "direction": "input",
+      "value_type": "bool",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "294": {
+      "id": 294,
+      "node": 120,
+      "key": "option_4",
+      "label": "Nouveau choix 5",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "295": {
+      "id": 295,
+      "node": 120,
+      "key": "option_4_condition",
+      "label": "Condition",
+      "direction": "input",
+      "value_type": "bool",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "297": {
+      "id": 297,
+      "node": 122,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "298": {
+      "id": 298,
+      "node": 122,
+      "key": "background",
+      "label": "Arrière-plan",
+      "direction": "input",
+      "value_type": {
+        "asset": "background"
+      },
+      "cardinality": "one",
+      "default_value": null
+    },
+    "299": {
+      "id": 299,
+      "node": 122,
+      "key": "hover",
+      "label": "Survol",
+      "direction": "input",
+      "value_type": {
+        "asset": "hover_image"
+      },
+      "cardinality": "one",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    },
+    "300": {
+      "id": 300,
+      "node": 122,
+      "key": "completed",
+      "label": "Terminé",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    }
+  },
+  "edges": {
+    "134": {
+      "id": 134,
+      "output": 274,
+      "input": 275
+    },
+    "135": {
+      "id": 135,
+      "output": 280,
+      "input": 276
+    },
+    "137": {
+      "id": 137,
+      "output": 281,
+      "input": 282
+    },
+    "138": {
+      "id": 138,
+      "output": 283,
+      "input": 277
+    },
+    "139": {
+      "id": 139,
+      "output": 278,
+      "input": 284
+    },
+    "140": {
+      "id": 140,
+      "output": 286,
+      "input": 297
+    }
+  },
+  "variables": {
+    "NewVar": {
+      "name": "NewVar",
+      "value_type": "bool",
+      "default_value": {
+        "type": "bool",
+        "value": false
+      }
+    },
+    "NewVar2": {
+      "name": "NewVar2",
+      "value_type": "bool",
+      "default_value": {
+        "type": "bool",
+        "value": false
+      }
+    },
+    "dialogue1": {
+      "name": "dialogue1",
+      "value_type": "string",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    },
+    "nombre10": {
+      "name": "nombre10",
+      "value_type": "int",
+      "default_value": {
+        "type": "int",
+        "value": 0
+      }
+    },
+    "score": {
+      "name": "score",
+      "value_type": "int",
+      "default_value": {
+        "type": "int",
+        "value": 0
+      }
+    },
+    "score_text": {
+      "name": "score_text",
+      "value_type": "string",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    },
+    "test": {
+      "name": "test",
+      "value_type": "float",
+      "default_value": {
+        "type": "float",
+        "value": 0.0
+      }
+    },
+    "texterep": {
+      "name": "texterep",
+      "value_type": "string",
+      "default_value": {
+        "type": "string",
+        "value": ""
+      }
+    },
+    "var": {
+      "name": "var",
+      "value_type": "float",
+      "default_value": {
+        "type": "float",
+        "value": 0.0
+      }
+    }
+  },
+  "characters": {
+    "erzy": "erzy le grand"
+  },
+  "next_node_id": 123,
+  "next_pin_id": 301,
+  "next_edge_id": 141
+}

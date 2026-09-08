@@ -1,0 +1,17 @@
+label start
+    alice "Bienvenue dans rust-VN."
+    set score = 2
+    if (score >= 10) {
+        alice "La condition est vraie."
+    } else {
+        alice "La condition est fausse."
+    }
+    choice {
+        "Continuer" => {
+            "Continuons !"
+        }
+        "Partir" => {
+            "À bientôt."
+        }
+    }
+    scene "station" with fade

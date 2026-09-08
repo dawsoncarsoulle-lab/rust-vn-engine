@@ -1,10 +1,10 @@
 use bevy::prelude::*;
 use rvn_parser::{AnimationParam, AnimationValue, Position, Transition};
 
-use super::{make_fade_in, make_fade_out, WIN_H, WIN_W};
+use super::{make_fade_in, make_fade_out, FadeAnim, WIN_H, WIN_W};
 use crate::components::{AnimationKind, SpriteAnimation, SpriteBaseTransform, VnSprite};
 use crate::vn_command::VnCommand;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 fn position_to_x(pos: &Position) -> f32 {
     match pos {
@@ -98,6 +98,7 @@ pub fn sprite_system(
     )>,
 ) {
     let mut spawned_this_frame: HashMap<String, Entity> = HashMap::new();
+    let mut retired = HashSet::new();
     let cmds: Vec<VnCommand> = vn_events.read().cloned().collect();
 
     for cmd in cmds {
@@ -109,6 +110,7 @@ pub fn sprite_system(
                 transition,
             } => {
                 let file = match &emotion {
+                    Some(path) if path.contains('/') => path.strip_prefix("assets/").unwrap_or(path).to_owned(),
                     Some(emo) => format!("sprites/{}/{}.png", id, emo),
                     None => format!("sprites/{}/default.png", id),
                 };
@@ -119,11 +121,11 @@ pub fn sprite_system(
                 let transform = sprite_default_transform(&position);
                 let base = base_from_transform(&transform);
 
-                let existing = queries
+                let existing = spawned_this_frame.get(&id).copied().filter(|e|!retired.contains(e)).or_else(|| queries
                     .p0()
                     .iter()
-                    .find(|(_, s)| s.id == id)
-                    .map(|(entity, _)| entity);
+                    .find(|(e, s)| s.id == id && !retired.contains(e))
+                    .map(|(entity, _)| entity));
 
                 if let Some(entity) = existing {
                     commands.entity(entity).insert((
@@ -137,6 +139,9 @@ pub fn sprite_system(
                         base,
                     ));
                     commands.entity(entity).remove::<SpriteAnimation>();
+
+                    // A new explicit appearance cancels a previous pending fade-out.
+                    commands.entity(entity).remove::<FadeAnim>();
 
                     if let Some(anim) = make_fade_in(&transition) {
                         commands.entity(entity).insert(anim);
@@ -172,25 +177,27 @@ pub fn sprite_system(
                 let mut found = false;
 
                 for (entity, sprite) in queries.p0().iter() {
-                    if sprite.id == id {
+                    if sprite.id == id && !retired.contains(&entity) {
                         found = true;
                         commands.entity(entity).remove::<SpriteAnimation>();
 
                         if let Some(anim) = make_fade_out(&transition) {
                             commands.entity(entity).insert(anim);
                         } else {
+                            retired.insert(entity);
                             commands.entity(entity).despawn();
                         }
                     }
                 }
 
                 if !found {
-                    if let Some(entity) = spawned_this_frame.get(&id) {
+                    if let Some(entity) = spawned_this_frame.get(&id).filter(|e| !retired.contains(e)) {
                         commands.entity(*entity).remove::<SpriteAnimation>();
 
                         if let Some(anim) = make_fade_out(&transition) {
                             commands.entity(*entity).insert(anim);
                         } else {
+                            retired.insert(*entity);
                             commands.entity(*entity).despawn();
                         }
                     }

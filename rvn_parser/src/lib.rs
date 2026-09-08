@@ -641,5 +641,9 @@ mod tests {
         } else {
             panic!("expected Scene");
         }
+        assert_eq!(
+            Transition::Fade { duration_ms: 500 }.to_string(),
+            "fade(500)"
+        );
     }
 }
