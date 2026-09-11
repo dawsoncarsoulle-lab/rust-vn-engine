@@ -950,12 +950,23 @@ impl Emitter<'_> {
             .get(&edge.output)
             .ok_or(TranspileError::PinNotFound(edge.output))?;
         let source = self.graph.nodes.get(&source_pin.node).unwrap();
-        if source.kind == NodeKind::VariableGet {
-            let name = property_string(source.id, &source.properties, "name")?;
+        if matches!(source.kind, NodeKind::VariableGet | NodeKind::SetVariable) {
+            // A SET value output is a typed variable value too. Read the
+            // assigned value at runtime, rather than treating it as a literal.
+            let name = match source.properties.get("name") {
+                Some(PropertyValue::String(name)) => name.clone(),
+                _ if source.kind == NodeKind::SetVariable => self.pin_string(source.id, "name")?,
+                _ => property_string(source.id, &source.properties, "name")?,
+            };
             return Ok(format!("[{}]", validate_variable_name(&name)?));
         }
         if source.kind == NodeKind::FormatText {
             return self.format_text_output(source.id, &mut BTreeSet::new());
+        }
+        if source.kind == NodeKind::ConvertNumberToText {
+            // Interpolation already renders numbers as text; avoid embedding
+            // a quoted empty string inside the dialogue's quoted payload.
+            return Ok(format!("[{}]", self.expression_from_input(source.id, "value")?));
         }
         if source.kind == NodeKind::Reroute {
             return self.pin_interpolated_text(source.id, "value");

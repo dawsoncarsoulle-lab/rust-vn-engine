@@ -452,6 +452,32 @@ fn set_then_get_text_variable_drives_dialogue_like_the_editor_workflow() {
 }
 
 #[test]
+fn set_text_output_drives_dialogue_with_inline_value() {
+    let mut graph = GraphDocument::new(GraphId::new(26), GraphKind::Label { name: "start".into() });
+    define(&mut graph, "dialogue_tila", ValueType::String, PropertyValue::String(String::new()));
+    let root = add(&mut graph, NodeKind::Label);
+    let setter = add(&mut graph, NodeKind::SetVariable);
+    let dialogue = add(&mut graph, NodeKind::Dialogue);
+    graph.set_property(setter, "name", PropertyValue::String("dialogue_tila".into())).unwrap();
+    graph.set_pin_default(setter, "value", PropertyValue::String("salut".into())).unwrap();
+    for key in ["value", "value_out"] {
+        let id = pin(&graph, setter, key);
+        graph.pins.get_mut(&id).unwrap().value_type = ValueType::String;
+    }
+    connect(&mut graph, root, "exec_out", setter, "exec_in");
+    connect(&mut graph, setter, "exec_out", dialogue, "exec_in");
+    connect(&mut graph, setter, "value_out", dialogue, "text");
+    assert_eq!(transpile(&graph).unwrap().source,
+        "label start\n    set dialogue_tila = \"salut\"\n    \"[dialogue_tila]\"\n");
+    let text_pin = pin(&graph, dialogue, "text");
+    graph.edges.retain(|_, edge| edge.input != text_pin);
+    let conversion = add(&mut graph, NodeKind::ConvertNumberToText);
+    graph.set_pin_default(conversion, "value", PropertyValue::Int(15)).unwrap();
+    connect(&mut graph, conversion, "result", dialogue, "text");
+    assert!(transpile(&graph).unwrap().source.contains("15"));
+}
+
+#[test]
 fn dialogue_never_uses_an_unconnected_hidden_text_default() {
     let mut graph = GraphDocument::new(
         GraphId::new(25),

@@ -3,7 +3,7 @@ use crate::*;
 /// Portable data-only package. Media remain independent files after import.
 #[derive(Clone,Debug,Serialize,Deserialize)]
 pub struct ThemePackage {pub version:u32,pub document:Document,pub resources:BTreeMap<String,Vec<u8>>}
-fn safe_path(path:&str)->Result<(),String>{if path.is_empty()||Path::new(path).components().any(|c|!matches!(c,std::path::Component::Normal(_))){return Err(format!("Chemin de ressource interdit : {path}"))}Ok(())}
+fn safe_path(path:&str)->Result<(),String>{if path.is_empty()||Path::new(path).components().any(|c|!matches!(c,std::path::Component::Normal(_))){return Err(diagnostic!("Chemin de ressource interdit : {path}", "Resource path is not allowed: {path}"))}Ok(())}
 fn local_variables(doc:&Document)->BTreeSet<String>{
     fn walk(es:&[Element],names:&mut BTreeSet<String>){for e in es{if let Some(c)=&e.local_control{names.insert(c.variable.clone());}walk(&e.children,names);}}
     let mut names=BTreeSet::new();for p in &doc.pages{walk(&p.elements,&mut names);for g in &p.graphs{for n in &g.nodes{if let Op::Set{variable,..}|Op::Branch{variable,..}=&n.op{if !variable.starts_with("state."){names.insert(variable.clone());}}}}}for e in doc.components.values(){walk(std::slice::from_ref(e),&mut names);}names
@@ -25,7 +25,7 @@ impl Document {
 impl ThemePackage {
     pub fn review(&self,existing:&Document)->Result<String,String>{
         self.validate()?;let mut trial=existing.clone();let start=trial.pages.len();trial.merge_design(self.document.clone())?;
-        let mut lines=vec!["CONTENU DU DESIGN".into(),format!("{} pages · {} styles · {} composants · {} fichiers",self.document.pages.len(),self.document.styles.len(),self.document.components.len(),self.resources.len()),String::new()];
+        let mut lines=vec![diagnostic!("CONTENU DU DESIGN", "DESIGN CONTENTS").into(),diagnostic!("{} pages · {} styles · {} composants · {} fichiers", "{} pages · {} styles · {} components · {} files",self.document.pages.len(),self.document.styles.len(),self.document.components.len(),self.resources.len()),String::new()];
         for (source,copy) in self.document.pages.iter().zip(&trial.pages[start..]){
             lines.push(format!("{} → {}",source.name,copy.id));
             if source.role.is_some()&&copy.role.is_none(){lines.push("  Rôle déjà utilisé : votre page actuelle reste active.".into());}
@@ -36,25 +36,25 @@ impl ThemePackage {
         for id in trial.styles.keys().filter(|id|!existing.styles.contains_key(*id)){lines.push(id.clone());}
         for id in trial.components.keys().filter(|id|!existing.components.contains_key(*id)){lines.push(id.clone());}
         lines.push("\nRESSOURCES (copies dans un nouveau dossier)".into());
-        for(path,bytes)in &self.resources{lines.push(format!("{path} — {} octets",bytes.len()));}
+        for(path,bytes)in &self.resources{lines.push(diagnostic!("{path} — {} octets", "{path} — {} bytes",bytes.len()));}
         if self.resources.is_empty(){lines.push("Aucun média inclus".into());}
         lines.push("\nAucun fichier ou élément existant ne sera écrasé.".into());Ok(lines.join("\n"))
     }
     pub fn collect(document:&Document,assets:&Path)->Result<Self,String>{
         document.validate()?;let mut resources=BTreeMap::new();let root=assets.canonicalize().map_err(|e|e.to_string())?;let mut total=0;
-        for path in document.resource_paths(){safe_path(&path)?;let file=assets.join(&path).canonicalize().map_err(|e|format!("{path} : {e}"))?;if !file.starts_with(&root){return Err("Ressource hors du dossier Assets".into())}
-            let data=std::fs::read(file).map_err(|e|e.to_string())?;total+=data.len();if total>64*1024*1024{return Err("Le modèle dépasse 64 Mo de ressources".into())}resources.insert(path.clone(),data);
-            for name in ["LICENSE.txt","OFL.txt","LICENCE.txt"]{let license=Path::new(&path).parent().unwrap_or(Path::new("")).join(name);let key=license.to_string_lossy().to_string();if resources.contains_key(&key){continue}let source=assets.join(&license);if source.exists(){let source=source.canonicalize().map_err(|e|e.to_string())?;if !source.starts_with(&root){return Err("Licence hors du dossier Assets".into())}let bytes=std::fs::read(source).map_err(|e|e.to_string())?;total+=bytes.len();if total>64*1024*1024{return Err("Le modèle dépasse 64 Mo de ressources".into())}resources.insert(key,bytes);}}
+        for path in document.resource_paths(){safe_path(&path)?;let file=assets.join(&path).canonicalize().map_err(|e|format!("{path} : {e}"))?;if !file.starts_with(&root){return Err(diagnostic!("Ressource hors du dossier Assets", "Resource outside the Assets folder").into())}
+            let data=std::fs::read(file).map_err(|e|e.to_string())?;total+=data.len();if total>64*1024*1024{return Err(diagnostic!("Le modèle dépasse 64 Mo de ressources", "The template exceeds 64 MB of resources").into())}resources.insert(path.clone(),data);
+            for name in ["LICENSE.txt","OFL.txt","LICENCE.txt"]{let license=Path::new(&path).parent().unwrap_or(Path::new("")).join(name);let key=license.to_string_lossy().to_string();if resources.contains_key(&key){continue}let source=assets.join(&license);if source.exists(){let source=source.canonicalize().map_err(|e|e.to_string())?;if !source.starts_with(&root){return Err(diagnostic!("Licence hors du dossier Assets", "License outside the Assets folder").into())}let bytes=std::fs::read(source).map_err(|e|e.to_string())?;total+=bytes.len();if total>64*1024*1024{return Err(diagnostic!("Le modèle dépasse 64 Mo de ressources", "The template exceeds 64 MB of resources").into())}resources.insert(key,bytes);}}
         }let package=Self{version:1,document:document.clone(),resources};package.validate()?;Ok(package)
     }
-    pub fn from_json(source:&str)->Result<Self,String>{if source.len()>256*1024*1024{return Err("Paquet trop volumineux".into())}let package:Self=serde_json::from_str(source).map_err(|e|e.to_string())?;package.validate()?;Ok(package)}
-    pub fn validate(&self)->Result<(),String>{if self.version!=1{return Err("Version de paquet non prise en charge".into())}self.document.validate()?;let mut size=0;for (path,bytes) in &self.resources{safe_path(path)?;size+=bytes.len();}if size>64*1024*1024{return Err("Ressources trop volumineuses".into())}for path in self.document.resource_paths(){if !self.resources.contains_key(&path){return Err(format!("Ressource absente du paquet : {path}"))}}Ok(())}
+    pub fn from_json(source:&str)->Result<Self,String>{if source.len()>256*1024*1024{return Err(diagnostic!("Paquet trop volumineux", "Package is too large").into())}let package:Self=serde_json::from_str(source).map_err(|e|e.to_string())?;package.validate()?;Ok(package)}
+    pub fn validate(&self)->Result<(),String>{if self.version!=1{return Err(diagnostic!("Version de paquet non prise en charge", "Unsupported package version").into())}self.document.validate()?;let mut size=0;for (path,bytes) in &self.resources{safe_path(path)?;size+=bytes.len();}if size>64*1024*1024{return Err(diagnostic!("Ressources trop volumineuses", "Resources are too large").into())}for path in self.document.resource_paths(){if !self.resources.contains_key(&path){return Err(diagnostic!("Ressource absente du paquet : {path}", "Resource missing from package: {path}"))}}Ok(())}
     /// Import into a fresh namespaced directory: no existing resource is overwritten.
     pub fn import(&self,assets:&Path)->Result<Document,String>{
         self.validate()?;std::fs::create_dir_all(assets).map_err(|e|e.to_string())?;
         // A resource cannot simultaneously be a file and another resource's
         // parent directory. Reject this before creating the import directory.
-        for path in self.resources.keys(){let mut parent=Path::new(path).parent();while let Some(p)=parent{if self.resources.contains_key(&p.to_string_lossy().to_string()){return Err(format!("Conflit fichier/dossier dans le paquet : {path}"));}parent=p.parent();}}
+        for path in self.resources.keys(){let mut parent=Path::new(path).parent();while let Some(p)=parent{if self.resources.contains_key(&p.to_string_lossy().to_string()){return Err(diagnostic!("Conflit fichier/dossier dans le paquet : {path}", "File/folder conflict in package: {path}"));}parent=p.parent();}}
         let mut n=1;let directory=loop{let p=assets.join(format!("menu_theme_{n}"));match std::fs::create_dir(&p){Ok(())=>break p,Err(e) if e.kind()==std::io::ErrorKind::AlreadyExists=>n+=1,Err(e)=>return Err(e.to_string())}};
         let copied=(||->Result<(),String>{for (path,bytes) in &self.resources{let target=directory.join(path);std::fs::create_dir_all(target.parent().unwrap()).map_err(|e|e.to_string())?;std::fs::write(target,bytes).map_err(|e|e.to_string())?;}Ok(())})();
         if let Err(error)=copied{let _=std::fs::remove_dir_all(&directory);return Err(error);}

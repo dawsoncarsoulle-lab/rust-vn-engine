@@ -60,7 +60,7 @@ pub fn image_quads(image:[f32;2],size:[f32;2],fit:ImageFit,border:[f32;4])->Vec<
 pub struct Shadow {pub offset:[f32;2],pub blur:f32,pub color:Color}
 impl Default for Shadow{fn default()->Self{Self{offset:[6.0,6.0],blur:8.0,color:[0.0;4]}}}
 impl Shadow{
-    pub fn validate(&self)->Result<(),String>{if self.offset.iter().any(|v|!v.is_finite()||v.abs()>4096.0)||!self.blur.is_finite()||!(0.0..=256.0).contains(&self.blur)||self.color.iter().any(|v|!v.is_finite()||!(0.0..=1.0).contains(v)){return Err("Ombre invalide : décalage ±4096, diffusion 0 à 256 et couleur RGBA valide requis".into());}Ok(())}
+    pub fn validate(&self)->Result<(),String>{if self.offset.iter().any(|v|!v.is_finite()||v.abs()>4096.0)||!self.blur.is_finite()||!(0.0..=256.0).contains(&self.blur)||self.color.iter().any(|v|!v.is_finite()||!(0.0..=1.0).contains(v)){return Err(diagnostic!("Ombre invalide : décalage ±4096, diffusion 0 à 256 et couleur RGBA valide requis", "Invalid shadow: offset ±4096, blur 0 to 256 and a valid RGBA color are required").into());}Ok(())}
 }
 /// Identical soft-edge layers in the native game and the authoring canvas.
 pub fn shadow_layers(rect:[f32;4],radius:f32,shadow:&Shadow)->Vec<([f32;4],f32,Color)>{
@@ -79,8 +79,8 @@ impl ScrollbarPatch{
     pub fn from_style(s:&ScrollbarStyle)->Self{Self{track:Some(s.track),thumb:Some(s.thumb),hover:Some(s.hover),pressed:Some(s.pressed),width:Some(s.width),radius:Some(s.radius)}}
     pub fn apply(&self,s:&mut ScrollbarStyle){if let Some(v)=self.track{s.track=v}if let Some(v)=self.thumb{s.thumb=v}if let Some(v)=self.hover{s.hover=v}if let Some(v)=self.pressed{s.pressed=v}if let Some(v)=self.width{s.width=v}if let Some(v)=self.radius{s.radius=v}}
     pub fn validate(&self)->Result<(),String>{
-        for c in [self.track,self.thumb,self.hover,self.pressed].into_iter().flatten(){if c.iter().any(|v|!v.is_finite()||!(0.0..=1.0).contains(v)){return Err("Couleur de barre de défilement invalide".into());}}
-        if self.width.is_some_and(|v|!v.is_finite()||!(4.0..=64.0).contains(&v))||self.radius.is_some_and(|v|!v.is_finite()||!(0.0..=32.0).contains(&v)){return Err("Barre de défilement : largeur de 4 à 64 px et arrondi de 0 à 32 px".into());}Ok(())
+        for c in [self.track,self.thumb,self.hover,self.pressed].into_iter().flatten(){if c.iter().any(|v|!v.is_finite()||!(0.0..=1.0).contains(v)){return Err(diagnostic!("Couleur de barre de défilement invalide", "Invalid scrollbar color").into());}}
+        if self.width.is_some_and(|v|!v.is_finite()||!(4.0..=64.0).contains(&v))||self.radius.is_some_and(|v|!v.is_finite()||!(0.0..=32.0).contains(&v)){return Err(diagnostic!("Barre de défilement : largeur de 4 à 64 px et arrondi de 0 à 32 px", "Scrollbar: width from 4 to 64 px and corner radius from 0 to 32 px").into());}Ok(())
     }
 }
 #[derive(Clone,Debug,Serialize,Deserialize,PartialEq)]
@@ -104,7 +104,7 @@ impl TextStateColors{
     pub fn apply(&self,target:&mut Self){if self.hover.is_some(){target.hover=self.hover;}if self.pressed.is_some(){target.pressed=self.pressed;}if self.disabled.is_some(){target.disabled=self.disabled;}if self.focus.is_some(){target.focus=self.focus;}if self.selected.is_some(){target.selected=self.selected;}}
     pub fn resolve(&self,normal:Color,enabled:bool,pressed:bool,hover:bool,focus:bool,selected:bool)->Color{if !enabled{return self.disabled.unwrap_or(normal);}let idle=if selected{self.selected.unwrap_or(normal)}else{normal};if pressed{return self.pressed.or(self.hover).unwrap_or(idle);}if hover{return self.hover.unwrap_or(idle);}if focus{return self.focus.or(self.hover).unwrap_or(idle);}idle}
     pub fn opacity(&mut self,opacity:f32){for c in [&mut self.hover,&mut self.pressed,&mut self.disabled,&mut self.focus,&mut self.selected].into_iter().flatten(){c[3]*=opacity;}}
-    pub fn validate(&self)->Result<(),String>{for c in [self.hover,self.pressed,self.disabled,self.focus,self.selected].into_iter().flatten(){if c.iter().any(|v|!v.is_finite()||!(0.0..=1.0).contains(v)){return Err("Couleur de texte interactive invalide".into());}}Ok(())}
+    pub fn validate(&self)->Result<(),String>{for c in [self.hover,self.pressed,self.disabled,self.focus,self.selected].into_iter().flatten(){if c.iter().any(|v|!v.is_finite()||!(0.0..=1.0).contains(v)){return Err(diagnostic!("Couleur de texte interactive invalide", "Invalid interactive text color").into());}}Ok(())}
 }
 impl Default for Appearance{fn default()->Self{Self{radius:0.0,border_width:0.0,border_color:[0.0;4],focus:None,selected:None,opacity:1.0,shadow:Shadow::default(),scrollbar:ScrollbarStyle::default(),text_states:TextStateColors::default(),image_states:StateImages::default()}}}
 impl Appearance {
@@ -147,11 +147,11 @@ impl StylePatch {
     pub fn validate(&self)->Result<(),String>{
         self.scrollbar.validate()?;
         self.text_states.validate()?;
-        if let Some(shadow)=&self.shadow{shadow.validate()?;}if let Some(l)=&self.layout{if l.padding.iter().chain(l.slice.iter()).chain(std::iter::once(&l.gap)).any(|v|!v.is_finite()||*v<0.0)||l.columns==0||l.columns>64{return Err("Disposition locale invalide".into())}}
-        if self.opacity.is_some_and(|v|!v.is_finite()||!(0.0..=1.0).contains(&v)){return Err("Opacité invalide".into());}
-        for c in [self.normal,self.hover,self.pressed,self.disabled,self.foreground,self.border_color,self.focus,self.selected].into_iter().flatten(){if c.iter().any(|v|!v.is_finite()||!(0.0..=1.0).contains(v)){return Err("Couleur de style invalide".into())}}
-        for v in [self.font_size,self.radius,self.border_width].into_iter().flatten(){if !v.is_finite()||v<0.0{return Err("Dimension de style invalide".into())}}
-        if self.font_size==Some(0.0){return Err("Taille de police nulle".into())}Ok(())
+        if let Some(shadow)=&self.shadow{shadow.validate()?;}if let Some(l)=&self.layout{if l.padding.iter().chain(l.slice.iter()).chain(std::iter::once(&l.gap)).any(|v|!v.is_finite()||*v<0.0)||l.columns==0||l.columns>64{return Err(diagnostic!("Disposition locale invalide", "Invalid local layout").into())}}
+        if self.opacity.is_some_and(|v|!v.is_finite()||!(0.0..=1.0).contains(&v)){return Err(diagnostic!("Opacité invalide", "Invalid opacity").into());}
+        for c in [self.normal,self.hover,self.pressed,self.disabled,self.foreground,self.border_color,self.focus,self.selected].into_iter().flatten(){if c.iter().any(|v|!v.is_finite()||!(0.0..=1.0).contains(v)){return Err(diagnostic!("Couleur de style invalide", "Invalid style color").into())}}
+        for v in [self.font_size,self.radius,self.border_width].into_iter().flatten(){if !v.is_finite()||v<0.0{return Err(diagnostic!("Dimension de style invalide", "Invalid style dimension").into())}}
+        if self.font_size==Some(0.0){return Err(diagnostic!("Taille de police nulle", "Font size must be greater than zero").into())}Ok(())
     }
 }
 /// Shared by the inspector's choices and document validation.
@@ -208,13 +208,13 @@ impl Document {
     pub fn outline(&self,page:usize)->Vec<(String,usize,String)>{fn walk(es:&[Element],depth:usize,out:&mut Vec<(String,usize,String)>){for e in es{out.push((e.id.clone(),depth,e.name.clone()));walk(&e.children,depth+1,out)}}let mut out=vec![];if let Some(p)=self.pages.get(page){walk(&p.elements,0,&mut out)}out}
     pub fn remove_element(&mut self,page:usize,id:&str)->Option<Element>{fn take(es:&mut Vec<Element>,id:&str)->Option<Element>{if let Some(index)=es.iter().position(|e|e.id==id){return Some(es.remove(index))}for e in es{if let Some(found)=take(&mut e.children,id){return Some(found)}}None}take(&mut self.pages.get_mut(page)?.elements,id)}
     pub fn reparent(&mut self,page:usize,id:&str,parent:Option<&str>)->Result<(),String>{
-        if Some(id)==parent{return Err("Un élément ne peut pas se contenir lui-même".into())}
+        if Some(id)==parent{return Err(diagnostic!("Un élément ne peut pas se contenir lui-même", "An element cannot contain itself").into())}
         fn contains(e:&Element,id:&str)->bool{e.id==id||e.children.iter().any(|c|contains(c,id))}
-        let e=self.find_element(page,id).ok_or("Élément absent")?;if parent.is_some_and(|p|contains(e,p)){return Err("Imbrication cyclique interdite".into())}
-        if let Some(parent)=parent{let p=self.find_element(page,parent).ok_or("Parent absent")?;if !matches!(p.kind,Kind::Panel|Kind::Overlay|Kind::Horizontal|Kind::Vertical|Kind::Grid|Kind::Scroll){return Err("Le parent doit être un conteneur".into())}}
+        let e=self.find_element(page,id).ok_or(diagnostic!("Élément absent", "Missing element"))?;if parent.is_some_and(|p|contains(e,p)){return Err(diagnostic!("Imbrication cyclique interdite", "Cyclic nesting is not allowed").into())}
+        if let Some(parent)=parent{let p=self.find_element(page,parent).ok_or(diagnostic!("Parent absent", "Missing parent"))?;if !matches!(p.kind,Kind::Panel|Kind::Overlay|Kind::Horizontal|Kind::Vertical|Kind::Grid|Kind::Scroll){return Err(diagnostic!("Le parent doit être un conteneur", "The parent must be a container").into())}}
         let e=self.remove_element(page,id).unwrap();if let Some(parent)=parent{self.find_element_mut(page,parent).unwrap().children.push(e)}else{self.pages[page].elements.push(e)}Ok(())
     }
-    pub fn duplicate_element(&mut self,page:usize,id:&str)->Result<String,String>{let mut e=self.find_element(page,id).ok_or("Élément absent")?.clone();let ids:BTreeSet<_>=self.outline(page).into_iter().map(|e|e.0).collect();fn rename(e:&mut Element,ids:&BTreeSet<String>){let mut n=1;let old=e.id.clone();while ids.contains(&format!("{old}_copy{n}")){n+=1}e.id=format!("{old}_copy{n}");for child in &mut e.children{rename(child,ids)}}rename(&mut e,&ids);e.rect[0]+=24.0;e.rect[1]+=24.0;let id=e.id.clone();self.pages[page].elements.push(e);Ok(id)}
+    pub fn duplicate_element(&mut self,page:usize,id:&str)->Result<String,String>{let mut e=self.find_element(page,id).ok_or(diagnostic!("Élément absent", "Missing element"))?.clone();let ids:BTreeSet<_>=self.outline(page).into_iter().map(|e|e.0).collect();fn rename(e:&mut Element,ids:&BTreeSet<String>){let mut n=1;let old=e.id.clone();while ids.contains(&format!("{old}_copy{n}")){n+=1}e.id=format!("{old}_copy{n}");for child in &mut e.children{rename(child,ids)}}rename(&mut e,&ids);e.rect[0]+=24.0;e.rect[1]+=24.0;let id=e.id.clone();self.pages[page].elements.push(e);Ok(id)}
     pub fn reorder(&mut self,page:usize,id:&str,forward:bool){fn swap(es:&mut [Element],id:&str,forward:bool)->bool{if let Some(i)=es.iter().position(|e|e.id==id){if forward&&i+1<es.len(){es.swap(i,i+1)}else if !forward&&i>0{es.swap(i,i-1)}return true}for e in es{if swap(&mut e.children,id,forward){return true}}false}if let Some(p)=self.pages.get_mut(page){swap(&mut p.elements,id,forward);}}
     pub fn apply_theme(&mut self,preset:ThemePreset){
         let (bg,normal,accent,fg)=match preset{
@@ -258,62 +258,62 @@ impl Document {
                 if graph.event == Event::ValueChanged && !graph.target.as_deref()
                     .and_then(|id| self.find_element(index, id))
                     .is_some_and(|e| self.resolved_element(e).supports_value_changed()) {
-                    return Err(format!("{} : Changement de valeur demande un contrôle relié à un réglage ou une variable d’interface", graph.id));
+                    return Err(diagnostic!("{} : Changement de valeur demande un contrôle relié à un réglage ou une variable d’interface", "{}: Value changed requires a control bound to a setting or a UI variable", graph.id));
                 }
             }
         }
-        for page in &self.pages{for graph in &page.graphs{if graph.event==Event::Click{if let Some(id)=&graph.target{let index=self.pages.iter().position(|p|p.id==page.id).unwrap();if self.find_element(index,id).is_some_and(|e|self.resolved_element(e).local_control.is_some()){return Err(format!("{} : utilisez l’événement Changement de valeur pour un contrôle local",graph.id));}}}}}
+        for page in &self.pages{for graph in &page.graphs{if graph.event==Event::Click{if let Some(id)=&graph.target{let index=self.pages.iter().position(|p|p.id==page.id).unwrap();if self.find_element(index,id).is_some_and(|e|self.resolved_element(e).local_control.is_some()){return Err(diagnostic!("{} : utilisez l’événement Changement de valeur pour un contrôle local", "{}: use the Value changed event for a local control",graph.id));}}}}}
         for style in self.styles.values(){style.validate()?;}
-        let mut roles=BTreeSet::new();for page in &self.pages{if let Some(role)=page.role{if !roles.insert(role){return Err("Rôle de page dupliqué".into())}}}
+        let mut roles=BTreeSet::new();for page in &self.pages{if let Some(role)=page.role{if !roles.insert(role){return Err(diagnostic!("Rôle de page dupliqué", "Duplicate page role").into())}}}
         fn check(doc:&Document,list:&[Element],stack:&mut Vec<String>,depth:usize)->Result<(),String>{
-            if depth>64{return Err("Hiérarchie trop profonde".into())}
+            if depth>64{return Err(diagnostic!("Hiérarchie trop profonde", "Hierarchy is too deep").into())}
             for e in list{
-                if e.visibility_binding.as_deref().is_some_and(|key|!matches!(key,"always"|"save.empty"|"save.filled"|"save.locked"|"save.unlocked"|"gallery.locked"|"gallery.unlocked")){return Err(format!("{} : condition d’affichage inconnue",e.name));}
-                if e.kind==Kind::ChoiceList&&!e.layout_options.text_wrap{return Err("Les réponses doivent conserver le retour à la ligne pour rester entièrement accessibles".into());}
+                if e.visibility_binding.as_deref().is_some_and(|key|!matches!(key,"always"|"save.empty"|"save.filled"|"save.locked"|"save.unlocked"|"gallery.locked"|"gallery.unlocked")){return Err(diagnostic!("{} : condition d’affichage inconnue", "{}: unknown visibility condition",e.name));}
+                if e.kind==Kind::ChoiceList&&!e.layout_options.text_wrap{return Err(diagnostic!("Les réponses doivent conserver le retour à la ligne pour rester entièrement accessibles", "Choices must keep text wrapping enabled to remain fully accessible").into());}
                 let resolved=doc.resolved_element(e);
-                if let Some(control)=&resolved.local_control{control.validate(resolved.kind)?;if resolved.binding.is_some()||resolved.action!=Action::None{return Err(format!("{} : un contrôle local ne peut pas également déclencher une commande du jeu",e.name));}}
-                if resolved.layout_options.auto_height&&(!matches!(resolved.kind,Kind::Text|Kind::Button)||resolved.anchors[1]!=resolved.anchors[3]){return Err(format!("{} : la hauteur automatique demande un texte ou bouton avec ancrage vertical fixe",e.name));}
-                if resolved.layout_options.auto_height&&resolved.binding.as_deref()==Some("dialogue.text"){return Err("Le texte de dialogue utilise sa zone défilante dédiée ; conservez sa hauteur fixe".into());}
-                if let Action::OpenPage(id)=&resolved.action{if !doc.pages.iter().any(|p|p.id==*id){return Err(format!("Page cible absente : {id}"));}}
+                if let Some(control)=&resolved.local_control{control.validate(resolved.kind)?;if resolved.binding.is_some()||resolved.action!=Action::None{return Err(diagnostic!("{} : un contrôle local ne peut pas également déclencher une commande du jeu", "{}: a local control cannot also trigger a game command",e.name));}}
+                if resolved.layout_options.auto_height&&(!matches!(resolved.kind,Kind::Text|Kind::Button)||resolved.anchors[1]!=resolved.anchors[3]){return Err(diagnostic!("{} : la hauteur automatique demande un texte ou bouton avec ancrage vertical fixe", "{}: automatic height requires text or a button with fixed vertical anchoring",e.name));}
+                if resolved.layout_options.auto_height&&resolved.binding.as_deref()==Some("dialogue.text"){return Err(diagnostic!("Le texte de dialogue utilise sa zone défilante dédiée ; conservez sa hauteur fixe", "Dialogue text uses its dedicated scrolling area; keep its height fixed").into());}
+                if let Action::OpenPage(id)=&resolved.action{if !doc.pages.iter().any(|p|p.id==*id){return Err(diagnostic!("Page cible absente : {id}", "Target page is missing: {id}"));}}
                 if let Some(binding)=resolved.binding.as_deref().filter(|b|!b.is_empty()){
                     let kind=resolved.kind;
-                    let compatible=binding_compatible(&kind,binding).ok_or_else(||format!("{} : donnée inconnue « {binding} »",e.name))?;
-                    if !compatible{return Err(format!("{} : le contrôle {:?} ne peut pas afficher « {binding} »",e.name,kind));}
+                    let compatible=binding_compatible(&kind,binding).ok_or_else(||diagnostic!("{} : donnée inconnue « {binding} »", "{}: unknown data binding “{binding}”",e.name))?;
+                    if !compatible{return Err(diagnostic!("{} : le contrôle {:?} ne peut pas afficher « {binding} »", "{}: control {:?} cannot display “{binding}”",e.name,kind));}
                 }
                 e.appearance.validate()?;
                 e.overrides.validate()?;
-                if e.list.columns==0||e.list.columns>12||e.list.rows==0||e.list.rows>24||e.list.slots==0||e.list.slots>1000{return Err("Dimensions de liste invalides".into())}
-                if e.list.template.as_ref().is_some_and(|id|!doc.components.contains_key(id)){return Err("Modèle de carte absent".into())}
+                if e.list.columns==0||e.list.columns>12||e.list.rows==0||e.list.rows>24||e.list.slots==0||e.list.slots>1000{return Err(diagnostic!("Dimensions de liste invalides", "Invalid list dimensions").into())}
+                if e.list.template.as_ref().is_some_and(|id|!doc.components.contains_key(id)){return Err(diagnostic!("Modèle de carte absent", "Missing card template").into())}
                 if let Some(template)=e.list.template.as_ref().filter(|_|matches!(e.kind,Kind::SaveList|Kind::Gallery)){
                     fn card_context(doc:&Document,e:&Element,prefix:&str,depth:usize)->Result<(),String>{
-                        if depth>=64{return Err("Composant de carte trop profond".into());}
+                        if depth>=64{return Err(diagnostic!("Composant de carte trop profond", "Card component nesting is too deep").into());}
                         let e=doc.resolved_element(e);
-                        if let Some(key)=e.visibility_binding.as_deref().filter(|k|*k!="always"){if !key.starts_with(prefix){return Err(format!("{} : la condition {key} ne correspond pas aux données de cette carte ({prefix})",e.name));}}
-                        if let Some(key)=e.binding.as_deref().filter(|k|k.starts_with("save.")||k.starts_with("gallery.")){if !key.starts_with(prefix){return Err(format!("{} : la donnée {key} appartient à un autre type de carte",e.name));}}
+                        if let Some(key)=e.visibility_binding.as_deref().filter(|k|*k!="always"){if !key.starts_with(prefix){return Err(diagnostic!("{} : la condition {key} ne correspond pas aux données de cette carte ({prefix})", "{}: condition {key} does not match this card's data ({prefix})",e.name));}}
+                        if let Some(key)=e.binding.as_deref().filter(|k|k.starts_with("save.")||k.starts_with("gallery.")){if !key.starts_with(prefix){return Err(diagnostic!("{} : la donnée {key} appartient à un autre type de carte", "{}: data binding {key} belongs to a different card type",e.name));}}
                         for child in &e.children{card_context(doc,child,prefix,depth+1)?;}Ok(())
                     }
                     card_context(doc,&doc.components[template],if e.kind==Kind::Gallery{"gallery."}else{"save."},0)?;
                 }
-                if let Some(template)=e.list.template.as_ref().filter(|_|matches!(e.kind,Kind::ChoiceList|Kind::History)){let binding=if e.kind==Kind::ChoiceList{"choice.text"}else{"history.text"};let rows=doc.layout_item(template,[1000.0,100.0],&BTreeMap::new());let texts=rows.iter().filter(|e|e.binding.as_deref()==Some(binding)).collect::<Vec<_>>();if texts.len()!=1||!texts[0].layout_options.text_wrap{return Err(format!("{} : le modèle doit contenir un unique texte à retour automatique lié à {binding}",e.name));}}
-                if e.style.as_ref().is_some_and(|id|!doc.styles.contains_key(id)){return Err(format!("Style absent : {}",e.name))}
-                let l=&e.layout_options;if l.padding.iter().chain(l.slice.iter()).chain(std::iter::once(&l.gap)).any(|v|!v.is_finite()||*v<0.0)||l.columns==0||l.columns>64{return Err(format!("Disposition invalide : {}",e.name))}
-                for id in e.component.iter().chain(e.list.template.iter()){if stack.contains(id){return Err("Cycle de composants ou de modèles de liste".into())}let template=doc.components.get(id).ok_or_else(||format!("Composant absent : {id}"))?;stack.push(id.clone());check(doc,std::slice::from_ref(template),stack,depth+1)?;stack.pop();}
+                if let Some(template)=e.list.template.as_ref().filter(|_|matches!(e.kind,Kind::ChoiceList|Kind::History)){let binding=if e.kind==Kind::ChoiceList{"choice.text"}else{"history.text"};let rows=doc.layout_item(template,[1000.0,100.0],&BTreeMap::new());let texts=rows.iter().filter(|e|e.binding.as_deref()==Some(binding)).collect::<Vec<_>>();if texts.len()!=1||!texts[0].layout_options.text_wrap{return Err(diagnostic!("{} : le modèle doit contenir un unique texte à retour automatique lié à {binding}", "{}: the template must contain exactly one wrapping text element bound to {binding}",e.name));}}
+                if e.style.as_ref().is_some_and(|id|!doc.styles.contains_key(id)){return Err(diagnostic!("Style absent : {}", "Missing style: {}",e.name))}
+                let l=&e.layout_options;if l.padding.iter().chain(l.slice.iter()).chain(std::iter::once(&l.gap)).any(|v|!v.is_finite()||*v<0.0)||l.columns==0||l.columns>64{return Err(diagnostic!("Disposition invalide : {}", "Invalid layout: {}",e.name))}
+                for id in e.component.iter().chain(e.list.template.iter()){if stack.contains(id){return Err(diagnostic!("Cycle de composants ou de modèles de liste", "Cycle in components or list templates").into())}let template=doc.components.get(id).ok_or_else(||diagnostic!("Composant absent : {id}", "Missing component: {id}"))?;stack.push(id.clone());check(doc,std::slice::from_ref(template),stack,depth+1)?;stack.pop();}
                 check(doc,&e.children,stack,depth+1)?;
             }Ok(())
         }
         for (id,e) in &self.components{check(self,std::slice::from_ref(e),&mut vec![id.clone()],0)?;}
         let controls=self.local_controls()?;
-        for page in &self.pages{for graph in &page.graphs{for node in &graph.nodes{if let Op::Set{variable,value}=&node.op{if let Some((kind,control))=controls.get(variable){if !control.accepts(*kind,value){return Err(format!("{} / nœud {} : valeur incompatible avec le contrôle {}",graph.id,node.id,variable));}}}}}}
+        for page in &self.pages{for graph in &page.graphs{for node in &graph.nodes{if let Op::Set{variable,value}=&node.op{if let Some((kind,control))=controls.get(variable){if !control.accepts(*kind,value){return Err(diagnostic!("{} / nœud {} : valeur incompatible avec le contrôle {}", "{} / node {}: value incompatible with control {}",graph.id,node.id,variable));}}}}}}
         for (index,p) in self.pages.iter().enumerate(){
             check(self,&p.elements,&mut vec![],0)?;
             let elements=self.layout_page(index,self.reference);
             let texts=elements.iter().filter(|e|e.binding.as_deref()==Some("dialogue.text")).collect::<Vec<_>>();
             let choices=elements.iter().filter(|e|e.kind==Kind::ChoiceList).count();
-            if p.role==Some(PageRole::Dialogue)&&(texts.len()!=1||texts[0].kind!=Kind::Text){return Err(format!("{} : ajoutez un unique Texte lié à dialogue.text",p.name));}
-            if p.role==Some(PageRole::Dialogue)&&!texts[0].layout_options.text_wrap{return Err(format!("{} : activez le retour à la ligne du texte de dialogue pour garder les phrases longues consultables",p.name));}
-            if p.role==Some(PageRole::Choices)&&choices!=1{return Err(format!("{} : une unique liste de réponses est requise",p.name));}
-            if p.role.is_some()&&p.role!=Some(PageRole::Choices)&&choices>0{return Err("La liste de réponses appartient à la page de rôle Choix".into());}
-            if p.role==Some(PageRole::Confirm)&&(!elements.iter().any(|e|e.enabled&&e.kind==Kind::Button&&e.action==Action::Confirm)||!elements.iter().any(|e|e.enabled&&e.kind==Kind::Button&&e.action==Action::Back)){return Err("Une confirmation doit proposer les boutons Confirmer et Retour / Annuler".into());}
+            if p.role==Some(PageRole::Dialogue)&&(texts.len()!=1||texts[0].kind!=Kind::Text){return Err(diagnostic!("{} : ajoutez un unique Texte lié à dialogue.text", "{}: add exactly one Text element bound to dialogue.text",p.name));}
+            if p.role==Some(PageRole::Dialogue)&&!texts[0].layout_options.text_wrap{return Err(diagnostic!("{} : activez le retour à la ligne du texte de dialogue pour garder les phrases longues consultables", "{}: enable dialogue text wrapping to keep long sentences accessible",p.name));}
+            if p.role==Some(PageRole::Choices)&&choices!=1{return Err(diagnostic!("{} : une unique liste de réponses est requise", "{}: exactly one choice list is required",p.name));}
+            if p.role.is_some()&&p.role!=Some(PageRole::Choices)&&choices>0{return Err(diagnostic!("La liste de réponses appartient à la page de rôle Choix", "The choice list belongs to the page with the Choices role").into());}
+            if p.role==Some(PageRole::Confirm)&&(!elements.iter().any(|e|e.enabled&&e.kind==Kind::Button&&e.action==Action::Confirm)||!elements.iter().any(|e|e.enabled&&e.kind==Kind::Button&&e.action==Action::Back)){return Err(diagnostic!("Une confirmation doit proposer les boutons Confirmer et Retour / Annuler", "A confirmation must provide Confirm and Back / Cancel buttons").into());}
         }Ok(())
     }
     pub fn find_element<'a>(&'a self,page:usize,id:&str)->Option<&'a Element>{

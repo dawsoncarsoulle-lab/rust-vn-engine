@@ -547,7 +547,7 @@ fn create_dist_structure(project_dir: &Path, game_name: &str, platform: &str) ->
 
 fn build_runtime() -> Result<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
-        let bundled = exe.with_file_name("rvn_bevy");
+        let bundled = exe.with_file_name(format!("rvn_bevy{}", std::env::consts::EXE_SUFFIX));
         if bundled.is_file() { return Ok(bundled); }
     }
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))

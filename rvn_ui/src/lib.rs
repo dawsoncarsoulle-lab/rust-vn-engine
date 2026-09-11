@@ -1,4 +1,7 @@
 //! Engine-independent menu documents, layout and bounded interaction graphs.
+#[macro_use]
+mod diagnostics;
+pub use diagnostics::set_diagnostic_english;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -46,7 +49,7 @@ pub fn document_path(root: &Path) -> Result<std::path::PathBuf, String> {
             )
         })
     {
-        return Err("Le fichier de menus doit rester dans le dossier du projet".into());
+        return Err(diagnostic!("Le fichier de menus doit rester dans le dossier du projet", "The menu file must remain inside the project folder").into());
     }
     Ok(root.join(path))
 }
@@ -64,10 +67,10 @@ pub fn save_document(
         Err(e) => return Err(e.to_string()),
     };
     if current.as_deref() != expected {
-        return Err("Les menus ont été modifiés sur disque. Rouvrez le projet avant d’enregistrer pour ne pas les écraser.".into());
+        return Err(diagnostic!("Les menus ont été modifiés sur disque. Rouvrez le projet avant d’enregistrer pour ne pas les écraser.", "Menus have changed on disk. Reopen the project before saving to avoid overwriting them.").into());
     }
     let json = doc.to_json()?;
-    let parent = path.parent().ok_or("Dossier de menus absent")?;
+    let parent = path.parent().ok_or(diagnostic!("Dossier de menus absent", "Missing menu folder"))?;
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     if let Some(source)=current.as_ref().filter(|s|serde_json::from_str::<serde_json::Value>(s).ok().and_then(|v|v.get("version").and_then(|v|v.as_u64()))==Some(1)){
         let mut backup=path.with_extension("rvnui.v1.bak");let mut index=1;
@@ -301,7 +304,7 @@ impl Session {
         let mut trial=self.clone();let mut effects=vec![];
         if graphs.is_empty()&&event==Event::Click&&fallback!=Action::None{effects.push(Effect::Action(fallback));}
         for graph in graphs{match trial.execute(graph){Ok(result)=>effects.extend(result),Err(error)=>{self.last_error=trial.last_error.clone();if let Some(d)=&mut self.last_error{d.page=page.id.clone();}return Err(format!("{} : {error}",graph.id));}}}
-        if effects.iter().filter(|e|matches!(e,Effect::Action(a) if *a!=Action::None)).count()>1{let message="Plusieurs navigations pour une même activation : aucune action exécutée".to_string();self.last_error=Some(RuntimeDiagnostic{page:page.id.clone(),graph:page.graphs.iter().find(|g|g.target.as_deref()==target&&g.event==event).map(|g|g.id.clone()).unwrap_or_default(),node:None,message:message.clone()});return Err(message)}
+        if effects.iter().filter(|e|matches!(e,Effect::Action(a) if *a!=Action::None)).count()>1{let message=diagnostic!("Plusieurs navigations pour une même activation : aucune action exécutée", "Multiple navigation actions for one activation: no action was executed").to_string();self.last_error=Some(RuntimeDiagnostic{page:page.id.clone(),graph:page.graphs.iter().find(|g|g.target.as_deref()==target&&g.event==event).map(|g|g.id.clone()).unwrap_or_default(),node:None,message:message.clone()});return Err(message)}
         *self=trial;Ok(effects)
     }
     pub fn apply_presentation(&mut self,page:&str,effect:&Effect){
@@ -329,7 +332,7 @@ impl Session {
                 .nodes
                 .iter()
                 .find(|n| n.id == id)
-                .ok_or_else(|| format!("Nœud de menu {id} absent"))?;
+                .ok_or_else(|| diagnostic!("Nœud de menu {id} absent", "Menu node {id} is missing"))?;
             self.cursor=Some(n.id);
             at = n.next;
             match &n.op {
@@ -350,7 +353,7 @@ impl Session {
                 Op::Animate{element,clip}=>{clip.validate()?;effects.push(Effect::Animate(element.clone(),clip.clone()));},
                 Op::Set { variable, value } => {
                     if variable.starts_with("state.") {
-                        return Err("Les états du jeu sont en lecture seule".into());
+                        return Err(diagnostic!("Les états du jeu sont en lecture seule", "Game state is read-only").into());
                     }
                     trial.insert(variable.clone(), value.clone());
                 }
@@ -365,7 +368,7 @@ impl Session {
                 }
             }
         }
-        if at.is_none(){self.variables=trial;Ok(effects)}else{Err("Boucle d’événements interrompue (256 étapes)".into())}
+        if at.is_none(){self.variables=trial;Ok(effects)}else{Err(diagnostic!("Boucle d’événements interrompue (256 étapes)", "Event loop stopped (256 steps)").into())}
     }
 }
 impl Element {
@@ -427,16 +430,15 @@ impl Document {
     pub fn validate_authoring(&self,workspaces:&BTreeSet<String>) -> Result<(), String> {
         self.validate_design()?;
         if self.version != VERSION {
-            return Err(format!(
-                "Version de menus {} non prise en charge",
+            return Err(diagnostic!("Version de menus {} non prise en charge", "Unsupported menu version {}",
                 self.version
             ));
         }
         if self.reference.iter().any(|v| !v.is_finite() || *v <= 0.0) {
-            return Err("Dimensions de référence invalides".into());
+            return Err(diagnostic!("Dimensions de référence invalides", "Invalid reference dimensions").into());
         }
         if self.pages.is_empty() {
-            return Err("Le document doit contenir au moins une page".into());
+            return Err(diagnostic!("Le document doit contenir au moins une page", "The document must contain at least one page").into());
         }
         fn color(c: &Color) -> bool {
             c.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v))
@@ -444,7 +446,7 @@ impl Document {
         let mut pages = BTreeSet::new();
         for p in &self.pages {
             if p.id.is_empty() || !pages.insert(&p.id) {
-                return Err("Identifiant de page vide ou dupliqué".into());
+                return Err(diagnostic!("Identifiant de page vide ou dupliqué", "Empty or duplicate page ID").into());
             }
         }
         fn elements<'a>(
@@ -455,13 +457,13 @@ impl Document {
         ) -> Result<(), String> {
             for e in list {
                 if e.id.is_empty() || !ids.insert(&e.id) {
-                    return Err(format!("Élément dupliqué : {}", e.id));
+                    return Err(diagnostic!("Élément dupliqué : {}", "Duplicate element: {}", e.id));
                 }
                 if [&e.normal, &e.hover, &e.pressed, &e.disabled, &e.foreground]
                     .iter()
                     .any(|c| !color(c))
                 {
-                    return Err(format!("Couleur invalide : {}", e.name));
+                    return Err(diagnostic!("Couleur invalide : {}", "Invalid color: {}", e.name));
                 }
                 if e.rect
                     .iter()
@@ -472,17 +474,17 @@ impl Document {
                     || !e.font_size.is_finite()
                     || e.font_size <= 0.0
                 {
-                    return Err(format!("Dimensions invalides : {}", e.name));
+                    return Err(diagnostic!("Dimensions invalides : {}", "Invalid dimensions: {}", e.name));
                 }
                 if e.anchors.iter().any(|v| !(0.0..=1.0).contains(v))
                     || e.anchors[2] < e.anchors[0]
                     || e.anchors[3] < e.anchors[1]
                 {
-                    return Err(format!("Ancres invalides : {}", e.name));
+                    return Err(diagnostic!("Ancres invalides : {}", "Invalid anchors: {}", e.name));
                 }
                 if let Action::OpenPage(id) = &e.action {
                     if !e.inherit_action && !pages.contains(id) {
-                        return Err(format!("Page cible absente : {id}"));
+                        return Err(diagnostic!("Page cible absente : {id}", "Target page is missing: {id}"));
                     }
                 }
                 let padding=e.layout_options.padding;
@@ -493,7 +495,7 @@ impl Document {
         }
         for p in &self.pages {
             if !color(&p.background) {
-                return Err(format!("Couleur de fond invalide : {}", p.name));
+                return Err(diagnostic!("Couleur de fond invalide : {}", "Invalid background color: {}", p.name));
             }
             let mut ids = BTreeSet::new();
             elements(&p.elements, &mut ids, &pages,self.reference)?;
@@ -501,49 +503,49 @@ impl Document {
             let visual=self.layout_page(page_index,self.reference);
             if !workspaces.contains(&p.id){
                 fn card_fields(doc:&Document,source:&Element,depth:usize)->Result<(),String>{
-                    if depth>=64{return Err("Composant trop profond".into());}let e=doc.resolved_element(source);
-                    if let Some(key)=e.binding.as_deref(){if (key.starts_with("save.")&&key!="save.page")||key.starts_with("gallery.")||key.starts_with("history.")||key=="choice.text"{return Err(format!("{} : la donnée {key} doit être placée dans un modèle de carte ou de ligne relié à sa liste",e.name));}}
+                    if depth>=64{return Err(diagnostic!("Composant trop profond", "Component nesting is too deep").into());}let e=doc.resolved_element(source);
+                    if let Some(key)=e.binding.as_deref(){if (key.starts_with("save.")&&key!="save.page")||key.starts_with("gallery.")||key.starts_with("history.")||key=="choice.text"{return Err(diagnostic!("{} : la donnée {key} doit être placée dans un modèle de carte ou de ligne relié à sa liste", "{}: data binding {key} must be inside a card or row template connected to its list",e.name));}}
                     for child in &e.children{card_fields(doc,child,depth+1)?;}Ok(())
                 }
                 for element in &p.elements{card_fields(self,element,0)?;}
             }
             let page_actions:Vec<_>=visual.iter().map(|e|&e.action).chain(p.graphs.iter().flat_map(|g|&g.nodes).filter_map(|n|if let Op::Action(a)=&n.op{Some(a)}else{None})).filter_map(|a|if let Action::SavePage(target)=a{Some(target)}else{None}).collect();
             if !workspaces.contains(&p.id)&&(!page_actions.is_empty()||visual.iter().any(|e|e.binding.as_deref()==Some("save.page"))){
-                let count=self.save_page_count(page_index).ok_or_else(||format!("{} : la pagination personnalisée nécessite une unique liste de sauvegardes sur la page",p.name))?;
-                if page_actions.iter().any(|target|matches!(target,SavePage::Number(n) if *n==0||*n>count)){return Err(format!("{} : numéro de page hors limites (1 à {count})",p.name));}
+                let count=self.save_page_count(page_index).ok_or_else(||diagnostic!("{} : la pagination personnalisée nécessite une unique liste de sauvegardes sur la page", "{}: custom pagination requires exactly one save list on the page",p.name))?;
+                if page_actions.iter().any(|target|matches!(target,SavePage::Number(n) if *n==0||*n>count)){return Err(diagnostic!("{} : numéro de page hors limites (1 à {count})", "{}: page number out of range (1 to {count})",p.name));}
             }
             let mut graph_ids = BTreeSet::new();
             for g in &p.graphs {
                 if g.id.is_empty() || !graph_ids.insert(&g.id) {
-                    return Err("Identifiant de graphe vide ou dupliqué".into());
+                    return Err(diagnostic!("Identifiant de graphe vide ou dupliqué", "Empty or duplicate graph ID").into());
                 }
                 if g.target.as_ref().is_some_and(|t| !ids.contains(t.as_str())) {
-                    return Err(format!("Cible absente du graphe {}", g.id));
+                    return Err(diagnostic!("Cible absente du graphe {}", "Missing target in graph {}", g.id));
                 }
                 let nids: BTreeSet<_> = g.nodes.iter().map(|n| n.id).collect();
                 if nids.len() != g.nodes.len() || !nids.contains(&g.entry) {
-                    return Err(format!("Entrée ou identifiants invalides : {}", g.id));
+                    return Err(diagnostic!("Entrée ou identifiants invalides : {}", "Invalid entry or IDs: {}", g.id));
                 }
                 for n in &g.nodes {
                     if p.role==Some(PageRole::Confirm){if let Op::Action(action)=&n.op{
-                        if *action!=Action::None&&(!matches!(action,Action::Confirm|Action::Back)||g.event!=Event::Click){return Err(format!("{} / nœud {} : une confirmation autorise seulement Confirmer ou Retour dans un événement clic",g.id,n.id));}
+                        if *action!=Action::None&&(!matches!(action,Action::Confirm|Action::Back)||g.event!=Event::Click){return Err(diagnostic!("{} / nœud {} : une confirmation autorise seulement Confirmer ou Retour dans un événement clic", "{} / node {}: a confirmation only allows Confirm or Back in a click event",g.id,n.id));}
                     }}
                     if n.position.iter().any(|v| !v.is_finite()) {
-                        return Err("Position de nœud invalide".into());
+                        return Err(diagnostic!("Position de nœud invalide", "Invalid node position").into());
                     }
                     if n.next.is_some_and(|id| !nids.contains(&id)) {
-                        return Err(format!("Connexion absente : {}", g.id));
+                        return Err(diagnostic!("Connexion absente : {}", "Missing connection: {}", g.id));
                     }
                     match &n.op {
                         Op::Set { variable, .. }
                             if variable.is_empty() || variable.starts_with("state.") =>
                         {
-                            return Err("Variable vide ou état du jeu en lecture seule".into())
+                            return Err(diagnostic!("Variable vide ou état du jeu en lecture seule", "Empty variable or read-only game state").into())
                         }
                         Op::Branch {
                             otherwise: Some(id),
                             ..
-                        } if !nids.contains(id) => return Err("Branche absente".into()),
+                        } if !nids.contains(id) => return Err(diagnostic!("Branche absente", "Missing branch").into()),
                         Op::Visible { element, .. }
                         | Op::Enabled { element, .. }
                         | Op::Text { element, .. }
@@ -551,12 +553,12 @@ impl Document {
                         | Op::Animate { element, .. }
                             if !ids.contains(element.as_str()) =>
                         {
-                            return Err(format!("Élément cible absent : {element}"))
+                            return Err(diagnostic!("Élément cible absent : {element}", "Target element is missing: {element}"))
                         }
                         Op::Action(Action::OpenPage(id)) if !pages.contains(id) => {
-                            return Err(format!("Page cible absente : {id}"))
+                            return Err(diagnostic!("Page cible absente : {id}", "Target page is missing: {id}"))
                         }
-                        Op::Animate{clip,..}=>clip.validate().map_err(|e|format!("{} / nœud {} : {e}",g.id,n.id))?,
+                        Op::Animate{clip,..}=>clip.validate().map_err(|e|diagnostic!("{} / nœud {} : {e}", "{} / node {}: {e}",g.id,n.id))?,
                         _ => {}
                     }
                 }
@@ -566,9 +568,9 @@ impl Document {
     }
     pub fn validate_resources(&self,assets:&Path)->Result<(),String>{
         for path in self.resource_paths(){
-            if path.is_empty()||Path::new(&path).components().any(|c|!matches!(c,std::path::Component::Normal(_))){return Err(format!("La ressource doit rester dans Assets : {path}"));}
-            let root=assets.canonicalize().map_err(|e|e.to_string())?;let file=assets.join(&path).canonicalize().map_err(|_|format!("Ressource absente : {path}"))?;
-            if !file.starts_with(root)||!file.is_file(){return Err(format!("Ressource invalide ou extérieure aux Assets : {path}"));}
+            if path.is_empty()||Path::new(&path).components().any(|c|!matches!(c,std::path::Component::Normal(_))){return Err(diagnostic!("La ressource doit rester dans Assets : {path}", "Resource must remain inside Assets: {path}"));}
+            let root=assets.canonicalize().map_err(|e|e.to_string())?;let file=assets.join(&path).canonicalize().map_err(|_|diagnostic!("Ressource absente : {path}", "Missing resource: {path}"))?;
+            if !file.starts_with(root)||!file.is_file(){return Err(diagnostic!("Ressource invalide ou extérieure aux Assets : {path}", "Invalid resource or resource outside Assets: {path}"));}
         }Ok(())
     }
     pub fn validate_files(&self, assets: &Path, labels: &BTreeSet<String>) -> Result<(), String> {
@@ -577,7 +579,7 @@ impl Document {
         fn action(a: &Action, labels: &BTreeSet<String>) -> Result<(), String> {
             if let Action::StartScene(label) = a {
                 if !labels.contains(label) {
-                    return Err(format!("Label de menu absent : {label}"));
+                    return Err(diagnostic!("Label de menu absent : {label}", "Missing menu label: {label}"));
                 }
             }
             Ok(())
@@ -587,7 +589,7 @@ impl Document {
                 let e=doc.resolved_element(e);
                 for p in [&e.asset, &e.font].into_iter().flatten() {
                     if !assets.join(p).is_file() {
-                        return Err(format!("Ressource de menu absente : {p}"));
+                        return Err(diagnostic!("Ressource de menu absente : {p}", "Missing menu resource: {p}"));
                     }
                 }
                 action(&e.action, labels)?;
@@ -602,7 +604,7 @@ impl Document {
                     match &n.op {
                         Op::Action(a) => action(a, labels)?,
                         Op::Image { path, .. } if !assets.join(path).is_file() => {
-                            return Err(format!("Image absente : {path}"))
+                            return Err(diagnostic!("Image absente : {path}", "Missing image: {path}"))
                         }
                         _ => {}
                     }

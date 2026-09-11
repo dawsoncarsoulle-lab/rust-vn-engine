@@ -11,11 +11,11 @@ impl Document {
     pub fn move_in_tree(&mut self,page:usize,id:&str,placement:&TreePlacement)->Result<(),String>{
         fn parent(es:&[Element],id:&str,owner:Option<&str>)->Option<Option<String>>{for e in es{if e.id==id{return Some(owner.map(str::to_owned));}if let Some(p)=parent(&e.children,id,Some(&e.id)){return Some(p);}}None}
         fn locked(es:&[Element],id:&str,inherited:bool)->bool{es.iter().any(|e|if e.id==id{inherited||e.locked}else{locked(&e.children,id,inherited||e.locked)})}
-        let elements=&self.pages.get(page).ok_or("Page absente")?.elements;
-        let old_parent=parent(elements,id,None).ok_or("Élément absent")?;
-        if locked(elements,id,false){return Err("Cet élément ou son conteneur est verrouillé".into());}
-        let next_parent=match placement{TreePlacement::Inside(p)=>p.clone(),TreePlacement::Before(target)|TreePlacement::After(target)=>{if target==id{return Ok(());}parent(elements,target,None).ok_or("Cible absente")?}};
-        if next_parent.as_deref().is_some_and(|p|locked(elements,p,false)){return Err("Le conteneur cible est verrouillé".into());}
+        let elements=&self.pages.get(page).ok_or(diagnostic!("Page absente", "Missing page"))?.elements;
+        let old_parent=parent(elements,id,None).ok_or(diagnostic!("Élément absent", "Missing element"))?;
+        if locked(elements,id,false){return Err(diagnostic!("Cet élément ou son conteneur est verrouillé", "This element or its container is locked").into());}
+        let next_parent=match placement{TreePlacement::Inside(p)=>p.clone(),TreePlacement::Before(target)|TreePlacement::After(target)=>{if target==id{return Ok(());}parent(elements,target,None).ok_or(diagnostic!("Cible absente", "Missing target"))?}};
+        if next_parent.as_deref().is_some_and(|p|locked(elements,p,false)){return Err(diagnostic!("Le conteneur cible est verrouillé", "The target container is locked").into());}
         let old_rect=self.layout_page(page,self.reference).into_iter().find(|e|e.id==id).map(|e|e.rect);
         let mut trial=self.clone();trial.reparent(page,id,next_parent.as_deref())?;
         if old_parent!=next_parent{if let Some(rect)=old_rect{
@@ -25,45 +25,45 @@ impl Document {
         }}
         if let TreePlacement::Before(target)|TreePlacement::After(target)=placement{
             let siblings=if let Some(p)=next_parent{&mut trial.find_element_mut(page,&p).unwrap().children}else{&mut trial.pages[page].elements};
-            let source=siblings.iter().position(|e|e.id==id).ok_or("Élément déplacé absent")?;let e=siblings.remove(source);
-            let target=siblings.iter().position(|e|e.id==*target).ok_or("Cible absente après déplacement")?;let index=target+usize::from(matches!(placement,TreePlacement::After(_)));siblings.insert(index,e);
+            let source=siblings.iter().position(|e|e.id==id).ok_or(diagnostic!("Élément déplacé absent", "Missing moved element"))?;let e=siblings.remove(source);
+            let target=siblings.iter().position(|e|e.id==*target).ok_or(diagnostic!("Cible absente après déplacement", "Missing target after move"))?;let index=target+usize::from(matches!(placement,TreePlacement::After(_)));siblings.insert(index,e);
         }
         *self=trial;Ok(())
     }
     /// Validate the edited component definitions, not their stale published copies.
     pub fn update_component_workspaces(&mut self,workspaces:&BTreeMap<String,String>)->Result<(),String>{
-        let mut trial=self.clone();for page in &self.pages{if let Some(id)=workspaces.get(&page.id){if page.elements.len()!=1{return Err(format!("Composant {id} : conservez une seule racine"));}trial.components.insert(id.clone(),page.elements[0].clone());}}
+        let mut trial=self.clone();for page in &self.pages{if let Some(id)=workspaces.get(&page.id){if page.elements.len()!=1{return Err(diagnostic!("Composant {id} : conservez une seule racine", "Component {id}: keep exactly one root"));}trial.components.insert(id.clone(),page.elements[0].clone());}}
         trial.validate_authoring(&workspaces.keys().cloned().collect())?;*self=trial;Ok(())
     }
     /// Snapshot an authored element without replacing it or losing page events.
     pub fn capture_component(&mut self,page:usize,element:&str,name:&str)->Result<(),String>{
-        let name=name.trim();if name.is_empty(){return Err("Donnez un nom au composant".into());}if self.components.contains_key(name){return Err("Ce nom de composant existe déjà".into());}
-        let source=self.find_element(page,element).ok_or("Sélectionnez un élément à transformer en composant")?;
+        let name=name.trim();if name.is_empty(){return Err(diagnostic!("Donnez un nom au composant", "Enter a component name").into());}if self.components.contains_key(name){return Err(diagnostic!("Ce nom de composant existe déjà", "This component name already exists").into());}
+        let source=self.find_element(page,element).ok_or(diagnostic!("Sélectionnez un élément à transformer en composant", "Select an element to turn into a component"))?;
         let mut template=self.resolved_element(source);template.component=None;template.inherit_text=false;template.inherit_action=false;template.inherit_binding=false;
         if let Some(placed)=self.layout_page(page,self.reference).iter().find(|e|e.id==element){template.rect=[0.0,0.0,placed.rect[2],placed.rect[3]];}else{template.rect[0]=0.0;template.rect[1]=0.0;}
         template.anchors=[0.0;4];
         // Components contain visual content and simple actions, not page graphs.
         let mut ids=BTreeSet::new();fn collect(e:&Element,ids:&mut BTreeSet<String>){ids.insert(e.id.clone());for child in &e.children{collect(child,ids);}}collect(&template,&mut ids);
-        if self.pages[page].graphs.iter().any(|g|g.target.as_ref().is_some_and(|id|ids.contains(id))){return Err("Ce groupe possède des interactions de page. Conservez-les sur la page et créez un composant visuel sans ces interactions.".into());}
+        if self.pages[page].graphs.iter().any(|g|g.target.as_ref().is_some_and(|id|ids.contains(id))){return Err(diagnostic!("Ce groupe possède des interactions de page. Conservez-les sur la page et créez un composant visuel sans ces interactions.", "This group has page interactions. Keep them on the page and create a visual component without those interactions.").into());}
         self.components.insert(name.into(),template);Ok(())
     }
     /// Removing a page must not silently break an existing navigation action.
     pub fn remove_page(&mut self,index:usize)->Result<(),String>{
-        if self.pages.len()<=1{return Err("Conservez au moins une page".into());}
-        let page=self.pages.get(index).ok_or("Page absente")?;let id=&page.id;
+        if self.pages.len()<=1{return Err(diagnostic!("Conservez au moins une page", "Keep at least one page").into());}
+        let page=self.pages.get(index).ok_or(diagnostic!("Page absente", "Missing page"))?;let id=&page.id;
         fn references(es:&[Element],id:&str)->bool{es.iter().any(|e|e.action==Action::OpenPage(id.into())||references(&e.children,id))}
-        for (i,p) in self.pages.iter().enumerate(){if i!=index&&(references(&p.elements,id)||p.graphs.iter().any(|g|g.nodes.iter().any(|n|n.op==Op::Action(Action::OpenPage(id.clone()))))){return Err(format!("La page « {} » utilise encore cette destination",p.name));}}
-        if self.components.values().any(|e|references(std::slice::from_ref(e),id)){return Err("Un composant utilise encore cette destination".into());}
+        for (i,p) in self.pages.iter().enumerate(){if i!=index&&(references(&p.elements,id)||p.graphs.iter().any(|g|g.nodes.iter().any(|n|n.op==Op::Action(Action::OpenPage(id.clone()))))){return Err(diagnostic!("La page « {} » utilise encore cette destination", "Page “{}” still uses this destination",p.name));}}
+        if self.components.values().any(|e|references(std::slice::from_ref(e),id)){return Err(diagnostic!("Un composant utilise encore cette destination", "A component still uses this destination").into());}
         self.pages.remove(index);Ok(())
     }
     /// Change the fixed anchor without moving the element at the reference size.
     pub fn set_anchor(&mut self,page:usize,id:&str,anchor:[f32;2])->Result<(),String>{
-        if anchor.iter().any(|v|!v.is_finite()||!(0.0..=1.0).contains(v)){return Err("Ancre invalide".into());}
+        if anchor.iter().any(|v|!v.is_finite()||!(0.0..=1.0).contains(v)){return Err(diagnostic!("Ancre invalide", "Invalid anchor").into());}
         fn parent<'a>(es:&'a [Element],id:&str,p:Option<&'a Element>)->Option<Option<&'a Element>>{for e in es{if e.id==id{return Some(p)}if let Some(v)=parent(&e.children,id,Some(e)){return Some(v)}}None}
-        let source=self.pages.get(page).ok_or("Page absente")?;let parent=parent(&source.elements,id,None).ok_or("Élément absent")?;
-        if parent.is_some_and(|p|matches!(p.kind,Kind::Horizontal|Kind::Vertical|Kind::Grid)){return Err("Les ancres sont pilotées par ce conteneur".into());}
-        let size=if let Some(parent)=parent{let p=self.layout_page(page,self.reference).into_iter().find(|e|e.id==parent.id).ok_or("Parent masqué")?;[p.rect[2]-p.layout_options.padding[0]-p.layout_options.padding[2],p.rect[3]-p.layout_options.padding[1]-p.layout_options.padding[3]]}else{self.reference};
-        let e=self.find_element_mut(page,id).ok_or("Élément absent")?;
+        let source=self.pages.get(page).ok_or(diagnostic!("Page absente", "Missing page"))?;let parent=parent(&source.elements,id,None).ok_or(diagnostic!("Élément absent", "Missing element"))?;
+        if parent.is_some_and(|p|matches!(p.kind,Kind::Horizontal|Kind::Vertical|Kind::Grid)){return Err(diagnostic!("Les ancres sont pilotées par ce conteneur", "Anchors are controlled by this container").into());}
+        let size=if let Some(parent)=parent{let p=self.layout_page(page,self.reference).into_iter().find(|e|e.id==parent.id).ok_or(diagnostic!("Parent masqué", "Hidden parent"))?;[p.rect[2]-p.layout_options.padding[0]-p.layout_options.padding[2],p.rect[3]-p.layout_options.padding[1]-p.layout_options.padding[3]]}else{self.reference};
+        let e=self.find_element_mut(page,id).ok_or(diagnostic!("Élément absent", "Missing element"))?;
         for axis in 0..2{e.rect[axis]+=(e.anchors[axis]-anchor[axis])*size[axis];e.rect[axis+2]+=(e.anchors[axis+2]-e.anchors[axis])*size[axis];e.anchors[axis]=anchor[axis];e.anchors[axis+2]=anchor[axis];}
         Ok(())
     }
@@ -76,8 +76,8 @@ impl Document {
         self.paste_elements_into_authoring(page,elements,parent,&BTreeMap::new())
     }
     pub fn paste_elements_into_authoring(&mut self,page:usize,elements:&[Element],parent:Option<&str>,workspaces:&BTreeMap<String,String>)->Result<Vec<String>,String>{
-        if elements.is_empty(){return Err("Le presse-papiers de composition est vide".into())}
-        if page>=self.pages.len(){return Err("Page absente".into())}
+        if elements.is_empty(){return Err(diagnostic!("Le presse-papiers de composition est vide", "The design clipboard is empty").into())}
+        if page>=self.pages.len(){return Err(diagnostic!("Page absente", "Missing page").into())}
         let mut ids:BTreeSet<String>=self.outline(page).into_iter().map(|e|e.0).collect();
         fn rename(e:&mut Element,ids:&mut BTreeSet<String>){let base=e.id.clone();let mut n=1;while ids.contains(&format!("{base}_copy{n}")){n+=1}e.id=format!("{base}_copy{n}");ids.insert(e.id.clone());for child in &mut e.children{rename(child,ids)}}
         let mut trial=self.clone();let mut created=vec![];
@@ -90,20 +90,20 @@ impl Document {
         let mut out=vec![];if let Some(p)=self.pages.get(page){walk(&p.elements,ids,&mut out)}out
     }
     pub fn align_elements(&mut self,page:usize,ids:&[String],alignment:Alignment)->Result<(),String>{
-        if ids.len()<2{return Err("Sélectionnez au moins deux éléments (Maj + clic)".into())}
+        if ids.len()<2{return Err(diagnostic!("Sélectionnez au moins deux éléments (Maj + clic)", "Select at least two elements (Shift + click)").into())}
         fn parent<'a>(es:&'a [Element],id:&str,p:Option<&'a Element>)->Option<Option<&'a Element>>{for e in es{if e.id==id{return Some(p)}if let Some(found)=parent(&e.children,id,Some(e)){return Some(found)}}None}
-        let p=self.pages.get(page).ok_or("Page absente")?;
-        let parents:Vec<_>=ids.iter().map(|id|parent(&p.elements,id,None).ok_or("Élément absent")).collect::<Result<_,_>>()?;
-        if parents.iter().any(|p|p.map(|e|&e.id)!=parents[0].map(|e|&e.id)){return Err("L’alignement nécessite des éléments dans le même conteneur".into())}
-        if parents[0].is_some_and(|p|matches!(p.kind,Kind::Horizontal|Kind::Vertical|Kind::Grid)){return Err("La disposition est pilotée par le conteneur : modifiez son espacement".into())}
-        if ids.iter().any(|id|self.find_element(page,id).is_some_and(|e|e.locked)){return Err("Déverrouillez les éléments avant de les aligner".into())}
+        let p=self.pages.get(page).ok_or(diagnostic!("Page absente", "Missing page"))?;
+        let parents:Vec<_>=ids.iter().map(|id|parent(&p.elements,id,None).ok_or(diagnostic!("Élément absent", "Missing element"))).collect::<Result<_,_>>()?;
+        if parents.iter().any(|p|p.map(|e|&e.id)!=parents[0].map(|e|&e.id)){return Err(diagnostic!("L’alignement nécessite des éléments dans le même conteneur", "Alignment requires elements in the same container").into())}
+        if parents[0].is_some_and(|p|matches!(p.kind,Kind::Horizontal|Kind::Vertical|Kind::Grid)){return Err(diagnostic!("La disposition est pilotée par le conteneur : modifiez son espacement", "Layout is controlled by the container: change its spacing").into())}
+        if ids.iter().any(|id|self.find_element(page,id).is_some_and(|e|e.locked)){return Err(diagnostic!("Déverrouillez les éléments avant de les aligner", "Unlock the elements before aligning them").into())}
         let layout=self.layout_page(page,self.reference);
-        let mut rects:Vec<_>=ids.iter().map(|id|layout.iter().find(|e|&e.id==id).map(|e|(id.clone(),e.rect)).ok_or("Un élément sélectionné est masqué")).collect::<Result<_,_>>()?;
+        let mut rects:Vec<_>=ids.iter().map(|id|layout.iter().find(|e|&e.id==id).map(|e|(id.clone(),e.rect)).ok_or(diagnostic!("Un élément sélectionné est masqué", "A selected element is hidden"))).collect::<Result<_,_>>()?;
         let axis=usize::from(matches!(alignment,Alignment::Top|Alignment::CenterY|Alignment::Bottom|Alignment::DistributeY));
         let lo=rects.iter().map(|(_,r)|r[axis]).fold(f32::INFINITY,f32::min);
         let hi=rects.iter().map(|(_,r)|r[axis]+r[axis+2]).fold(f32::NEG_INFINITY,f32::max);
         let distribute=matches!(alignment,Alignment::DistributeX|Alignment::DistributeY);
-        if distribute&&ids.len()<3{return Err("La répartition nécessite au moins trois éléments".into())}
+        if distribute&&ids.len()<3{return Err(diagnostic!("La répartition nécessite au moins trois éléments", "Distribution requires at least three elements").into())}
         rects.sort_by(|a,b|a.1[axis].total_cmp(&b.1[axis]));
         let gap=(hi-lo-rects.iter().map(|(_,r)|r[axis+2]).sum::<f32>())/(ids.len()-1) as f32;
         let mut cursor=lo;

@@ -3,15 +3,15 @@ use crate::{Document, Element, StylePatch};
 fn checked_name(name: &str) -> Result<String,String> {
     let name=name.trim();
     if name.is_empty() || name.chars().count()>120 || name.chars().any(char::is_control) {
-        return Err("Le style demande un nom de 1 à 120 caractères, sans caractère de contrôle".into());
+        return Err(diagnostic!("Le style demande un nom de 1 à 120 caractères, sans caractère de contrôle", "Style names must contain 1 to 120 characters, without control characters").into());
     }
     Ok(name.into())
 }
 impl Document {
     pub fn capture_style(&mut self,page:usize,element:&str,name:&str)->Result<String,String> {
         let name=checked_name(name)?;
-        if self.styles.contains_key(&name){return Err(format!("Le style « {name} » existe déjà. Choisissez un autre nom ou mettez à jour ce style."));}
-        let source=self.find_element(page,element).ok_or("Élément absent")?;
+        if self.styles.contains_key(&name){return Err(diagnostic!("Le style « {name} » existe déjà. Choisissez un autre nom ou mettez à jour ce style.", "Style “{name}” already exists. Choose another name or update this style."));}
+        let source=self.find_element(page,element).ok_or(diagnostic!("Élément absent", "Missing element"))?;
         let style=StylePatch::from_element(&self.resolved_element(source));
         self.styles.insert(name.clone(),style);
         let source=self.find_element_mut(page,element).unwrap();
@@ -20,9 +20,9 @@ impl Document {
     }
     pub fn rename_style(&mut self,old:&str,new:&str)->Result<(),String> {
         let new=checked_name(new)?;
-        if !self.styles.contains_key(old){return Err("Style partagé absent".into());}
+        if !self.styles.contains_key(old){return Err(diagnostic!("Style partagé absent", "Missing shared style").into());}
         if new==old{return Ok(());}
-        if self.styles.contains_key(&new){return Err(format!("Le style « {new} » existe déjà ; aucun style n’a été remplacé."));}
+        if self.styles.contains_key(&new){return Err(diagnostic!("Le style « {new} » existe déjà ; aucun style n’a été remplacé.", "Style “{new}” already exists; no style was replaced."));}
         let style=self.styles.remove(old).unwrap();self.styles.insert(new.clone(),style);
         fn remap(elements:&mut [Element],old:&str,new:&str){for e in elements{if e.style.as_deref()==Some(old){e.style=Some(new.into());}remap(&mut e.children,old,new);}}
         for p in &mut self.pages{remap(&mut p.elements,old,&new);}

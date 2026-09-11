@@ -23,7 +23,7 @@ impl Reader {
             .map(|v| {
                 v.as_str()
                     .map(str::to_string)
-                    .ok_or_else(|| format!("{path} : texte attendu"))
+                    .ok_or_else(|| diagnostic!("{path} : texte attendu", "{path}: expected text"))
             })
             .transpose()
     }
@@ -34,7 +34,7 @@ impl Reader {
                     .or_else(|| v.as_integer().map(|n| n as f64))
                     .filter(|n| n.is_finite())
                     .map(|n| n as f32)
-                    .ok_or_else(|| format!("{path} : nombre fini attendu"))
+                    .ok_or_else(|| diagnostic!("{path} : nombre fini attendu", "{path}: expected a finite number"))
             })
             .transpose()
     }
@@ -42,7 +42,7 @@ impl Reader {
         self.take(path)
             .map(|v| {
                 v.as_bool()
-                    .ok_or_else(|| format!("{path} : booléen attendu"))
+                    .ok_or_else(|| diagnostic!("{path} : booléen attendu", "{path}: expected a boolean"))
             })
             .transpose()
     }
@@ -50,7 +50,7 @@ impl Reader {
         self.text(path)?
             .map(|s| {
                 parse_color(&s)
-                    .ok_or_else(|| format!("{path} : couleur #RRGGBB ou #RRGGBBAA attendue"))
+                    .ok_or_else(|| diagnostic!("{path} : couleur #RRGGBB ou #RRGGBBAA attendue", "{path}: expected a #RRGGBB or #RRGGBBAA color"))
             })
             .transpose()
     }
@@ -76,7 +76,7 @@ impl Reader {
         leaves(&self.value, "", &mut out);
         out.into_iter()
             .filter(|p| !self.used.contains(p))
-            .map(|p| format!("Non converti : {p}"))
+            .map(|p| diagnostic!("Non converti : {p}", "Not converted: {p}"))
             .collect()
     }
 }
@@ -102,7 +102,7 @@ fn anchor(s: &str) -> Result<[f32; 2], String> {
         "bottom_left" => [0.0, 1.0],
         "bottom_center" => [0.5, 1.0],
         "bottom_right" => [1.0, 1.0],
-        _ => return Err(format!("Ancrage inconnu : {s}")),
+        _ => return Err(diagnostic!("Ancrage inconnu : {s}", "Unknown anchor: {s}")),
     })
 }
 fn text_style(r: &mut Reader, prefix: &str, e: &mut Element) -> Result<(), String> {
@@ -190,7 +190,7 @@ impl Document {
                 "cover" => ImageFit::Cover,
                 "contain" => ImageFit::Contain,
                 "stretch" => ImageFit::Stretch,
-                other => return Err(format!("Mode d’image inconnu : {other}")),
+                other => return Err(diagnostic!("Mode d’image inconnu : {other}", "Unknown image mode: {other}")),
             };
             title.elements.insert(0, e);
         }
@@ -200,12 +200,12 @@ impl Document {
         let order = match r.take("title_screen.button_order") {
             Some(v) => v
                 .as_array()
-                .ok_or("button_order : liste attendue")?
+                .ok_or(diagnostic!("button_order : liste attendue", "button_order: expected a list"))?
                 .iter()
                 .map(|v| {
                     v.as_str()
                         .map(str::to_string)
-                        .ok_or("button_order : texte attendu".to_string())
+                        .ok_or(diagnostic!("button_order : texte attendu", "button_order: expected text").to_string())
                 })
                 .collect::<Result<Vec<_>, _>>()?,
             None => keys.iter().map(|s| s.to_string()).collect(),
@@ -236,7 +236,7 @@ impl Document {
         let mut seen = BTreeSet::new();
         for key in order {
             if !seen.insert(key.clone()) {
-                return Err(format!("Bouton dupliqué : {key}"));
+                return Err(diagnostic!("Bouton dupliqué : {key}", "Duplicate button: {key}"));
             }
             let action = match key.as_str() {
                 "continue" => Action::Continue,
@@ -246,7 +246,7 @@ impl Document {
                 "gallery" => Action::Gallery,
                 "quit" => Action::Quit,
                 _ => {
-                    warnings.push(format!("Bouton non converti : {key}"));
+                    warnings.push(diagnostic!("Bouton non converti : {key}", "Button not converted: {key}"));
                     continue;
                 }
             };
@@ -255,7 +255,7 @@ impl Document {
                 .iter()
                 .find(|e| e.kind == Kind::Button && e.action == action)
                 .cloned()
-                .ok_or("Bouton standard absent")?;
+                .ok_or(diagnostic!("Bouton standard absent", "Missing standard button"))?;
             let shown = r
                 .boolean(&format!("title_screen.buttons.visibility.{key}"))?
                 .or(r.boolean(&format!("title_screen.show_{key}"))?)
@@ -301,7 +301,7 @@ impl Document {
                 e.rect[1] -= shift;
             }
             warnings.push(
-                "Boutons du titre : groupe remonté pour garder le dernier bouton accessible."
+                diagnostic!("Boutons du titre : groupe remonté pour garder le dernier bouton accessible.", "Title buttons: group moved up to keep the last button accessible.")
                     .into(),
             );
         }
@@ -310,7 +310,7 @@ impl Document {
         if r.boolean("title_screen.enabled")? == Some(false) {
             title.role = None;
             warnings.push(
-                "Écran titre désactivé : la page importée n’a pas de rôle de démarrage.".into(),
+                diagnostic!("Écran titre désactivé : la page importée n’a pas de rôle de démarrage.", "Title screen disabled: the imported page has no startup role.").into(),
             );
         }
         let box_height = r.number("textbox.height")?.unwrap_or(174.0);
@@ -331,7 +331,7 @@ impl Document {
         let content_height = (box_height - padding * 2.0 - name_height).max(40.0);
         if padding * 2.0 + name_height + 40.0 > box_height {
             warnings.push(
-                "Boîte de dialogue : marges verticales réduites pour garder le texte accessible."
+                diagnostic!("Boîte de dialogue : marges verticales réduites pour garder le texte accessible.", "Dialogue box: vertical padding reduced to keep the text accessible.")
                     .into(),
             );
         }

@@ -26,10 +26,10 @@ impl Element {
 impl LocalControl{
     pub fn for_kind(kind:Kind,variable:String)->Self{Self{variable,initial:match kind{Kind::CheckBox=>false.into(),Kind::Select=>"Option 1".into(),_=>0.0.into()},minimum:0.0,maximum:100.0,step:1.0,options:if kind==Kind::Select{vec!["Option 1".into(),"Option 2".into()]}else{vec![]}}}
     pub fn validate(&self,kind:Kind)->Result<(),String>{
-        if self.variable.trim().is_empty()||self.variable.starts_with("state.")||self.variable.chars().any(|c|!(c.is_alphanumeric()||matches!(c,'_'|'.'|'-'))){return Err("Variable d’interface invalide : utilisez un nom sans espace, hors du préfixe réservé state.".into());}
-        if ![self.minimum,self.maximum,self.step].iter().all(|n|n.is_finite()&&n.abs()<=1.0e9)||self.minimum>=self.maximum||self.step<=0.0{return Err("Le curseur demande des valeurs finies entre −1 milliard et 1 milliard, un minimum inférieur au maximum et un pas positif".into());}
-        if kind==Kind::Select&&(self.options.is_empty()||self.options.len()>200||self.options.iter().any(|s|s.trim().is_empty())||self.options.iter().collect::<std::collections::BTreeSet<_>>().len()!=self.options.len()){return Err("Le sélecteur demande de 1 à 200 options distinctes et non vides".into());}
-        if !self.accepts(kind,&self.initial){return Err("Valeur initiale incompatible avec le contrôle d’interface".into());}Ok(())
+        if self.variable.trim().is_empty()||self.variable.starts_with("state.")||self.variable.chars().any(|c|!(c.is_alphanumeric()||matches!(c,'_'|'.'|'-'))){return Err(diagnostic!("Variable d’interface invalide : utilisez un nom sans espace, hors du préfixe réservé state.", "Invalid UI variable: use a name without spaces, outside the reserved state. prefix").into());}
+        if ![self.minimum,self.maximum,self.step].iter().all(|n|n.is_finite()&&n.abs()<=1.0e9)||self.minimum>=self.maximum||self.step<=0.0{return Err(diagnostic!("Le curseur demande des valeurs finies entre −1 milliard et 1 milliard, un minimum inférieur au maximum et un pas positif", "Slider requires finite values between −1 billion and 1 billion, minimum below maximum and a positive step").into());}
+        if kind==Kind::Select&&(self.options.is_empty()||self.options.len()>200||self.options.iter().any(|s|s.trim().is_empty())||self.options.iter().collect::<std::collections::BTreeSet<_>>().len()!=self.options.len()){return Err(diagnostic!("Le sélecteur demande de 1 à 200 options distinctes et non vides", "Dropdown requires 1 to 200 distinct, non-empty options").into());}
+        if !self.accepts(kind,&self.initial){return Err(diagnostic!("Valeur initiale incompatible avec le contrôle d’interface", "Initial value incompatible with the UI control").into());}Ok(())
     }
     pub fn accepts(&self,kind:Kind,value:&Value)->bool{match kind{Kind::CheckBox=>value.is_boolean(),Kind::Slider=>value.as_f64().is_some_and(|n|n.is_finite()&&n>=self.minimum&&n<=self.maximum),Kind::Select=>value.as_str().is_some_and(|s|self.options.iter().any(|o|o==s)),_=>false}}
     pub fn quantize(&self,value:f64)->f64{(self.minimum+((value-self.minimum)/self.step).round()*self.step).clamp(self.minimum,self.maximum)}
@@ -38,14 +38,14 @@ impl LocalControl{
 impl Session{
     pub fn initialize_controls(&mut self,doc:&Document)->Result<(),String>{for (name,(_,control)) in doc.local_controls()?{self.variables.entry(name).or_insert(control.initial);}Ok(())}
     pub fn set_control_value(&mut self,kind:Kind,control:&LocalControl,value:Value)->Result<bool,String>{
-        control.validate(kind)?;if !control.accepts(kind,&value){return Err("Valeur incompatible avec le contrôle d’interface".into());}
+        control.validate(kind)?;if !control.accepts(kind,&value){return Err(diagnostic!("Valeur incompatible avec le contrôle d’interface", "Value incompatible with the UI control").into());}
         if control.value(kind,self)==&value{return Ok(false);}self.variables.insert(control.variable.clone(),value);Ok(true)
     }
     pub(crate) fn present_controls(&self,e:&mut Element){if let Some(control)=&mut e.local_control{control.initial=control.value(e.kind,self).clone();}for child in &mut e.children{self.present_controls(child);}}
 }
 impl Document{
     pub fn local_controls(&self)->Result<std::collections::BTreeMap<String,(Kind,LocalControl)>,String>{
-        fn walk(doc:&Document,es:&[Element],out:&mut std::collections::BTreeMap<String,(Kind,LocalControl)>,depth:usize)->Result<(),String>{if depth>=64{return Err("Imbrication de contrôles trop profonde".into());}for source in es{let e=doc.resolved_element(source);if let Some(c)=&e.local_control{c.validate(e.kind)?;if let Some((kind,old))=out.get(&c.variable){if *kind!=e.kind||old!=c{return Err(format!("La variable {} est utilisée par des contrôles aux configurations différentes",c.variable));}}out.insert(c.variable.clone(),(e.kind,c.clone()));}walk(doc,&e.children,out,depth+1)?;}Ok(())}
+        fn walk(doc:&Document,es:&[Element],out:&mut std::collections::BTreeMap<String,(Kind,LocalControl)>,depth:usize)->Result<(),String>{if depth>=64{return Err(diagnostic!("Imbrication de contrôles trop profonde", "Control nesting is too deep").into());}for source in es{let e=doc.resolved_element(source);if let Some(c)=&e.local_control{c.validate(e.kind)?;if let Some((kind,old))=out.get(&c.variable){if *kind!=e.kind||old!=c{return Err(diagnostic!("La variable {} est utilisée par des contrôles aux configurations différentes", "Variable {} is used by controls with different configurations",c.variable));}}out.insert(c.variable.clone(),(e.kind,c.clone()));}walk(doc,&e.children,out,depth+1)?;}Ok(())}
         let mut out=std::collections::BTreeMap::new();for p in &self.pages{walk(self,&p.elements,&mut out,0)?;}Ok(out)
     }
 }

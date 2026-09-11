@@ -9,10 +9,10 @@ pub enum Curve{#[default] Linear,EaseIn,EaseOut,EaseInOut}
 pub struct AnimationClip{pub kind:AnimationKind,pub duration:f32,pub curve:Curve,pub from:[f32;4],pub to:[f32;4]}
 impl AnimationClip{
     pub fn validate(&self)->Result<(),String>{
-        if !self.duration.is_finite()||self.duration<=0.0||self.duration>60.0{return Err("La durée d’un effet doit être comprise entre 0 et 60 secondes (exclusivement positive)".into());}
-        if self.from.iter().chain(self.to.iter()).any(|v|!v.is_finite()){return Err("Valeur d’effet non finie".into());}
+        if !self.duration.is_finite()||self.duration<=0.0||self.duration>60.0{return Err(diagnostic!("La durée d’un effet doit être comprise entre 0 et 60 secondes (exclusivement positive)", "Effect duration must be greater than 0 and at most 60 seconds").into());}
+        if self.from.iter().chain(self.to.iter()).any(|v|!v.is_finite()){return Err(diagnostic!("Valeur d’effet non finie", "Non-finite effect value").into());}
         let valid=match self.kind{AnimationKind::Fade=>(0.0..=1.0).contains(&self.from[0])&&(0.0..=1.0).contains(&self.to[0]),AnimationKind::Scale=>(0.01..=20.0).contains(&self.from[0])&&(0.01..=20.0).contains(&self.to[0]),AnimationKind::Color=>self.from.iter().chain(self.to.iter()).all(|v|(0.0..=1.0).contains(v)),AnimationKind::Move=>self.from[..2].iter().chain(self.to[..2].iter()).all(|v|v.abs()<=10000.0)};
-        if !valid{return Err("Valeurs hors limites pour cet effet".into());}Ok(())
+        if !valid{return Err(diagnostic!("Valeurs hors limites pour cet effet", "Values out of range for this effect").into());}Ok(())
     }
     pub fn sample(&self,elapsed:f32)->[f32;4]{let t=(elapsed/self.duration).clamp(0.0,1.0);let t=match self.curve{Curve::Linear=>t,Curve::EaseIn=>t*t,Curve::EaseOut=>1.0-(1.0-t)*(1.0-t),Curve::EaseInOut=>t*t*(3.0-2.0*t)};std::array::from_fn(|i|self.from[i]+(self.to[i]-self.from[i])*t)}
 }
