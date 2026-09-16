@@ -374,7 +374,10 @@ fn drive(mut qa:ResMut<Qa>,state:Res<State<VnState>>,mut next:ResMut<NextState<V
     let now=qa.started.elapsed().as_secs_f64();
     if std::env::var_os("RVN_QA_CUSTOM_CHOICES").is_some(){let _=std::fs::write(qa.dir.join("state.txt"),format!("state={:?} pc={} choices={} interaction={:?} clicked={:?} buttons={:?}",state.get(),engine.0.state.pc,qa.choices,engine.0.current_interaction(),qa.map_clicked,choice_buttons.iter().map(|(b,_,t,i)|(b.0,t.translation(),*i)).collect::<Vec<_>>()));}
     if qa.mouse_down{mouse.send(bevy::input::mouse::MouseButtonInput{button:MouseButton::Left,state:bevy::input::ButtonState::Released,window:windows.single()});qa.mouse_down=false;}
-    if now>240.0 { error!("QA timeout: state={:?}, pc={}, interaction={:?}",state.get(),engine.0.state.pc,engine.0.current_interaction());exit.send(AppExit::error());return; }
+    // Complete example routes have substantially more dialogue than tiny QA
+    // fixtures; compositors may throttle a covered native window to one FPS.
+    let timeout=if std::env::var_os("RVN_QA_ROUTE").is_some(){600.0}else{240.0};
+    if now>timeout { error!("QA timeout: state={:?}, pc={}, interaction={:?}",state.get(),engine.0.state.pc,engine.0.current_interaction());exit.send(AppExit::error());return; }
     if *state.get()==VnState::Error { error!("QA script error");exit.send(AppExit::error());return; }
     if let Some(at)=qa.finishing {if now-at>3.0 {exit.send(AppExit::Success);}return;}
     // Explicitly exercises real custom-button dispatch, not the title-state shortcut.
@@ -453,7 +456,9 @@ fn drive(mut qa:ResMut<Qa>,state:Res<State<VnState>>,mut next:ResMut<NextState<V
     }
     match interaction {
         rvn_core::Interaction::Choice{..}=>{
-            let selected=match qa.choices {0=>2,1=>0,2=>2,_=>0};
+            let selected=if let Ok(route)=std::env::var("RVN_QA_ROUTE") {
+                route.split(',').nth(qa.choices).expect("QA route exhausted").parse::<usize>().expect("QA route must contain comma-separated indices")
+            } else {match qa.choices {0=>2,1=>0,2=>2,_=>0}};
             if std::env::var_os("RVN_QA_CUSTOM_CHOICES").is_some(){if qa.map_clicked==Some(engine.0.state.pc){return;}if let Some((_,_,transform,interaction))=choice_buttons.iter().find(|(id,_,_,_)|id.0==selected){window_values.single_mut().set_cursor_position(Some(transform.translation().truncate()));if *interaction!=Interaction::Hovered{return;}mouse.send(bevy::input::mouse::MouseButtonInput{button:MouseButton::Left,state:bevy::input::ButtonState::Pressed,window:windows.single()});qa.mouse_down=true;qa.map_clicked=Some(engine.0.state.pc);qa.choices+=1;}}else{qa.choices+=1;input.send(PlayerInput::Choose(selected));}
         }
         rvn_core::Interaction::Imagemap{..}=>{if qa.map_target.is_some(){if qa.map_clicked==Some(engine.0.state.pc){return;}qa.map_clicked=Some(engine.0.state.pc);mouse.send(bevy::input::mouse::MouseButtonInput{button:MouseButton::Left,state:bevy::input::ButtonState::Pressed,window:windows.single()});qa.mouse_down=true;qa.choices+=1;}else{input.send(PlayerInput::Choose(1));}}

@@ -382,6 +382,7 @@ type OldMenus = Or<(
 )>;
 #[derive(SystemParam)]
 struct Context<'w, 's> {
+    engine: Res<'w, VnEngine>,
     state: Res<'w, State<VnState>>,
     save: Res<'w, SaveMenuState>,
     settings: Res<'w, SettingsMenuState>,
@@ -398,6 +399,9 @@ struct Context<'w, 's> {
     thumbnails:Res<'w,crate::save_thumbnails::SaveThumbnails>,
     values: Res<'w, crate::systems::settings_menu::Settings>,
     menu: Res<'w, MenuState>,
+}
+fn translated(ctx:&Context,text:&str)->String {
+    ctx.engine.0.locale.as_ref().map(|locale|locale.translate(text)).unwrap_or(text).to_owned()
 }
 fn render(
     mut commands: Commands,
@@ -477,7 +481,7 @@ fn render(
     );
     let presentation:Vec<_>=menus.session.presentation.iter().map(|(id,s)|(id,s.visible,s.enabled,&s.text,&s.image)).collect();
     let locals:Vec<_>=menus.session.variables.iter().filter(|(k,_)|!k.starts_with("state.")).collect();
-    let key=format!("{key}:{image_state:?}:{}:{:?}:{presentation:?}:{locals:?}",ctx.values.auto_speed,(ctx.images.len(),ctx.fonts.len(),ctx.save.revision));
+    let key=format!("{key}:{image_state:?}:{}:{:?}:{presentation:?}:{locals:?}:{}",ctx.values.auto_speed,(ctx.images.len(),ctx.fonts.len(),ctx.save.revision),ctx.engine.0.locale.as_ref().map(|l|l.current_lang()).unwrap_or(""));
     if menus.key == key {
         return;
     }
@@ -547,7 +551,7 @@ fn spawn_element(
         top: Val::Px(r[1]),
         width: Val::Px(r[2]),
         height: Val::Px(r[3]),
-        align_items: AlignItems::FlexStart,
+        align_items: if e.kind == Kind::Button { AlignItems::Center } else { AlignItems::FlexStart },
         justify_content: JustifyContent::FlexStart,
         padding: UiRect::all(Val::Px(if e.kind==Kind::Text{0.0}else{(e.font_size*0.15).min(6.0)})),
         overflow: if matches!(e.kind,Kind::Panel|Kind::Horizontal|Kind::Vertical|Kind::Grid|Kind::Overlay){Overflow::visible()}else{Overflow::clip()},
@@ -606,8 +610,8 @@ fn spawn_element(
         };
         let value=value.or_else(||e.local_control.as_ref().map(|c|c.initial.as_str().map(str::to_owned).unwrap_or_else(||c.initial.to_string())));
         let label = value.filter(|_|e.kind!=Kind::CheckBox)
-            .map(|v| format!("{} : {v}", e.text))
-            .unwrap_or_else(|| e.text.clone());
+            .map(|v| format!("{} : {}", translated(ctx,&e.text),translated(ctx,&v)))
+            .unwrap_or_else(|| translated(ctx,&e.text));
         commands.entity(entity).with_children(|p| {
             let mut text=TextBundle::from_section(
                 label,
@@ -639,13 +643,13 @@ fn spawn_element(
         for (index,slot) in ((current*capacity+1)..=(current*capacity+capacity).min(e.list.slots)).enumerate() {
             let saved=mgr.as_ref().and_then(|m|m.load(slot as u32).ok());let present=saved.is_some();
             let protected=mgr.as_ref().is_none_or(|m|m.is_protected(slot as u32).unwrap_or(true));
-            let label = format!("{} — {}", slot, if present { "Sauvegarde" } else { "Vide" });
+            let label = format!("{} — {}", slot, translated(ctx,if present { "Sauvegarde" } else { "Vide" }));
             let mut explicit_controls=false;
             let b = if let Some(template)=&e.list.template{
                 let bounds=e.list.card_rect_with_navigation(index,[r[2],r[3]],e.layout_options.gap,automatic);let card=[bounds[2],bounds[3]];
                 let root=commands.spawn(ButtonBundle{style:Style{position_type:PositionType::Absolute,left:Val::Px(bounds[0]),top:Val::Px(bounds[1]),width:Val::Px(card[0]),height:Val::Px(card[1]),overflow:Overflow::clip(),..default()},background_color:color(e.normal).into(),..default()}).id();commands.entity(entity).add_child(root);
                 let date=saved.as_ref().and_then(|s|chrono::DateTime::from_timestamp(s.timestamp as i64,0)).map(|d|d.with_timezone(&chrono::Local).format("%d/%m/%Y %H:%M").to_string()).unwrap_or_else(||"Emplacement vide".into());
-                let data=[("save.slot".into(),slot.to_string()),("save.thumbnail".into(),saved.as_ref().and_then(|s|s.thumbnail.clone()).unwrap_or_default()),("save.date".into(),date),("save.summary".into(),saved.as_ref().map(|s|s.label.clone()).unwrap_or_else(||format!("Emplacement {slot}")))].into_iter().collect();
+                let data=[("save.slot".into(),slot.to_string()),("save.thumbnail".into(),saved.as_ref().and_then(|s|s.thumbnail.clone()).unwrap_or_default()),("save.date".into(),date),("save.summary".into(),saved.as_ref().map(|s|s.label.clone()).unwrap_or_else(||format!("{} {slot}",translated(ctx,"Emplacement"))))].into_iter().collect();
                 let mut data:std::collections::BTreeMap<String,String>=data;data.extend(rvn_ui::card_state_bindings(false,present,protected));
                 let children=menu_layout::item(doc,template,card,&data,assets,ctx);if children.is_empty(){commands.entity(root).despawn_recursive();continue;}
                 card_layouts.push((root,bounds,children[0].rect[3]));
@@ -731,11 +735,12 @@ fn spawn_element(
         let slider=e.local_control.as_ref().map(|c|(c.initial.as_f64().unwrap_or(c.minimum)as f32,c.minimum as f32,c.maximum as f32)).or_else(||e.binding.as_deref().and_then(|binding|slider_range(binding).map(|(min,max)|{let value=match binding{"music_volume"=>ctx.values.music_volume,"sfx_volume"=>ctx.values.sfx_volume,"text_speed"=>ctx.values.text_speed,_=>ctx.values.auto_speed};(value,min,max)})));
         if let Some((value,min,max))=slider{
             let fraction=((value-min)/(max-min)).clamp(0.0,1.0);
+            let ui_scale=(size[0]/doc.reference[0]).min(size[1]/doc.reference[1]);
             if enabled&&e.local_control.is_none(){commands.entity(entity).insert(MenuSlider(e.binding.clone().unwrap()));}
             commands.entity(entity).with_children(|p|{
-                p.spawn(NodeBundle{style:Style{position_type:PositionType::Absolute,left:Val::Px(12.0),right:Val::Px(12.0),bottom:Val::Px(8.0),height:Val::Px(4.0),..default()},background_color:color(e.disabled).into(),..default()});
-                p.spawn(NodeBundle{style:Style{position_type:PositionType::Absolute,left:Val::Px(12.0),bottom:Val::Px(8.0),width:Val::Px((r[2]-24.0).max(1.0)*fraction),height:Val::Px(4.0),..default()},background_color:color(e.hover).into(),..default()});
-                p.spawn(NodeBundle{style:Style{position_type:PositionType::Absolute,left:Val::Px(7.0+(r[2]-24.0).max(1.0)*fraction),bottom:Val::Px(3.0),width:Val::Px(10.0),height:Val::Px(14.0),..default()},background_color:color(e.foreground).into(),..default()});
+                p.spawn(NodeBundle{style:Style{position_type:PositionType::Absolute,left:Val::Px(12.0),right:Val::Px(12.0),bottom:Val::Px(8.0*ui_scale),height:Val::Px(4.0*ui_scale),..default()},background_color:color(e.disabled).into(),..default()});
+                p.spawn(NodeBundle{style:Style{position_type:PositionType::Absolute,left:Val::Px(12.0),bottom:Val::Px(8.0*ui_scale),width:Val::Px((r[2]-24.0).max(1.0)*fraction),height:Val::Px(4.0*ui_scale),..default()},background_color:color(e.hover).into(),..default()});
+                p.spawn(NodeBundle{style:Style{position_type:PositionType::Absolute,left:Val::Px(7.0+(r[2]-24.0).max(1.0)*fraction),bottom:Val::Px(3.0*ui_scale),width:Val::Px(10.0),height:Val::Px(14.0*ui_scale),..default()},background_color:color(e.foreground).into(),..default()});
             });
         }
     }
@@ -1028,6 +1033,23 @@ fn interact(
                     menus.page=None;
                     menus.history.clear();
                     menus.key.clear();
+                    // These are explicit controls on the visible custom page,
+                    // not clicks passing through to the hidden pause overlay.
+                    if matches!(ctx.state.get(), VnState::Menu | VnState::Gallery | VnState::History) && matches!(a, Action::Save | Action::Load | Action::Settings) {
+                        let from_title = ctx.menu.return_to == Some(VnState::TitleScreen);
+                        if a == Action::Save && from_title { continue; }
+                        ctx.next.set(VnState::Menu);
+                        match a {
+                            Action::Settings => { ctx.save.active = false; ctx.settings.active = true; }
+                            Action::Save if from_title => continue,
+                            _ => {
+                                ctx.settings.active = false;
+                                ctx.save.open(if a == Action::Save { SaveMenuMode::Save } else { SaveMenuMode::Load },
+                                    if from_title { crate::systems::save_menu::SaveMenuOrigin::TitleScreen } else { crate::systems::save_menu::SaveMenuOrigin::InGame });
+                            }
+                        }
+                        continue;
+                    }
                     let proxy = commands
                         .spawn((
                             MenuProxy,
@@ -1046,7 +1068,10 @@ fn interact(
                     } else if ctx.settings.active && a == Action::Back {
                         commands.entity(proxy).insert(SettingsButton::Close);
                     } else if a == Action::History {
-                        ctx.menu.return_to = Some(VnState::Menu);
+                        let return_to = if ctx.menu.return_to == Some(VnState::TitleScreen) { VnState::TitleScreen } else { VnState::Menu };
+                        ctx.save.active = false;
+                        ctx.settings.active = false;
+                        ctx.menu.return_to = Some(return_to);
                         ctx.next.set(VnState::History);
                     } else if a == Action::Gallery {
                         ctx.menu.return_to = Some(ctx.state.get().clone());

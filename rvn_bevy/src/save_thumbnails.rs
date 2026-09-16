@@ -12,11 +12,11 @@ pub(crate) struct SaveThumbnails {
     stamps:HashMap<String,std::time::SystemTime>,
     resume:Vec<ResumeCapture>,
 }
-struct ResumeCapture {slot:rvn_core::save::ResumeSlot,key:String,expected:rvn_core::save::SaveData,created:std::time::Instant}
+struct ResumeCapture {slot:rvn_core::save::ResumeSlot,key:String,expected:rvn_core::save::SaveData,created:bevy::utils::Instant}
 fn scene_key(engine:&VnEngine)->String{format!("{:?}",engine.0.state)}
 impl SaveThumbnails {
     pub fn request_resume(&mut self,slot:rvn_core::save::ResumeSlot,engine:&VnEngine,expected:rvn_core::save::SaveData){
-        self.resume.retain(|request|request.slot!=slot);self.resume.push(ResumeCapture{slot,key:scene_key(engine),expected,created:std::time::Instant::now()});
+        self.resume.retain(|request|request.slot!=slot);self.resume.push(ResumeCapture{slot,key:scene_key(engine),expected,created:bevy::utils::Instant::now()});
     }
     fn persist_resume(&mut self,directory:&std::path::Path){
         if self.resume.is_empty(){return;}

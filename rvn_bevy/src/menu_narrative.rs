@@ -13,7 +13,7 @@ pub(super) fn render_quick_actions(mut commands:Commands,mut menus:ResMut<Menus>
     if index.is_none()||*ctx.state.get()!=VnState::Waiting||menus.page.is_some(){page_event(&mut menus,&mut previous,None);for root in &roots{commands.entity(root).despawn_recursive();}last.clear();return;}
     let doc=menus.session.present(menus.doc.as_ref().unwrap());let index=index.unwrap();let window=ctx.windows.single();let size=[window.width(),window.height()];
     page_event(&mut menus,&mut previous,Some(doc.pages[index].id.clone()));
-    let key=format!("{size:?}:{}",serde_json::to_string(&doc.pages[index]).unwrap_or_default());let key=format!("{key}:fonts={}",ctx.fonts.len());if *last==key{return;}*last=key;
+    let key=format!("{size:?}:{}",serde_json::to_string(&doc.pages[index]).unwrap_or_default());let key=format!("{key}:fonts={}:lang={}",ctx.fonts.len(),ctx.engine.0.locale.as_ref().map(|l|l.current_lang()).unwrap_or(""));if *last==key{return;}*last=key;
     for root in &roots{commands.entity(root).despawn_recursive();}
     let root=commands.spawn((QuickActionsRoot,NodeBundle{style:Style{position_type:PositionType::Absolute,width:Val::Percent(100.0),height:Val::Percent(100.0),..default()},background_color:color(doc.pages[index].background).into(),z_index:ZIndex::Global(700),..default()})).id();
     for e in menu_layout::tree(&doc,index,size,&assets,&ctx,0,&[]){spawn_element(&mut commands,root,&e,&doc.pages[index].id,size,size,&assets,&ctx,&doc,0);}
@@ -102,8 +102,9 @@ pub(super) fn render_narrative(
     mut last:Local<String>,mut previous:Local<Option<String>>,
 ){
     let role=menus.doc.as_ref().and_then(|d|d.pages.iter().position(|p|p.role==Some(rvn_ui::PageRole::Dialogue)));
-    let active=role.is_some()&&!matches!(ctx.state.get(),VnState::TitleScreen|VnState::Finished|VnState::Error)&&original.iter().any(|(style,_)|style.display!=Display::None);
-    for (_,mut visibility) in &mut original{*visibility=if active{Visibility::Hidden}else{Visibility::Inherited};}
+    let in_story=matches!(ctx.state.get(),VnState::Waiting|VnState::Stepping|VnState::Animating);
+    let active=role.is_some()&&in_story&&original.iter().any(|(style,_)|style.display!=Display::None);
+    for (_,mut visibility) in &mut original{*visibility=if active||!in_story{Visibility::Hidden}else{Visibility::Inherited};}
     if !active{page_event(&mut menus,&mut previous,None);for root in &roots{commands.entity(root).despawn_recursive();}last.clear();return;}
     let name=names.iter().next().map(|t|t.sections.iter().map(|s|s.value.as_str()).collect::<String>()).unwrap_or_default();
     let window=ctx.windows.single();let size=[window.width(),window.height()];

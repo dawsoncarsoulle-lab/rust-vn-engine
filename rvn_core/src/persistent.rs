@@ -92,6 +92,8 @@ pub struct PersistentData {
     #[serde(default)]
     pub fullscreen: Option<bool>,
     #[serde(default)]
+    pub typewriter: Option<bool>,
+    #[serde(default)]
     pub last_resume_target: Option<LastResumeTarget>,
     /// Author-defined persistent variables set via `set persistent.flag = ...`.
     /// Keys include the `persistent.` prefix.

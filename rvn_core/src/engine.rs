@@ -238,6 +238,7 @@ impl<R: Renderer> Engine<R> {
             script,
             label_table,
             state: GameState {
+                last_dialogue: None,
                 pc: 0,
                 current_interactive_pc: 0,
                 background_image: String::new(),
@@ -391,9 +392,7 @@ impl<R: Renderer> Engine<R> {
             }
             let stmt = self.script[self.state.pc].clone();
             if Self::is_interactive(&stmt) {
-                self.state.current_interactive_pc = self.state.pc;
-                let display = self.make_display_resolved(&stmt)?;
-                self.history.push(self.state.clone(), display);
+                self.record_interaction_snapshot(&stmt)?;
                 return self.exec_interactive(stmt);
             } else {
                 self.exec_silent(stmt)?;
@@ -407,6 +406,17 @@ impl<R: Renderer> Engine<R> {
         };
         self.state = entry.state;
         self.renderer.restore_screen(&self.state);
+        // Re-resolve the restored interaction in the currently selected language.
+        // The cached display is only a fallback for an unresolvable legacy entry.
+        if let Ok(Some(interaction)) = self.current_interaction() {
+            if matches!(interaction, Interaction::Choice { .. }) {
+                if let Ok(Some(dialogue)) = self.last_dialogue_interaction() {
+                    self.render_interaction(dialogue);
+                }
+            }
+            self.render_interaction(interaction);
+            return true;
+        }
         if let Some(display) = &entry.display {
             match display {
                 HistoryDisplay::Dialogue { character, text } => {
@@ -537,6 +547,9 @@ impl<R: Renderer> Engine<R> {
     }
 
     fn record_interaction_snapshot(&mut self, stmt: &Statement) -> Result<(), RuntimeError> {
+        if matches!(stmt,Statement::Dialogue{..}) {
+            self.state.last_dialogue=Some(crate::types::DialogueSnapshot{pc:self.state.pc,vars:self.vars_for_eval()});
+        }
         self.state.current_interactive_pc = self.state.pc;
         let display = self.make_display_resolved(stmt)?;
         self.history.push(self.state.clone(), display);
@@ -948,6 +961,32 @@ impl<R: Renderer> Engine<R> {
         }
     }
 
+    /// Re-render a recorded dialogue in the selected language without replaying
+    /// commands or substituting the current value of ordinary story variables.
+    pub fn localized_dialogue_history(&self) -> Result<Vec<(Option<String>, String)>, RuntimeError> {
+        self.history.entries().iter().filter_map(|entry| {
+            if !matches!(self.script.get(entry.state.pc),Some(Statement::Dialogue{..})){return None;}
+            Some(self.resolve_recorded_dialogue(&crate::types::DialogueSnapshot{pc:entry.state.pc,vars:entry.state.last_dialogue.as_ref().map(|d|d.vars.clone()).unwrap_or_else(||entry.state.vars.clone())}))
+        }).collect()
+    }
+
+    pub fn last_dialogue_interaction(&self) -> Result<Option<Interaction>,RuntimeError>{
+        self.state.last_dialogue.as_ref().map(|snapshot|self.resolve_recorded_dialogue(snapshot).map(|(character,text)|Interaction::Dialogue{character,text})).transpose()
+    }
+
+    fn resolve_recorded_dialogue(&self,snapshot:&crate::types::DialogueSnapshot)->Result<(Option<String>,String),RuntimeError>{
+            let Some(Statement::Dialogue { character_id, text }) = self.script.get(snapshot.pc) else { return Ok((None,String::new())); };
+            let key = text_to_locale_key(text);
+            let translated = self.translate(&key);
+            let template = if translated == key { text.clone() } else {
+                match rvn_parser::parse_interpolated_str(translated) {
+                    Ok(template) => template,
+                    Err(_) => return Ok((character_id.clone(), translated.to_owned())),
+                }
+            };
+            eval_interpolated(&template, &snapshot.vars).map(|text|(character_id.clone(),text)).map_err(|e|self.eval_err(e,"History translation"))
+    }
+
     /// Valide un dialogue affiché et avance au statement suivant.
     pub fn advance_dialogue(&mut self) -> Result<(), RuntimeError> {
         match self.script.get(self.state.pc) {
@@ -1037,6 +1076,9 @@ impl<R: Renderer> Engine<R> {
         self.state = data.into_game_state();
         self.history.clear();
         self.renderer.restore_screen(&self.state);
+        if matches!(self.current_interaction(),Ok(Some(Interaction::Choice{..}))) {
+            if let Ok(Some(dialogue))=self.last_dialogue_interaction(){self.render_interaction(dialogue);}
+        }
         if let Ok(Some(interaction)) = self.current_interaction() {
             self.render_interaction(interaction);
         }

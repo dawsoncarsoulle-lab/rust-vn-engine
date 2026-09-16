@@ -35,8 +35,11 @@ pub fn transpile_project(graphs: &[GraphDocument]) -> Result<TranspiledScript, S
     for (index, graph) in ordered.iter().enumerate() {
         let mut graph = (*graph).clone();
         graph.characters = if index == 0 { characters.clone() } else { BTreeMap::new() };
-        source.push_str(&transpile(&graph).map_err(|e| format!("Graphe {:?} : {e}", graph.kind))?.source);
-        if matches!(graph.kind, GraphKind::Label { .. }) {
+        let compiled = transpile(&graph).map_err(|e| format!("Graphe {:?} : {e}", graph.kind))?;
+        source.push_str(&compiled.source);
+        // An explicit final jump already leaves this graph. Emitting another
+        // jump after it creates unreachable code and spurious CLI warnings.
+        if matches!(graph.kind, GraphKind::Label { .. }) && !matches!(compiled.ast.last(), Some(Statement::Jump { .. })) {
             source.push_str(&format!("    jump {end_label}\n"));
         }
         source.push('\n');

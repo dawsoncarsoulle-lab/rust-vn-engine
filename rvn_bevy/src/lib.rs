@@ -108,6 +108,16 @@ struct WindowSection {
 mod window_configuration_tests {
     use super::WindowSection;
     #[test]
+    fn typewriter_preference_round_trips_and_legacy_settings_keep_default() {
+        let mut data = rvn_core::persistent::PersistentData::default();
+        data.typewriter = Some(false);
+        let json = serde_json::to_string(&data).unwrap();
+        let restored = serde_json::from_str(&json).unwrap();
+        assert!(!super::settings_from_persistent(&restored, "fr").typewriter);
+        let legacy = serde_json::from_str("{}").unwrap();
+        assert!(super::settings_from_persistent(&legacy, "fr").typewriter);
+    }
+    #[test]
     fn legacy_windows_allow_resize_and_explicit_fixed_windows_remain_supported() {
         let legacy:WindowSection=toml::from_str("width = 1280\nheight = 720\n").unwrap();
         assert!(legacy.resizable.unwrap_or(true));
@@ -468,6 +478,7 @@ fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
                     background_system,
                     background_cover_resize_system,
                     sprite_system,
+                    systems::sprite::resize_sprite_stage,
                     sprite_animation_system,
                     cinematic_system,
                     cinematic_cover_resize_system,
@@ -919,6 +930,7 @@ async fn fetch_text(url: &str) -> Result<String, String> {
 /// that the library does not depend on the old binary entry point.
 fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
+    commands.spawn((systems::sprite::SpriteStage, SpatialBundle::default()));
 }
 
 #[allow(clippy::field_reassign_with_default)]
@@ -942,6 +954,9 @@ fn settings_from_persistent(data: &PersistentData, current_lang: &str) -> Settin
     }
     if let Some(fullscreen) = data.fullscreen {
         settings.fullscreen = fullscreen;
+    }
+    if let Some(typewriter) = data.typewriter {
+        settings.typewriter = typewriter;
     }
     settings
 }

@@ -104,13 +104,6 @@ pub fn stepping_system(
                 });
             }
         }
-    } else if engine.0.is_finished() {
-        vn_events.send(VnCommand::ScriptFinished);
-        next_state.set(VnState::Finished);
-        return;
-    } else {
-        next_state.set(VnState::Finished);
-        return;
     }
 
     let has_anim = pending.iter().any(|cmd| {
@@ -153,11 +146,41 @@ pub fn stepping_system(
 pub fn script_finished_system(
     mut vn_events: EventReader<VnCommand>,
     mut next_state: ResMut<NextState<VnState>>,
+    theme: Res<crate::resources::Theme>,
 ) {
     for cmd in vn_events.read() {
         if matches!(cmd, VnCommand::ScriptFinished) {
             info!("[moteur] script terminé");
-            next_state.set(VnState::Finished);
+            // The last batch (sprite removal, fades, audio) has already completed.
+            // A game with a title screen must remain navigable after its ending.
+            next_state.set(if theme.title_screen.enabled {
+                VnState::TitleScreen
+            } else {
+                VnState::Finished
+            });
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn ending_returns_to_an_enabled_title_screen() {
+        for enabled in [false, true] {
+            let mut app = App::new();
+            let mut theme = crate::resources::Theme::default();
+            theme.title_screen.enabled = enabled;
+            app.insert_resource(theme)
+                .insert_resource(NextState::<VnState>::Unchanged)
+                .add_event::<VnCommand>()
+                .add_systems(Update, script_finished_system);
+            app.world_mut().send_event(VnCommand::ScriptFinished);
+            app.update();
+            let NextState::Pending(actual) = app.world().resource::<NextState<VnState>>() else {
+                panic!("ending did not select a destination");
+            };
+            assert_eq!(*actual, if enabled { VnState::TitleScreen } else { VnState::Finished });
         }
     }
 }

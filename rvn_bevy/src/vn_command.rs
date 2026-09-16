@@ -15,6 +15,8 @@ impl From<&rvn_parser::Hotspot> for ImagemapZone {
 
 #[derive(Event, Debug, Clone)]
 pub enum VnCommand {
+    /// Replace the rendered cast when restoring a complete saved screen.
+    ClearSprites,
     // ── Visuels ───────────────────────────────────────────────────────────────
     SetBackground {
         path: String,

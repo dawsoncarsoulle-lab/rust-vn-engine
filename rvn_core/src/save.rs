@@ -195,6 +195,8 @@ impl From<SaveSprite> for SpriteState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveData {
+    #[serde(default)]
+    pub last_dialogue: Option<crate::types::DialogueSnapshot>,
     pub slot: u32,
     pub label: String,
     pub timestamp: u64,
@@ -216,6 +218,7 @@ pub struct SaveData {
 impl SaveData {
     pub fn from_state(state: &GameState, slot: u32, label: String, script_name: String) -> Self {
         Self {
+            last_dialogue: state.last_dialogue.clone(),
             slot,
             label,
             timestamp: current_unix_timestamp_secs(),
@@ -247,6 +250,7 @@ impl SaveData {
 
     pub fn into_game_state(self) -> GameState {
         GameState {
+            last_dialogue: self.last_dialogue,
             pc: self.pc,
             current_interactive_pc: self.pc,
             background_image: self.background_image,
@@ -719,6 +723,7 @@ mod tests {
 
         GameState {
             pc: 7,
+            last_dialogue: None,
             current_interactive_pc: 7,
             background_image: "plage.png".into(),
             call_stack: vec![3, 5],
@@ -973,6 +978,7 @@ mod tests {
 
         let state = GameState {
             pc: 0,
+            last_dialogue: None,
             current_interactive_pc: 0,
             background_image: "".into(),
             call_stack: vec![],

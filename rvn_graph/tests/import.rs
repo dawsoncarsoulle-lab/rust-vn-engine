@@ -74,6 +74,14 @@ fn legacy_call_load_adds_an_unconnected_continuation() {
 }
 
 #[test]
+fn explicit_final_jump_does_not_generate_an_unreachable_exit() {
+    let script=rvn_parser::parse("label start\n jump finish\nlabel finish\n narrator \"Done\"\n").unwrap();
+    let compiled=transpile_project(&import_script(&script).unwrap()).unwrap();
+    assert!(!compiled.ast.windows(2).any(|pair|matches!((&pair[0],&pair[1]),(Statement::Jump{..},Statement::Jump{..}))));
+    assert_eq!(compiled.source.matches("jump __blueprint_project_end").count(),1);
+}
+
+#[test]
 fn label_and_position_defaults_become_visible_typed_references() {
     let mut g=GraphDocument::new(GraphId::new(1),GraphKind::Label{name:"start".into()});
     let root=g.add_catalog_node(NodeKind::Label,[0.0,0.0]).unwrap();

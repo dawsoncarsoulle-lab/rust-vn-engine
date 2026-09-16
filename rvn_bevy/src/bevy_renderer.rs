@@ -23,6 +23,24 @@ impl BevyRenderer {
     }
 }
 
+#[cfg(test)]
+mod restore_tests {
+    use super::*;
+    #[test]
+    fn restoring_an_empty_cast_discards_previous_visual_and_music_commands() {
+        let mut engine = rvn_core::Engine::new(vec![], BevyRenderer::new(), 10).unwrap();
+        engine.renderer.pending.push(VnCommand::ShowSprite {
+            id: "old_character".into(), emotion: None,
+            position: rvn_parser::Position::Left, transition: Transition::None,
+        });
+        engine.renderer.restore_screen(&engine.state);
+        let commands = engine.renderer.take_pending();
+        assert!(matches!(commands.first(), Some(VnCommand::ClearSprites)));
+        assert!(!commands.iter().any(|cmd| matches!(cmd, VnCommand::ShowSprite {..})));
+        assert!(commands.iter().any(|cmd| matches!(cmd, VnCommand::MusicStop)));
+    }
+}
+
 impl Renderer for BevyRenderer {
     fn set_background(&mut self, path: &str, transition: &Transition) {
         self.pending.push(VnCommand::SetBackground {
@@ -181,6 +199,8 @@ impl Renderer for BevyRenderer {
     }
 
     fn restore_screen(&mut self, state: &GameState) {
+        self.pending.clear();
+        self.pending.push(VnCommand::ClearSprites);
         self.pending.push(VnCommand::SetBackground {
             path: state.background_image.clone(),
             transition: Transition::None,
@@ -214,6 +234,8 @@ impl Renderer for BevyRenderer {
                 file: file.clone(),
                 transition: Transition::None,
             });
+        } else {
+            self.pending.push(VnCommand::MusicStop);
         }
     }
 

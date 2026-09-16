@@ -483,7 +483,8 @@ fn build_desktop_project(project_dir: &Path, cfg: &ProjectConfig, game_name: &st
     println!("Copie fichiers...");
     copy_project_files(project_dir, &dist_dir, &cfg)?;
 
-    let output_binary = dist_dir.join(&game_name);
+    let executable_name = desktop_executable_name(game_name, std::env::consts::OS);
+    let output_binary = dist_dir.join(&executable_name);
     fs::copy(&runtime_binary, &output_binary).with_context(|| {
         format!(
             "unable to copy runtime binary '{}' to '{}'",
@@ -494,7 +495,7 @@ fn build_desktop_project(project_dir: &Path, cfg: &ProjectConfig, game_name: &st
 
     println!("Build terminé.");
     println!("Build terminé : {}/", dist_dir.display());
-    println!("Lancez : ./{}", game_name);
+    println!("Lancez : {}", output_binary.display());
     Ok(())
 }
 
@@ -518,8 +519,26 @@ fn sanitize_game_name(name: &str) -> String {
 }
 
 fn detect_platform() -> Result<String> {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
+    desktop_platform(std::env::consts::OS, std::env::consts::ARCH)
+}
+
+fn desktop_executable_name(name: &str, os: &str) -> String {
+    if os == "windows" { format!("{name}.exe") } else { name.into() }
+}
+
+#[test]
+fn desktop_targets_and_executable_names() {
+    assert_eq!(desktop_platform("windows", "x86_64").unwrap(), "windows-x64");
+    assert_eq!(desktop_platform("linux", "x86_64").unwrap(), "linux-x64");
+    assert_eq!(desktop_executable_name("My_game", "windows"), "My_game.exe");
+    assert_eq!(desktop_executable_name("My_game", "linux"), "My_game");
+    assert!(desktop_platform("windows", "aarch64").is_err());
+}
+
+fn desktop_platform(os: &str, arch: &str) -> Result<String> {
+    match (os, arch) {
         ("linux", "x86_64") => Ok("linux-x64".to_string()),
+        ("windows", "x86_64") => Ok("windows-x64".to_string()),
         (os, arch) => anyhow::bail!("unsupported build platform: {os}-{arch}"),
     }
 }
@@ -680,6 +699,7 @@ fn run_wasm_bindgen(wasm_input: &Path, dist_dir: &Path) -> Result<()> {
 }
 
 fn copy_web_project_files(project_dir: &Path, dist_dir: &Path, cfg: &ProjectConfig) -> Result<()> {
+    copy_project_notices(project_dir, dist_dir)?;
     copy_file_relative(project_dir, dist_dir, Path::new("rvn.toml"))?;
     copy_custom_menus(project_dir, dist_dir)?;
     copy_optional_file_relative(project_dir, dist_dir, Path::new(&cfg.paths.theme))?;
@@ -964,6 +984,7 @@ fn html_escape(value: &str) -> String {
 
 fn copy_project_files(project_dir: &Path, dist_dir: &Path, cfg: &ProjectConfig) -> Result<()> {
     let data_dir = dist_dir.join("data");
+    copy_project_notices(project_dir, &data_dir)?;
     copy_file_relative(project_dir, &data_dir, Path::new("rvn.toml"))?;
     copy_custom_menus(project_dir, &data_dir)?;
     copy_optional_file_relative(project_dir, &data_dir, Path::new(&cfg.paths.theme))?;
@@ -983,6 +1004,13 @@ fn copy_project_files(project_dir: &Path, dist_dir: &Path, cfg: &ProjectConfig) 
             cfg.paths.saves
         )
     })?;
+    Ok(())
+}
+
+fn copy_project_notices(project_dir: &Path, dist_dir: &Path) -> Result<()> {
+    for name in ["CREDITS.md", "LICENSE", "LICENSE.md", "LICENSE.txt"] {
+        copy_optional_file_relative(project_dir, dist_dir, Path::new(name))?;
+    }
     Ok(())
 }
 
@@ -1012,6 +1040,9 @@ mod distribution_regressions {
         fs::write(root.join("rvn.toml"),"[paths]\nmenus='menus.rvnui'\n").unwrap();
         let menu=rvn_ui::Document::defaults().to_json().unwrap();
         fs::write(root.join("menus.rvnui"),&menu).unwrap();
+        fs::write(root.join("CREDITS.md"),"Attribution: CC BY artist").unwrap();
+        copy_project_notices(&root,&dist).unwrap();
+        assert_eq!(fs::read_to_string(dist.join("CREDITS.md")).unwrap(),"Attribution: CC BY artist");
         copy_custom_menus(&root,&dist).unwrap();
         assert_eq!(fs::read_to_string(dist.join("menus.rvnui")).unwrap(),menu);
         write_web_script_manifest(&root,&dist,Path::new("project.generated.rvn")).unwrap();

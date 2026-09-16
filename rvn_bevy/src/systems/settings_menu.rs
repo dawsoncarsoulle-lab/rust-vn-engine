@@ -476,6 +476,7 @@ pub fn settings_menu_interaction_system(
                 persistent.data.text_speed = Some(settings.text_speed);
                 persistent.data.auto_speed = Some(settings.auto_speed);
                 persistent.data.fullscreen = Some(settings.fullscreen);
+                persistent.data.typewriter = Some(settings.typewriter);
                 if let Err(e) = persistent.manager.save(&persistent.data) {
                     error!("[settings] impossible de sauvegarder persistent.json : {e}");
                 }
@@ -556,6 +557,8 @@ pub fn apply_settings_to_runtime_system(
     mut vn_events: EventWriter<VnCommand>,
     mut windows: Query<&mut Window>,
     mut dialogue_text_query: Query<&mut Text, With<DialogueText>>,
+    mut history: ResMut<crate::resources::DialogueHistory>,
+    registry: Res<crate::resources::CharacterRegistry>,
 ) {
     if !settings.is_changed() {
         return;
@@ -567,7 +570,16 @@ pub fn apply_settings_to_runtime_system(
     if let Some(locale) = &mut engine.0.locale {
         if locale.current_lang() != settings.language {
             match locale.set_language(&settings.language) {
-                Ok(()) => refresh_current_interaction(&mut engine, &mut vn_events),
+                Ok(()) => {
+                    if let Ok(lines)=engine.0.localized_dialogue_history() {
+                        history.clear();
+                        for (character,text) in &lines { history.add(character.as_deref().map(|id|registry.display_name(id)).unwrap_or("").into(),rvn_core::parse_text_tags(text).map(|rich|rich.plain_text()).unwrap_or_else(|_|text.clone())); }
+                        if matches!(engine.0.current_interaction(),Ok(Some(rvn_core::Interaction::Choice{..}))) {
+                            if let Ok(Some(rvn_core::Interaction::Dialogue{character,text}))=engine.0.last_dialogue_interaction() { vn_events.send(VnCommand::ShowDialogue{character,text}); }
+                        }
+                    }
+                    refresh_current_interaction(&mut engine, &mut vn_events);
+                },
                 Err(e) => {
                     error!(
                         "[settings] impossible de charger la langue `{}` : {}",

@@ -740,6 +740,26 @@ pub fn title_interaction_system(
                     }
 
                     TitleButton::NewGame => {
+                        // Returning here after an ending must start a fresh story,
+                        // not resume the finished instruction pointer.
+                        if engine.0.is_finished() {
+                            let Ok(mut fresh) = engine.0.fresh(crate::bevy_renderer::BevyRenderer::new(), 64) else {
+                                error!("Impossible de recommencer la partie");
+                                continue;
+                            };
+                            fresh.locale = engine.0.locale.take();
+                            fresh.persistent_vars = engine.0.persistent_vars.clone();
+                            for (id, sprite) in &engine.0.state.sprites {
+                                if sprite.visible {
+                                    vn_events.send(VnCommand::HideSprite { id: id.clone(), transition: rvn_parser::Transition::None });
+                                }
+                            }
+                            engine.0 = fresh;
+                            *render_state = VnRenderState::default();
+                            *tw_state = TypewriterState::default();
+                            imagemap_state.clear();
+                            history.clear();
+                        }
                         info!("[titre] nouvelle partie");
                         next_state.set(VnState::Stepping);
                     }

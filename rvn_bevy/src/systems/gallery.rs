@@ -22,6 +22,7 @@ pub fn spawn_gallery_overlay(
     persistent: Res<PersistentDataResource>,
     cg_registry: Res<CgAssetRegistry>,
     state: Res<GalleryState>,
+    engine: Res<crate::resources::VnEngine>,
     query: Query<Entity, With<GalleryOverlay>>,
 ) {
     if !query.is_empty() {
@@ -56,7 +57,7 @@ pub fn spawn_gallery_overlay(
         ))
         .with_children(|parent| {
             parent.spawn(TextBundle::from_section(
-                "Galerie",
+                engine.0.locale.as_ref().map(|l| l.translate("Galerie des souvenirs")).unwrap_or("Galerie des souvenirs"),
                 TextStyle {
                     font_size: 48.0,
                     color: Color::WHITE,
@@ -102,7 +103,7 @@ pub fn spawn_gallery_overlay(
                 }
             }
 
-            spawn_gallery_button(parent, "Retour", GalleryButton::Back);
+            spawn_gallery_button(parent, engine.0.locale.as_ref().map(|l| l.translate("Retour")).unwrap_or("Retour"), GalleryButton::Back);
         });
 }
 
@@ -305,7 +306,18 @@ pub fn gallery_interaction_system(
     overlay_query: Query<Entity, With<GalleryOverlay>>,
     mut state: ResMut<GalleryState>,
     mut next_state: ResMut<NextState<VnState>>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut menu: ResMut<crate::resources::MenuState>,
 ) {
+    if keys.just_pressed(KeyCode::Escape) {
+        keys.clear_just_pressed(KeyCode::Escape);
+        if state.selected_cg.take().is_some() {
+            for entity in &overlay_query { commands.entity(entity).despawn_recursive(); }
+        } else {
+            next_state.set(menu.return_to.take().unwrap_or(VnState::TitleScreen));
+        }
+        return;
+    }
     for (interaction, button, mut bg_color,colors) in interaction_query.iter_mut() {
         match interaction {
             Interaction::Hovered => {
@@ -324,7 +336,7 @@ pub fn gallery_interaction_system(
                         }
                     }
                     GalleryButton::Back => {
-                        next_state.set(VnState::TitleScreen);
+                        next_state.set(menu.return_to.take().unwrap_or(VnState::TitleScreen));
                     }
                     GalleryButton::ShowCg => {
                         state.view = GalleryView::Cg;

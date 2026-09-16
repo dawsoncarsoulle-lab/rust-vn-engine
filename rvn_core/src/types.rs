@@ -79,7 +79,15 @@ pub struct CinematicState {
 // ─── GAME STATE ──────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct DialogueSnapshot {
+    pub pc: usize,
+    pub vars: HashMap<String, Value>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GameState {
+    #[serde(default)]
+    pub last_dialogue: Option<DialogueSnapshot>,
     pub pc: usize,
     pub current_interactive_pc: usize,
     pub background_image: String,

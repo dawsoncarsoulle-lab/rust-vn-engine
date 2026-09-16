@@ -26,7 +26,10 @@ pub(super) fn drive(qa:Res<Qa>,engine:Res<VnEngine>,state:Res<State<VnState>>,
     let mut capture=|name:&str|shots.save_screenshot_to_disk(window,qa.dir.join(format!("{name}.png"))).unwrap();
     match phase.0 {
         0=>{
-            assert_eq!(menus.document().unwrap().pages.len(),11);
+            let document=menus.document().unwrap();
+            for role in [rvn_ui::PageRole::Title,rvn_ui::PageRole::Pause,rvn_ui::PageRole::Save,rvn_ui::PageRole::Load,rvn_ui::PageRole::Settings,rvn_ui::PageRole::Gallery,rvn_ui::PageRole::History,rvn_ui::PageRole::Confirm,rvn_ui::PageRole::Dialogue,rvn_ui::PageRole::Choices,rvn_ui::PageRole::QuickActions]{
+                assert!(document.pages.iter().any(|p|p.role==Some(role)),"Missing required page {role:?}");
+            }
             phase.3=std::fs::read(paths.root.join("menus.rvnui")).unwrap();
             phase.2=engine.0.state.pc;
             *initial_window=format!("{} × {} logical pixels, scale {}",dimensions.width(),dimensions.height(),dimensions.scale_factor());
@@ -36,7 +39,8 @@ pub(super) fn drive(qa:Res<Qa>,engine:Res<VnEngine>,state:Res<State<VnState>>,
             let manager=rvn_core::save::SaveManager::new(&paths.saves,1000).unwrap();
             for (slot,title) in [(1,"Exemple — Première sauvegarde"),(2,"Exemple — Un titre assez long pour vérifier les accents et la disposition")]{
                 engine.0.save(&manager,slot,title.into(),"preview.rvn".into()).unwrap();
-                assert_eq!(manager.load(slot).unwrap().pc,phase.2);
+                // Saves resume at the last interaction, not the next instruction.
+                assert_eq!(manager.load(slot).unwrap().pc,engine.0.state.current_interactive_pc);
             }
             capture("title");
         },
