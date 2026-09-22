@@ -34,6 +34,10 @@ pub enum Interaction {
 // ─── FLATTEN AST ─────────────────────────────────────────────────────────────
 
 pub fn flatten_ast(script: &mut Script, extra: &mut Vec<Statement>, counter: &mut usize) {
+    flatten_with_returns(script, extra, counter, &mut Vec::new());
+}
+
+fn flatten_with_returns(script: &mut Script, extra: &mut Vec<Statement>, counter: &mut usize, returns: &mut Vec<usize>) {
     for stmt in script.iter_mut() {
         match stmt {
             Statement::Use { .. } | Statement::Init { .. } => {}
@@ -42,8 +46,8 @@ pub fn flatten_ast(script: &mut Script, extra: &mut Vec<Statement>, counter: &mu
                 else_branch,
                 ..
             } => {
-                flatten_ast(then_branch, extra, counter);
-                flatten_ast(else_branch, extra, counter);
+                flatten_with_returns(then_branch, extra, counter, returns);
+                flatten_with_returns(else_branch, extra, counter, returns);
                 if !then_branch.is_empty() {
                     *counter += 1;
                     let target = format!("__internal_then_{}", counter);
@@ -53,6 +57,7 @@ pub fn flatten_ast(script: &mut Script, extra: &mut Vec<Statement>, counter: &mu
                         name: target.clone(),
                     });
                     extra.extend(block);
+                    returns.push(extra.len() - 1);
                     *then_branch = vec![Statement::Call { target }];
                 }
                 if !else_branch.is_empty() {
@@ -64,12 +69,13 @@ pub fn flatten_ast(script: &mut Script, extra: &mut Vec<Statement>, counter: &mu
                         name: target.clone(),
                     });
                     extra.extend(block);
+                    returns.push(extra.len() - 1);
                     *else_branch = vec![Statement::Call { target }];
                 }
             }
             Statement::Choice { options } => {
                 for opt in options.iter_mut() {
-                    flatten_ast(&mut opt.body, extra, counter);
+                    flatten_with_returns(&mut opt.body, extra, counter, returns);
                     if !opt.body.is_empty() {
                         *counter += 1;
                         let target = format!("__internal_choice_{}", counter);
@@ -79,13 +85,14 @@ pub fn flatten_ast(script: &mut Script, extra: &mut Vec<Statement>, counter: &mu
                             name: target.clone(),
                         });
                         extra.extend(block);
+                        returns.push(extra.len() - 1);
                         opt.body = vec![Statement::Call { target }];
                     }
                 }
             }
             Statement::Imagemap { hotspots, .. } => {
                 for hs in hotspots.iter_mut() {
-                    flatten_ast(&mut hs.body, extra, counter);
+                    flatten_with_returns(&mut hs.body, extra, counter, returns);
                     if !hs.body.is_empty() {
                         *counter += 1;
                         let target = format!("__internal_hotspot_{}", counter);
@@ -95,6 +102,7 @@ pub fn flatten_ast(script: &mut Script, extra: &mut Vec<Statement>, counter: &mu
                             name: target.clone(),
                         });
                         extra.extend(block);
+                        returns.push(extra.len() - 1);
                         hs.body = vec![Statement::Call { target }];
                     }
                 }
@@ -178,6 +186,9 @@ pub struct InputState {
 pub struct Engine<R: Renderer> {
     pub script: Script,
     label_table: HashMap<String, usize>,
+    // Lowering adds calls for branches. Their synthetic returns pop one frame;
+    // an authored return must unwind those frames and return to the real caller.
+    branch_returns: std::collections::HashSet<usize>,
     pub state: GameState,
     pub renderer: R,
     pub history: RollbackHistory,
@@ -200,27 +211,29 @@ impl<R: Renderer> Engine<R> {
     ) -> Result<Self, RuntimeError> {
         let mut extra = Vec::new();
         let mut counter = 0;
-        flatten_ast(&mut script, &mut extra, &mut counter);
+        let mut returns = Vec::new();
+        flatten_with_returns(&mut script, &mut extra, &mut counter, &mut returns);
 
         script.push(Statement::Jump {
             target: "__script_end".to_string(),
         });
+        let branch_returns = returns.into_iter().map(|pc| pc + script.len()).collect();
         script.extend(extra);
         script.push(Statement::Label {
             name: "__script_end".to_string(),
         });
 
-        Self::from_prepared_script(script, renderer, rollback_depth)
+        Self::from_prepared_script(script, renderer, rollback_depth, branch_returns)
     }
 
     /// Start a clean game from this engine's already lowered script. Passing
     /// `self.script` back through `new` would lower choice calls twice and reuse
     /// internal labels, creating recursive calls instead of the original branch.
     pub fn fresh(&self, renderer:R, rollback_depth:usize)->Result<Self,RuntimeError>{
-        Self::from_prepared_script(self.script.clone(),renderer,rollback_depth)
+        Self::from_prepared_script(self.script.clone(),renderer,rollback_depth,self.branch_returns.clone())
     }
 
-    fn from_prepared_script(script:Script,renderer:R,rollback_depth:usize)->Result<Self,RuntimeError>{
+    fn from_prepared_script(script:Script,renderer:R,rollback_depth:usize,branch_returns:std::collections::HashSet<usize>)->Result<Self,RuntimeError>{
 
         let label_table = script
             .iter()
@@ -237,6 +250,7 @@ impl<R: Renderer> Engine<R> {
         let mut engine = Self {
             script,
             label_table,
+            branch_returns,
             state: GameState {
                 last_dialogue: None,
                 pc: 0,
@@ -661,6 +675,13 @@ impl<R: Renderer> Engine<R> {
                 self.state.pc = self.resolve(&target)?;
             }
             Statement::Return => {
+                if !self.branch_returns.contains(&self.state.pc) {
+                    while self.state.call_stack.last().is_some_and(|pc| pc.checked_sub(1)
+                        .and_then(|caller| self.script.get(caller))
+                        .is_some_and(|s| matches!(s, Statement::If { .. } | Statement::Choice { .. } | Statement::Imagemap { .. }))) {
+                        self.state.call_stack.pop();
+                    }
+                }
                 self.state.pc = self.state.call_stack.pop().ok_or(RuntimeError::no_stmt(
                     crate::error::RuntimeErrorKind::ReturnWithoutCall,
                     self.state.pc,

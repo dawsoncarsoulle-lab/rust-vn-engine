@@ -126,6 +126,29 @@ mod tests {
         Engine::new(parse(src).expect("parse failed"), Mock::default(), 32).unwrap()
     }
 
+    #[test]
+    fn explicit_return_in_choice_resumes_real_caller_for_both_options() {
+        for option in 0..2 {
+            let original = engine("label start\ncall scene_1\n\"after call\"\njump done\nlabel scene_1\nchoice {\n\"A\" => { if true { return } }\n\"B\" => { return }\n}\n\"must not run\"\nlabel done\n");
+            // A new game must retain the distinction between authored and
+            // synthetic returns, without changing serialized call-stack data.
+            let mut e = original.fresh(Mock::default(), 32).unwrap();
+            assert!(matches!(e.step_until_interaction().unwrap(), Some(Interaction::Choice { .. })));
+            e.submit_selection(option).unwrap();
+            assert!(matches!(e.step_until_interaction().unwrap(), Some(Interaction::Dialogue { text, .. }) if text == "after call"));
+            assert!(e.state.call_stack.is_empty());
+            e.advance_dialogue().unwrap();
+            assert!(e.step_until_interaction().unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn ordinary_branch_completion_and_nested_real_calls_keep_their_continuations() {
+        let mut e = engine("label start\ncall scene_1\n\"finished\"\njump done\nlabel scene_1\nif true { call inner }\nreturn\nlabel inner\nif true { return }\n\"must not run\"\nlabel done\n");
+        assert!(matches!(e.step_until_interaction().unwrap(), Some(Interaction::Dialogue { text, .. }) if text == "finished"));
+        assert!(e.state.call_stack.is_empty());
+    }
+
     fn step(e: &mut Engine<Mock>) {
         e.step().expect("step error");
     }
