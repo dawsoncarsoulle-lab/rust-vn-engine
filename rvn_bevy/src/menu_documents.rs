@@ -277,7 +277,7 @@ fn scroll_lists(
     if delta == 0.0 {
         return;
     }
-    let Some(cursor) = windows.single().cursor_position() else {
+    let Some(cursor) = windows.get_single().ok().and_then(Window::cursor_position) else {
         return;
     };
     let contains=|node:&Node,transform:&GlobalTransform|{let origin=transform.translation().truncate()-node.size()*0.5;cursor.x>=origin.x&&cursor.y>=origin.y&&cursor.x<origin.x+node.size().x&&cursor.y<origin.y+node.size().y};
@@ -464,7 +464,7 @@ fn render(
         menus.key.clear();
         return;
     }
-    let window = ctx.windows.single();
+    let Ok(window) = ctx.windows.get_single() else { return; };
     let size = [window.width(), window.height()];
     let doc=menus.session.present(menus.doc.as_ref().unwrap());
     let image_state:Vec<_>=doc.resource_paths().into_iter().filter_map(|path|assets.get_handle::<Image>(path).and_then(|handle|ctx.images.get(&handle).map(|image|(handle.id(),image.size())))).collect();

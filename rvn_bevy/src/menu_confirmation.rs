@@ -98,7 +98,8 @@ pub(super) fn update(
         for root in &roots{commands.entity(root).despawn_recursive();}*previous=None;*focus=None;return;
     }
     doc=menus.session.present(&doc);
-    let window=ctx.windows.single();let size=[window.width(),window.height()];let key=format!("{operation:?}/{action:?}/{size:?}/{}",serde_json::to_string(&doc.pages[index]).unwrap_or_default());let key=format!("{key}:fonts={}",ctx.fonts.len());if previous.as_ref()==Some(&key){return;}*previous=Some(key);
+    let Ok(window)=ctx.windows.get_single() else { return; };
+    let size=[window.width(),window.height()];let key=format!("{operation:?}/{action:?}/{size:?}/{}",serde_json::to_string(&doc.pages[index]).unwrap_or_default());let key=format!("{key}:fonts={}",ctx.fonts.len());if previous.as_ref()==Some(&key){return;}*previous=Some(key);
     for root in &roots{commands.entity(root).despawn_recursive();}
     let root=commands.spawn((ConfirmationRoot,NodeBundle{style:Style{position_type:PositionType::Absolute,width:Val::Percent(100.0),height:Val::Percent(100.0),..default()},background_color:color(doc.pages[index].background).into(),z_index:ZIndex::Global(4000),focus_policy:bevy::ui::FocusPolicy::Block,..default()})).id();
     let title=if let Some((slot,mode))=operation{if slot==0{translated(&ctx,"Charger la sauvegarde rapide et remplacer la partie en cours ?")}else if mode==SaveMenuMode::Delete{translated(&ctx,"Supprimer définitivement la sauvegarde [slot] ?").replace("[slot]",&slot.to_string())}else if mode==SaveMenuMode::Save{translated(&ctx,"Remplacer la sauvegarde [slot] ?").replace("[slot]",&slot.to_string())}else{translated(&ctx,"Charger la sauvegarde [slot] et remplacer la partie en cours ?").replace("[slot]",&slot.to_string())}}else if matches!(action,Some((Action::Continue,_,_))){translated(&ctx,"Continuer la sauvegarde et remplacer la partie en cours ?")}else{translated(&ctx,"Démarrer une nouvelle partie et remplacer la partie en cours ?")};

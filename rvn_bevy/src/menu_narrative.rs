@@ -1,5 +1,8 @@
 //! Custom dialogue presentation reuses the engine's already parsed typing state.
 //! The original widgets remain hidden data consumers, never a second visible UI.
+#[cfg(test)]
+#[path="menu_window_tests.rs"]
+mod window_tests;
 use super::*;
 use crate::components::{CharacterNameText,DialogueBox};
 use crate::components::{ChoiceButton,ChoiceContainer};
@@ -11,7 +14,9 @@ fn page_event(menus:&mut Menus,previous:&mut Option<String>,next:Option<String>)
 pub(super) fn render_quick_actions(mut commands:Commands,mut menus:ResMut<Menus>,ctx:Context,assets:Res<AssetServer>,roots:Query<Entity,With<QuickActionsRoot>>,mut last:Local<String>,mut previous:Local<Option<String>>){
     let index=menus.doc.as_ref().and_then(|d|d.pages.iter().position(|p|p.role==Some(rvn_ui::PageRole::QuickActions)));
     if index.is_none()||*ctx.state.get()!=VnState::Waiting||menus.page.is_some(){page_event(&mut menus,&mut previous,None);for root in &roots{commands.entity(root).despawn_recursive();}last.clear();return;}
-    let doc=menus.session.present(menus.doc.as_ref().unwrap());let index=index.unwrap();let window=ctx.windows.single();let size=[window.width(),window.height()];
+    // Window destruction can precede the last Update during application exit.
+    let Ok(window)=ctx.windows.get_single() else { return; };
+    let doc=menus.session.present(menus.doc.as_ref().unwrap());let index=index.unwrap();let size=[window.width(),window.height()];
     page_event(&mut menus,&mut previous,Some(doc.pages[index].id.clone()));
     let key=format!("{size:?}:{}",serde_json::to_string(&doc.pages[index]).unwrap_or_default());let key=format!("{key}:fonts={}:lang={}",ctx.fonts.len(),ctx.engine.0.locale.as_ref().map(|l|l.current_lang()).unwrap_or(""));if *last==key{return;}*last=key;
     for root in &roots{commands.entity(root).despawn_recursive();}
@@ -29,7 +34,8 @@ pub(super) fn render_choices(mut commands:Commands,mut menus:ResMut<Menus>,ctx:C
     let index=menus.doc.as_ref().and_then(|d|d.pages.iter().position(|p|p.role==Some(rvn_ui::PageRole::Choices)));
     for mut visibility in &mut original{*visibility=if index.is_some(){Visibility::Hidden}else{Visibility::Inherited};}
     if index.is_none()||state.choice_options.is_empty(){page_event(&mut menus,&mut previous,None);for root in &roots{commands.entity(root).despawn_recursive();}last.clear();return;}
-    let doc=menus.session.present(menus.doc.as_ref().unwrap());let index=index.unwrap();let window=ctx.windows.single();let size=[window.width(),window.height()];
+    let Ok(window)=ctx.windows.get_single() else { return; };
+    let doc=menus.session.present(menus.doc.as_ref().unwrap());let index=index.unwrap();let size=[window.width(),window.height()];
     page_event(&mut menus,&mut previous,Some(doc.pages[index].id.clone()));
     let key=format!("{size:?}:{:?}:{}",state.choice_options,serde_json::to_string(&doc.pages[index]).unwrap_or_default());let key=format!("{key}:fonts={}",ctx.fonts.len());if *last==key{return;}*last=key;
     for root in &roots{commands.entity(root).despawn_recursive();}
@@ -107,7 +113,8 @@ pub(super) fn render_narrative(
     for (_,mut visibility) in &mut original{*visibility=if active||!in_story{Visibility::Hidden}else{Visibility::Inherited};}
     if !active{page_event(&mut menus,&mut previous,None);for root in &roots{commands.entity(root).despawn_recursive();}last.clear();return;}
     let name=names.iter().next().map(|t|t.sections.iter().map(|s|s.value.as_str()).collect::<String>()).unwrap_or_default();
-    let window=ctx.windows.single();let size=[window.width(),window.height()];
+    let Ok(window)=ctx.windows.get_single() else { return; };
+    let size=[window.width(),window.height()];
     let doc=menus.session.present(menus.doc.as_ref().unwrap());let index=role.unwrap();
     page_event(&mut menus,&mut previous,Some(doc.pages[index].id.clone()));
     let key=format!("{:?}:{size:?}:{name}:{}:{}",menus.modified,ctx.fonts.len(),serde_json::to_string(&doc.pages[index]).unwrap_or_default());
