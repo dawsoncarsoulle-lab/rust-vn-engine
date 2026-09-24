@@ -1,0 +1,194 @@
+{
+  "schema_version": 2,
+  "graph_id": 1,
+  "kind": {
+    "label": {
+      "name": "start"
+    }
+  },
+  "nodes": {
+    "1": {
+      "id": 1,
+      "kind": "label",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "title_override": null,
+      "properties": {
+        "label": {
+          "type": "string",
+          "value": ""
+        }
+      },
+      "pins": [
+        1
+      ]
+    },
+    "2": {
+      "id": 2,
+      "kind": "dialogue",
+      "position": [
+        430.0,
+        0.0
+      ],
+      "title_override": null,
+      "properties": {},
+      "pins": [
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "3": {
+      "id": 3,
+      "kind": "character_value",
+      "position": [
+        195.0,
+        112.0
+      ],
+      "title_override": null,
+      "properties": {
+        "character": {
+          "type": "string",
+          "value": "narrator"
+        },
+        "emotion": {
+          "type": "string",
+          "value": ""
+        }
+      },
+      "pins": [
+        6,
+        7
+      ]
+    },
+    "4": {
+      "id": 4,
+      "kind": "text_value",
+      "position": [
+        195.0,
+        208.0
+      ],
+      "title_override": null,
+      "properties": {
+        "value": {
+          "type": "string",
+          "value": "Votre histoire commence ici."
+        }
+      },
+      "pins": [
+        8
+      ]
+    }
+  },
+  "pins": {
+    "1": {
+      "id": 1,
+      "node": 1,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "2": {
+      "id": 2,
+      "node": 2,
+      "key": "exec_in",
+      "label": "",
+      "direction": "input",
+      "value_type": "execution",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "3": {
+      "id": 3,
+      "node": 2,
+      "key": "character",
+      "label": "Personnage",
+      "direction": "input",
+      "value_type": "character",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "4": {
+      "id": 4,
+      "node": 2,
+      "key": "text",
+      "label": "Texte",
+      "direction": "input",
+      "value_type": "interpolated_text",
+      "cardinality": "one",
+      "default_value": null
+    },
+    "5": {
+      "id": 5,
+      "node": 2,
+      "key": "exec_out",
+      "label": "",
+      "direction": "output",
+      "value_type": "execution",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "6": {
+      "id": 6,
+      "node": 3,
+      "key": "sprite",
+      "label": "Sprite",
+      "direction": "input",
+      "value_type": {
+        "asset": "sprite"
+      },
+      "cardinality": "one",
+      "default_value": null
+    },
+    "7": {
+      "id": 7,
+      "node": 3,
+      "key": "value",
+      "label": "Personnage",
+      "direction": "output",
+      "value_type": "character",
+      "cardinality": "many",
+      "default_value": null
+    },
+    "8": {
+      "id": 8,
+      "node": 4,
+      "key": "value",
+      "label": "",
+      "direction": "output",
+      "value_type": "interpolated_text",
+      "cardinality": "many",
+      "default_value": null
+    }
+  },
+  "edges": {
+    "1": {
+      "id": 1,
+      "output": 1,
+      "input": 2
+    },
+    "2": {
+      "id": 2,
+      "output": 7,
+      "input": 3
+    },
+    "3": {
+      "id": 3,
+      "output": 8,
+      "input": 4
+    }
+  },
+  "variables": {},
+  "characters": {
+    "narrator": ""
+  },
+  "next_node_id": 5,
+  "next_pin_id": 9,
+  "next_edge_id": 4
+}

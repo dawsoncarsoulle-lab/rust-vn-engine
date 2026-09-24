@@ -1,0 +1,9 @@
+// Minimal text-only starter. Add your own licensed media when ready.
+init {
+    character.create("narrator", "")
+}
+
+label start
+    narrator "Welcome to your story."
+    narrator "Edit scripts/main.rvn to write the next scene."
+    return

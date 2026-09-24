@@ -1,0 +1,6 @@
+init {
+    character.create("narrator", "")
+}
+label start
+    narrator.hide()
+    narrator "Votre histoire commence ici."

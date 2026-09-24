@@ -57,7 +57,7 @@ The engine is available under [MIT](LICENSE-MIT). Existing MIT OR Apache-2.0 gra
 
 You may use the engine in free or paid games without rust-VN royalties. Your own stories and assets do not become MIT merely because the game uses this engine. Preserve applicable runtime/dependency notices and obtain rights for all included media.
 
-Historical demo assets are still undergoing provenance review. Do not assume the source-code license grants rights to every image, font or audio file. Publication/redistribution of those assets must wait for documented permission.
+Legacy test images, audio and media-bearing demo archives were excluded from this public history. The CLI includes a text-only starter; DejaVu Sans is distributed with its own license. See [public source boundary](PUBLICATION.md). User-provided media must have their own redistribution permissions.
 
 ## Contributions and bug reports
 

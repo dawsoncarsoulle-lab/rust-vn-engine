@@ -400,8 +400,27 @@ mod tests {
         assert!(d.validate().is_err());
     }
     #[test]
-    fn imports_real_theme_and_reports_unconverted_fields() {
-        let source = include_str!("../../rvn_cli/template/default/theme.toml");
+    fn imports_theme_and_reports_unconverted_fields() {
+        // Synthetic paths exercise import semantics without redistributing demo media.
+        let source = r##"
+[textbox]
+image_path = "ui/textbox2.png"
+[text.dialogue]
+font_size = 22.0
+[choice]
+number_color = "#FFFFFF"
+[title_screen]
+enabled = true
+music = "music/test.ogg"
+[title_screen.background]
+path = "backgrounds/title_forest.png"
+mode = "cover"
+[title_screen.buttons]
+width = 304.0
+font_size = 22.0
+[title_screen.buttons.labels]
+settings = "Paramètres"
+"##;
         let report = Document::import_theme_report(source).unwrap();
         let d = report.document;
         assert_eq!(d.reference, [1280.0, 720.0]);

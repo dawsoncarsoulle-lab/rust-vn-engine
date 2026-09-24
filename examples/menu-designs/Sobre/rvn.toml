@@ -1,0 +1,13 @@
+[project]
+title = "Sobre"
+main_script = "project.generated.rvn"
+start_label = "start"
+
+[window]
+width = 1280
+height = 720
+
+[paths]
+assets = "assets"
+locales = "locales"
+saves = "saves"

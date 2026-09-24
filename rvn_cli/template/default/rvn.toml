@@ -1,0 +1,14 @@
+[project]
+title = "My story"
+main_script = "scripts/main.rvn"
+start_label = "start"
+
+[window]
+width = 1280
+height = 720
+
+[paths]
+assets = "assets"
+locales = "locales"
+theme = "theme.toml"
+saves = "saves"
