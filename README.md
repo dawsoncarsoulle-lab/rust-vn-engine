@@ -53,7 +53,7 @@ Known reports still under investigation include typewriter behaviour after loadi
 
 ## License and commercial games
 
-The engine is available under [MIT](LICENSE-MIT). Existing MIT OR Apache-2.0 grants remain valid; [Apache-2.0](LICENSE-APACHE) is retained for previously dual-licensed code. Third-party components and media keep their own licenses.
+The engine is available under [MIT](LICENSE-MIT). Existing MIT OR Apache-2.0 grants remain valid; [Apache-2.0](docs/licenses/Apache-2.0.txt) is retained for previously dual-licensed code. Third-party components and media keep their own licenses.
 
 You may use the engine in free or paid games without rust-VN royalties. Your own stories and assets do not become MIT merely because the game uses this engine. Preserve applicable runtime/dependency notices and obtain rights for all included media.
 
