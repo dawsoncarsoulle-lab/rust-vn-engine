@@ -1040,6 +1040,10 @@ mod distribution_regressions {
                     include_dir::DirEntry::Dir(child) => visit(child),
                     include_dir::DirEntry::File(file) => {
                         let path = file.path().to_string_lossy();
+                        if file.path().file_name().and_then(|name| name.to_str()) == Some(".gitkeep") {
+                            assert!(file.contents().is_empty(), "{path} must only preserve an empty directory");
+                            continue;
+                        }
                         assert!(!path.starts_with("assets/sprites/eileen/"), "{path}");
                         assert!(!path.starts_with("assets/music/"), "{path}");
                         if path.ends_with(".rvn") || path.ends_with(".toml") {
