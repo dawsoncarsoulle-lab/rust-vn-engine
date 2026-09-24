@@ -3,63 +3,128 @@ use rvn_parser::{BinOpKind, Expr, Statement, Transition};
 
 #[test]
 fn declared_character_uses_connected_sprite_and_preserves_display_name() {
-    let mut graph = GraphDocument::new(GraphId::new(900), GraphKind::Label { name: "start".into() });
-    graph.characters.insert("alice".into(), "Alice Lemaire".into());
+    let mut graph = GraphDocument::new(
+        GraphId::new(900),
+        GraphKind::Label {
+            name: "start".into(),
+        },
+    );
+    graph
+        .characters
+        .insert("alice".into(), "Alice Lemaire".into());
     let root = add(&mut graph, NodeKind::Label);
     let character = add(&mut graph, NodeKind::CharacterValue);
     let image = add(&mut graph, NodeKind::SpriteAsset);
     let show = add(&mut graph, NodeKind::SpriteShow);
-    graph.set_property(character, "character", PropertyValue::String("alice".into())).unwrap();
-    graph.set_property(image, "path", PropertyValue::String("assets/images/sprites/happy.png".into())).unwrap();
+    graph
+        .set_property(
+            character,
+            "character",
+            PropertyValue::String("alice".into()),
+        )
+        .unwrap();
+    graph
+        .set_property(
+            image,
+            "path",
+            PropertyValue::String("assets/images/sprites/happy.png".into()),
+        )
+        .unwrap();
     connect(&mut graph, root, "exec_out", show, "exec_in");
     connect(&mut graph, image, "value", character, "sprite");
     connect(&mut graph, character, "value", show, "character");
     let graph = GraphDocument::from_json(&graph.to_pretty_json().unwrap()).unwrap();
     let output = transpile(&graph).unwrap();
-    assert!(output.source.contains("character.create(\"alice\", \"Alice Lemaire\")"));
-    assert!(output.source.contains("alice.show(\"assets/images/sprites/happy.png\")"));
+    assert!(output
+        .source
+        .contains("character.create(\"alice\", \"Alice Lemaire\")"));
+    assert!(output
+        .source
+        .contains("alice.show(\"assets/images/sprites/happy.png\")"));
 }
 
 #[test]
 fn dialogue_sprite_connection_preserves_sprite_until_explicit_removal() {
-    let mut graph=GraphDocument::new(GraphId::new(901),GraphKind::Label{name:"start".into()});
-    graph.characters.insert("alice".into(),"Alice".into());
-    let mut previous=add(&mut graph,NodeKind::Label);
-    for (index,path) in [Some("sprites/alice/happy.png"),None,None,Some("sprites/alice/sad.png")].into_iter().enumerate() {
-        if index==2 {
+    let mut graph = GraphDocument::new(
+        GraphId::new(901),
+        GraphKind::Label {
+            name: "start".into(),
+        },
+    );
+    graph.characters.insert("alice".into(), "Alice".into());
+    let mut previous = add(&mut graph, NodeKind::Label);
+    for (index, path) in [
+        Some("sprites/alice/happy.png"),
+        None,
+        None,
+        Some("sprites/alice/sad.png"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if index == 2 {
             // Repeated removal is harmless and targets only Alice.
             for _ in 0..2 {
-                let hide=add(&mut graph,NodeKind::SpriteHide);
-                graph.set_pin_default(hide,"character",PropertyValue::String("alice".into())).unwrap();
-                connect(&mut graph,previous,"exec_out",hide,"exec_in");
-                previous=hide;
+                let hide = add(&mut graph, NodeKind::SpriteHide);
+                graph
+                    .set_pin_default(hide, "character", PropertyValue::String("alice".into()))
+                    .unwrap();
+                connect(&mut graph, previous, "exec_out", hide, "exec_in");
+                previous = hide;
             }
         }
-        let dialogue=add(&mut graph,NodeKind::Dialogue);
-        let character=add(&mut graph,NodeKind::CharacterValue);
-        graph.set_property(character,"character",PropertyValue::String("alice".into())).unwrap();
+        let dialogue = add(&mut graph, NodeKind::Dialogue);
+        let character = add(&mut graph, NodeKind::CharacterValue);
+        graph
+            .set_property(
+                character,
+                "character",
+                PropertyValue::String("alice".into()),
+            )
+            .unwrap();
         // Even a stale property must not provide an image without a wire.
-        graph.set_property(character,"emotion",PropertyValue::String("hidden_fallback".into())).unwrap();
-        graph.set_pin_default(dialogue,"text",PropertyValue::String("Bonjour".into())).unwrap();
-        connect(&mut graph,previous,"exec_out",dialogue,"exec_in");
-        connect(&mut graph,character,"value",dialogue,"character");
-        if let Some(path)=path {
-            let image=add(&mut graph,NodeKind::SpriteAsset);
-            graph.set_property(image,"path",PropertyValue::String(path.into())).unwrap();
-            connect(&mut graph,image,"value",character,"sprite");
+        graph
+            .set_property(
+                character,
+                "emotion",
+                PropertyValue::String("hidden_fallback".into()),
+            )
+            .unwrap();
+        graph
+            .set_pin_default(dialogue, "text", PropertyValue::String("Bonjour".into()))
+            .unwrap();
+        connect(&mut graph, previous, "exec_out", dialogue, "exec_in");
+        connect(&mut graph, character, "value", dialogue, "character");
+        if let Some(path) = path {
+            let image = add(&mut graph, NodeKind::SpriteAsset);
+            graph
+                .set_property(image, "path", PropertyValue::String(path.into()))
+                .unwrap();
+            connect(&mut graph, image, "value", character, "sprite");
         }
-        previous=dialogue;
+        previous = dialogue;
     }
     graph.materialize_visible_defaults().unwrap();
-    let compiled=transpile(&graph).unwrap();
+    let compiled = transpile(&graph).unwrap();
     assert!(!compiled.source.contains("hidden_fallback"));
-    let mut engine=rvn_core::Engine::new(compiled.ast,rvn_core::TerminalRenderer,20).unwrap();
-    engine.state.sprites.insert("bob".into(),rvn_core::SpriteState::new(Some("bob.png".into()),rvn_parser::Position::Left));
-    assert_eq!(compiled.source.matches("alice.hide()").count(),2);
-    for expected in [Some("sprites/alice/happy.png"),Some("sprites/alice/happy.png"),None,Some("sprites/alice/sad.png")] {
-        assert!(matches!(engine.step_until_interaction().unwrap(),Some(rvn_core::Interaction::Dialogue{..})));
-        let sprite=engine.state.sprites.get("alice").filter(|s|s.visible);
-        assert_eq!(sprite.and_then(|s|s.emotion.as_deref()),expected);
+    let mut engine = rvn_core::Engine::new(compiled.ast, rvn_core::TerminalRenderer, 20).unwrap();
+    engine.state.sprites.insert(
+        "bob".into(),
+        rvn_core::SpriteState::new(Some("bob.png".into()), rvn_parser::Position::Left),
+    );
+    assert_eq!(compiled.source.matches("alice.hide()").count(), 2);
+    for expected in [
+        Some("sprites/alice/happy.png"),
+        Some("sprites/alice/happy.png"),
+        None,
+        Some("sprites/alice/sad.png"),
+    ] {
+        assert!(matches!(
+            engine.step_until_interaction().unwrap(),
+            Some(rvn_core::Interaction::Dialogue { .. })
+        ));
+        let sprite = engine.state.sprites.get("alice").filter(|s| s.visible);
+        assert_eq!(sprite.and_then(|s| s.emotion.as_deref()), expected);
         assert!(engine.state.sprites["bob"].visible);
         engine.advance_dialogue().unwrap();
     }
@@ -67,30 +132,67 @@ fn dialogue_sprite_connection_preserves_sprite_until_explicit_removal() {
 
 #[test]
 fn an_unwired_speaker_is_valid_before_any_sprite_has_been_shown() {
-    let mut graph=GraphDocument::new(GraphId::new(902),GraphKind::Label{name:"start".into()});
-    let root=add(&mut graph,NodeKind::Label); let d=add(&mut graph,NodeKind::Dialogue);
-    graph.set_pin_default(d,"character",PropertyValue::String("narrator".into())).unwrap();
-    graph.set_pin_default(d,"text",PropertyValue::String("Texte seul".into())).unwrap();
-    connect(&mut graph,root,"exec_out",d,"exec_in");
+    let mut graph = GraphDocument::new(
+        GraphId::new(902),
+        GraphKind::Label {
+            name: "start".into(),
+        },
+    );
+    let root = add(&mut graph, NodeKind::Label);
+    let d = add(&mut graph, NodeKind::Dialogue);
+    graph
+        .set_pin_default(d, "character", PropertyValue::String("narrator".into()))
+        .unwrap();
+    graph
+        .set_pin_default(d, "text", PropertyValue::String("Texte seul".into()))
+        .unwrap();
+    connect(&mut graph, root, "exec_out", d, "exec_in");
     graph.materialize_visible_defaults().unwrap();
-    let mut engine=rvn_core::Engine::new(transpile(&graph).unwrap().ast,rvn_core::TerminalRenderer,20).unwrap();
+    let mut engine = rvn_core::Engine::new(
+        transpile(&graph).unwrap().ast,
+        rvn_core::TerminalRenderer,
+        20,
+    )
+    .unwrap();
     assert!(engine.step_until_interaction().unwrap().is_some());
     assert!(engine.state.sprites.is_empty());
 }
 
 #[test]
 fn legacy_show_migration_is_explicit_and_disconnect_does_not_restore_it() {
-    let mut graph=GraphDocument::new(GraphId::new(903),GraphKind::Label{name:"start".into()});
-    let root=add(&mut graph,NodeKind::Label); let show=add(&mut graph,NodeKind::SpriteShow);
-    graph.set_pin_default(show,"character",PropertyValue::String("alice".into())).unwrap();
-    graph.set_pin_default(show,"emotion",PropertyValue::String("happy".into())).unwrap();
-    connect(&mut graph,root,"exec_out",show,"exec_in");
+    let mut graph = GraphDocument::new(
+        GraphId::new(903),
+        GraphKind::Label {
+            name: "start".into(),
+        },
+    );
+    let root = add(&mut graph, NodeKind::Label);
+    let show = add(&mut graph, NodeKind::SpriteShow);
+    graph
+        .set_pin_default(show, "character", PropertyValue::String("alice".into()))
+        .unwrap();
+    graph
+        .set_pin_default(show, "emotion", PropertyValue::String("happy".into()))
+        .unwrap();
+    connect(&mut graph, root, "exec_out", show, "exec_in");
     graph.materialize_visible_defaults().unwrap();
-    assert!(transpile(&graph).unwrap().source.contains("sprites/alice/happy.png"));
-    let input=graph.nodes.values().find(|n|n.kind==NodeKind::CharacterValue).and_then(|n|graph.pin_by_key(n.id,"sprite")).unwrap().id;
-    graph.edges.retain(|_,e|e.input!=input);
+    assert!(transpile(&graph)
+        .unwrap()
+        .source
+        .contains("sprites/alice/happy.png"));
+    let input = graph
+        .nodes
+        .values()
+        .find(|n| n.kind == NodeKind::CharacterValue)
+        .and_then(|n| graph.pin_by_key(n.id, "sprite"))
+        .unwrap()
+        .id;
+    graph.edges.retain(|_, e| e.input != input);
     graph.materialize_visible_defaults().unwrap();
-    assert!(matches!(transpile(&graph),Err(TranspileError::MissingInputValue{..})));
+    assert!(matches!(
+        transpile(&graph),
+        Err(TranspileError::MissingInputValue { .. })
+    ));
 }
 
 fn add(graph: &mut GraphDocument, kind: NodeKind) -> NodeId {
@@ -453,13 +555,31 @@ fn set_then_get_text_variable_drives_dialogue_like_the_editor_workflow() {
 
 #[test]
 fn set_text_output_drives_dialogue_with_inline_value() {
-    let mut graph = GraphDocument::new(GraphId::new(26), GraphKind::Label { name: "start".into() });
-    define(&mut graph, "dialogue_tila", ValueType::String, PropertyValue::String(String::new()));
+    let mut graph = GraphDocument::new(
+        GraphId::new(26),
+        GraphKind::Label {
+            name: "start".into(),
+        },
+    );
+    define(
+        &mut graph,
+        "dialogue_tila",
+        ValueType::String,
+        PropertyValue::String(String::new()),
+    );
     let root = add(&mut graph, NodeKind::Label);
     let setter = add(&mut graph, NodeKind::SetVariable);
     let dialogue = add(&mut graph, NodeKind::Dialogue);
-    graph.set_property(setter, "name", PropertyValue::String("dialogue_tila".into())).unwrap();
-    graph.set_pin_default(setter, "value", PropertyValue::String("salut".into())).unwrap();
+    graph
+        .set_property(
+            setter,
+            "name",
+            PropertyValue::String("dialogue_tila".into()),
+        )
+        .unwrap();
+    graph
+        .set_pin_default(setter, "value", PropertyValue::String("salut".into()))
+        .unwrap();
     for key in ["value", "value_out"] {
         let id = pin(&graph, setter, key);
         graph.pins.get_mut(&id).unwrap().value_type = ValueType::String;
@@ -467,12 +587,16 @@ fn set_text_output_drives_dialogue_with_inline_value() {
     connect(&mut graph, root, "exec_out", setter, "exec_in");
     connect(&mut graph, setter, "exec_out", dialogue, "exec_in");
     connect(&mut graph, setter, "value_out", dialogue, "text");
-    assert_eq!(transpile(&graph).unwrap().source,
-        "label start\n    set dialogue_tila = \"salut\"\n    \"[dialogue_tila]\"\n");
+    assert_eq!(
+        transpile(&graph).unwrap().source,
+        "label start\n    set dialogue_tila = \"salut\"\n    \"[dialogue_tila]\"\n"
+    );
     let text_pin = pin(&graph, dialogue, "text");
     graph.edges.retain(|_, edge| edge.input != text_pin);
     let conversion = add(&mut graph, NodeKind::ConvertNumberToText);
-    graph.set_pin_default(conversion, "value", PropertyValue::Int(15)).unwrap();
+    graph
+        .set_pin_default(conversion, "value", PropertyValue::Int(15))
+        .unwrap();
     connect(&mut graph, conversion, "result", dialogue, "text");
     assert!(transpile(&graph).unwrap().source.contains("15"));
 }
@@ -827,12 +951,24 @@ fn transpiles_the_runtime_instruction_catalog_and_reparses_it() {
         .set_imagemap_hotspots(nodes[21], vec!["door:10:20:100:160".into()])
         .unwrap();
 
-    let character=add(&mut graph,NodeKind::CharacterValue);
-    let image=add(&mut graph,NodeKind::SpriteAsset);
-    graph.set_property(character,"character",PropertyValue::String("alice".into())).unwrap();
-    graph.set_property(image,"path",PropertyValue::String("sprites/alice/happy.png".into())).unwrap();
-    connect(&mut graph,image,"value",character,"sprite");
-    connect(&mut graph,character,"value",nodes[5],"character");
+    let character = add(&mut graph, NodeKind::CharacterValue);
+    let image = add(&mut graph, NodeKind::SpriteAsset);
+    graph
+        .set_property(
+            character,
+            "character",
+            PropertyValue::String("alice".into()),
+        )
+        .unwrap();
+    graph
+        .set_property(
+            image,
+            "path",
+            PropertyValue::String("sprites/alice/happy.png".into()),
+        )
+        .unwrap();
+    connect(&mut graph, image, "value", character, "sprite");
+    connect(&mut graph, character, "value", nodes[5], "character");
     let generated = transpile(&graph).unwrap();
     assert!(generated
         .source

@@ -527,9 +527,12 @@ fn title_continue_available(
     project_paths: &ProjectPaths,
     persistent: &PersistentDataResource,
 ) -> bool {
-    SaveManager::new(&project_paths.saves, crate::systems::save_menu::SUPPORTED_SLOTS)
-        .map(|mgr| resolve_continue_data(&mgr, persistent).is_ok())
-        .unwrap_or(false)
+    SaveManager::new(
+        &project_paths.saves,
+        crate::systems::save_menu::SUPPORTED_SLOTS,
+    )
+    .map(|mgr| resolve_continue_data(&mgr, persistent).is_ok())
+    .unwrap_or(false)
 }
 
 pub(crate) fn resolve_continue_data(
@@ -716,7 +719,10 @@ pub fn title_interaction_system(
 
                 match button {
                     TitleButton::Continue => {
-                        match SaveManager::new(&project_paths.saves, crate::systems::save_menu::SUPPORTED_SLOTS) {
+                        match SaveManager::new(
+                            &project_paths.saves,
+                            crate::systems::save_menu::SUPPORTED_SLOTS,
+                        ) {
                             Ok(mgr) => match resolve_continue_data(&mgr, &persistent) {
                                 Ok((data, target)) => {
                                     if let Some(target) = target {
@@ -743,7 +749,10 @@ pub fn title_interaction_system(
                         // Returning here after an ending must start a fresh story,
                         // not resume the finished instruction pointer.
                         if engine.0.is_finished() {
-                            let Ok(mut fresh) = engine.0.fresh(crate::bevy_renderer::BevyRenderer::new(), 64) else {
+                            let Ok(mut fresh) = engine
+                                .0
+                                .fresh(crate::bevy_renderer::BevyRenderer::new(), 64)
+                            else {
                                 error!("Impossible de recommencer la partie");
                                 continue;
                             };
@@ -751,7 +760,10 @@ pub fn title_interaction_system(
                             fresh.persistent_vars = engine.0.persistent_vars.clone();
                             for (id, sprite) in &engine.0.state.sprites {
                                 if sprite.visible {
-                                    vn_events.send(VnCommand::HideSprite { id: id.clone(), transition: rvn_parser::Transition::None });
+                                    vn_events.send(VnCommand::HideSprite {
+                                        id: id.clone(),
+                                        transition: rvn_parser::Transition::None,
+                                    });
                                 }
                             }
                             engine.0 = fresh;

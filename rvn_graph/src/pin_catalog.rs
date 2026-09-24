@@ -158,7 +158,12 @@ pub(crate) fn pin_definitions(kind: NodeKind) -> Vec<PinDefinition> {
         Kind::Label => vec![output("exec_out", "", ValueType::Execution)],
         Kind::Call => vec![
             input("exec_in", "", ValueType::Execution),
-            input_default("target", "Label", ValueType::Label, PropertyValue::String(String::new())),
+            input_default(
+                "target",
+                "Label",
+                ValueType::Label,
+                PropertyValue::String(String::new()),
+            ),
             output("exec_out", "Après retour", ValueType::Execution),
         ],
         Kind::Jump => vec![
@@ -311,7 +316,11 @@ pub(crate) fn pin_definitions(kind: NodeKind) -> Vec<PinDefinition> {
             ),
             output("exec_out", "", ValueType::Execution),
         ],
-        Kind::MusicStop => vec![input("exec_in", "", ValueType::Execution), transition(), output("exec_out", "", ValueType::Execution)],
+        Kind::MusicStop => vec![
+            input("exec_in", "", ValueType::Execution),
+            transition(),
+            output("exec_out", "", ValueType::Execution),
+        ],
         Kind::TimerCancel | Kind::VoiceStop => exec_in_out(),
         Kind::MethodCall => vec![
             input("exec_in", "", ValueType::Execution),
@@ -417,7 +426,11 @@ pub(crate) fn pin_definitions(kind: NodeKind) -> Vec<PinDefinition> {
             output("value_out", "", ValueType::Any),
         ],
         Kind::CharacterValue => vec![
-            input("sprite", "Sprite", ValueType::Asset(crate::AssetKind::Sprite)),
+            input(
+                "sprite",
+                "Sprite",
+                ValueType::Asset(crate::AssetKind::Sprite),
+            ),
             output("value", "Personnage", ValueType::Character),
         ],
         Kind::SceneAsset => vec![output("value", "", ValueType::Asset(AssetKind::Background))],

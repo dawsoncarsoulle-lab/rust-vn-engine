@@ -35,7 +35,9 @@ pub fn validate_expression(expression: &str) -> Result<(), TranspileError> {
     let parsed = rvn_parser::parse(&format!("set __editor_check = {expression}\n"))
         .map_err(|error| TranspileError::GeneratedSourceInvalid(error.to_string()))?;
     if !matches!(parsed.as_slice(), [rvn_parser::Statement::SetVar { .. }]) {
-        return Err(TranspileError::GeneratedSourceInvalid("Une seule expression RVN est attendue".into()));
+        return Err(TranspileError::GeneratedSourceInvalid(
+            "Une seule expression RVN est attendue".into(),
+        ));
     }
     Ok(())
 }
@@ -93,7 +95,11 @@ impl Emitter<'_> {
             source.push_str("init {\n");
             for (id, name) in &self.graph.characters {
                 validate_identifier(id)?;
-                source.push_str(&format!("    character.create({}, {})\n", quote(id), quote(name)));
+                source.push_str(&format!(
+                    "    character.create({}, {})\n",
+                    quote(id),
+                    quote(name)
+                ));
             }
             source.push_str("}\n");
         }
@@ -110,14 +116,27 @@ impl Emitter<'_> {
         }
         if let GraphKind::Label { name } = &self.graph.kind {
             let mut names = BTreeSet::from([name.clone()]);
-            for node in self.graph.nodes.values().filter(|n| n.kind == NodeKind::Label && n.id != *root) {
+            for node in self
+                .graph
+                .nodes
+                .values()
+                .filter(|n| n.kind == NodeKind::Label && n.id != *root)
+            {
                 let label = property_string(node.id, &node.properties, "label")?;
                 validate_identifier(&label)?;
                 if !names.insert(label.clone()) {
-                    return Err(TranspileError::GeneratedSourceInvalid(format!("Label dupliqué : {label}")));
+                    return Err(TranspileError::GeneratedSourceInvalid(format!(
+                        "Label dupliqué : {label}"
+                    )));
                 }
                 source.push_str(&format!("\nlabel {label}\n"));
-                self.emit_sequence(self.successor(node.id, "exec_out")?, 1, None, &mut source, &mut BTreeSet::new())?;
+                self.emit_sequence(
+                    self.successor(node.id, "exec_out")?,
+                    1,
+                    None,
+                    &mut source,
+                    &mut BTreeSet::new(),
+                )?;
             }
         }
         Ok(source)
@@ -243,7 +262,12 @@ impl Emitter<'_> {
                 }
                 NodeKind::SpriteShow => {
                     let character = self.pin_string(node_id, "character")?;
-                    let emotion = self.connected_sprite(node_id)?.ok_or(TranspileError::MissingInputValue { node: node_id, key: "Sprite : reliez une image au personnage".into() })?;
+                    let emotion = self.connected_sprite(node_id)?.ok_or(
+                        TranspileError::MissingInputValue {
+                            node: node_id,
+                            key: "Sprite : reliez une image au personnage".into(),
+                        },
+                    )?;
                     let position = self.pin_string(node_id, "position")?;
                     push_indent(source, indent);
                     source.push_str(validate_identifier(&character)?);
@@ -290,7 +314,12 @@ impl Emitter<'_> {
                             let (name, value) = param.split_once('=').ok_or_else(|| {
                                 TranspileError::InvalidDynamicParameter(param.clone())
                             })?;
-                            if node.properties.contains_key(&format!("animation_param_{}", name.trim())) { continue; }
+                            if node
+                                .properties
+                                .contains_key(&format!("animation_param_{}", name.trim()))
+                            {
+                                continue;
+                            }
                             source.push_str(", ");
                             source.push_str(validate_identifier(name.trim())?);
                             source.push_str(": ");
@@ -320,12 +349,19 @@ impl Emitter<'_> {
                     let mut effects = Vec::new();
                     for key in ["flip_x", "flip_y", "scale", "rotation", "tint"] {
                         // Missing flags mean legacy behavior: all effects were applied.
-                        if node.properties.get(&format!("apply_{key}")) == Some(&PropertyValue::Bool(false)) { continue; }
+                        if node.properties.get(&format!("apply_{key}"))
+                            == Some(&PropertyValue::Bool(false))
+                        {
+                            continue;
+                        }
                         let value = match key {
                             "flip_x" | "flip_y" => self.pin_bool(node_id, key)?.to_string(),
                             "tint" => match self.pin_string(node_id, key) {
                                 Ok(color) => quote(&color),
-                                Err(_) => quote(&format!("[{}]", self.expression_from_input(node_id, key)?)),
+                                Err(_) => quote(&format!(
+                                    "[{}]",
+                                    self.expression_from_input(node_id, key)?
+                                )),
                             },
                             _ => self.pin_float(node_id, key)?.to_string(),
                         };
@@ -458,10 +494,15 @@ impl Emitter<'_> {
                                 coordinates[0], coordinates[1], coordinates[2], coordinates[3]
                             ));
                             if coordinates.len() == 8 {
-                                if coordinates[6] <= coordinates[4] || coordinates[7] <= coordinates[5] {
+                                if coordinates[6] <= coordinates[4]
+                                    || coordinates[7] <= coordinates[5]
+                                {
                                     return Err(TranspileError::InvalidHotspot(hotspot.clone()));
                                 }
-                                source.push_str(&format!(" hover_area: ({}, {}, {}, {})", coordinates[4], coordinates[5], coordinates[6], coordinates[7]));
+                                source.push_str(&format!(
+                                    " hover_area: ({}, {}, {}, {})",
+                                    coordinates[4], coordinates[5], coordinates[6], coordinates[7]
+                                ));
                             }
                             source.push_str(" } => {\n");
                             self.emit_sequence(
@@ -511,7 +552,11 @@ impl Emitter<'_> {
                     source.push(' ');
                     source.push_str(validate_identifier(&target)?);
                     source.push('\n');
-                    if node.kind == NodeKind::Call { self.successor(node_id, "exec_out")? } else { None }
+                    if node.kind == NodeKind::Call {
+                        self.successor(node_id, "exec_out")?
+                    } else {
+                        None
+                    }
                 }
                 NodeKind::Return => {
                     push_indent(source, indent);
@@ -582,7 +627,9 @@ impl Emitter<'_> {
             if self.input_is_connected(node, &condition_key)? {
                 source.push_str(" if ");
                 source.push_str(&self.expression_from_input(node, &condition_key)?);
-            } else if let Some(PropertyValue::String(condition)) = graph_node.properties.get(&condition_key) {
+            } else if let Some(PropertyValue::String(condition)) =
+                graph_node.properties.get(&condition_key)
+            {
                 if !condition.trim().is_empty() {
                     validate_expression(condition)?;
                     source.push_str(" if ");
@@ -676,10 +723,15 @@ impl Emitter<'_> {
             }
             NodeKind::TextValue => quote(&property_string(node.id, &node.properties, "value")?),
             NodeKind::MakeColor => {
-                let channels = ["r", "g", "b", "a"].into_iter()
+                let channels = ["r", "g", "b", "a"]
+                    .into_iter()
                     .map(|key| self.expression_from_input_with_stack(node.id, key, active))
                     .collect::<Result<Vec<_>, _>>()?;
-                let function = if node.properties.get("rgb_max") == Some(&PropertyValue::Int(255)) { "make_color_rgb" } else { "make_color" };
+                let function = if node.properties.get("rgb_max") == Some(&PropertyValue::Int(255)) {
+                    "make_color_rgb"
+                } else {
+                    "make_color"
+                };
                 format!("{function}({})", channels.join(", "))
             }
             NodeKind::FormatText => quote(&self.format_text_output(node.id, active)?),
@@ -688,7 +740,9 @@ impl Emitter<'_> {
                 quote(&property_string(node.id, &node.properties, "character")?)
             }
             NodeKind::LabelValue => quote(&property_string(node.id, &node.properties, "label")?),
-            NodeKind::PositionValue => quote(&property_string(node.id, &node.properties, "position")?),
+            NodeKind::PositionValue => {
+                quote(&property_string(node.id, &node.properties, "position")?)
+            }
             NodeKind::SceneAsset
             | NodeKind::SpriteAsset
             | NodeKind::MusicAsset
@@ -800,10 +854,21 @@ impl Emitter<'_> {
             NodeKind::FunctionCall => {
                 let function = property_string(node.id, &node.properties, "function")?;
                 if let Some(PropertyValue::Int(count)) = node.properties.get("input_count") {
-                    let args = (0..*count).map(|i| self.expression_from_input_with_stack(node.id, &format!("item_{i}"), active))
+                    let args = (0..*count)
+                        .map(|i| {
+                            self.expression_from_input_with_stack(
+                                node.id,
+                                &format!("item_{i}"),
+                                active,
+                            )
+                        })
                         .collect::<Result<Vec<_>, _>>()?;
                     active.remove(&node.id);
-                    return Ok(format!("{}({})", validate_identifier(&function)?, args.join(", ")));
+                    return Ok(format!(
+                        "{}({})",
+                        validate_identifier(&function)?,
+                        args.join(", ")
+                    ));
                 }
                 let args = property_string_list(node.id, &node.properties, "args")?;
                 format!(
@@ -817,7 +882,14 @@ impl Emitter<'_> {
             }
             NodeKind::ListLiteral => {
                 if let Some(PropertyValue::Int(count)) = node.properties.get("input_count") {
-                    let items = (0..*count).map(|i| self.expression_from_input_with_stack(node.id, &format!("item_{i}"), active))
+                    let items = (0..*count)
+                        .map(|i| {
+                            self.expression_from_input_with_stack(
+                                node.id,
+                                &format!("item_{i}"),
+                                active,
+                            )
+                        })
                         .collect::<Result<Vec<_>, _>>()?;
                     active.remove(&node.id);
                     return Ok(format!("[{}]", items.join(", ")));
@@ -843,10 +915,21 @@ impl Emitter<'_> {
         Ok(expression)
     }
 
-    fn connected_character(&self, node: NodeId, key: &str, visited: &mut BTreeSet<NodeId>) -> Option<NodeId> {
-        if !visited.insert(node) { return None; }
+    fn connected_character(
+        &self,
+        node: NodeId,
+        key: &str,
+        visited: &mut BTreeSet<NodeId>,
+    ) -> Option<NodeId> {
+        if !visited.insert(node) {
+            return None;
+        }
         let pin = self.pin(node, key).ok()?;
-        let edge = self.graph.edges.values().find(|edge| edge.input == pin.id)?;
+        let edge = self
+            .graph
+            .edges
+            .values()
+            .find(|edge| edge.input == pin.id)?;
         let source = &self.graph.nodes[&self.graph.pins[&edge.output].node];
         match source.kind {
             NodeKind::CharacterValue => Some(source.id),
@@ -856,20 +939,42 @@ impl Emitter<'_> {
     }
 
     fn connected_sprite(&self, consumer: NodeId) -> Result<Option<String>, TranspileError> {
-        let Some(character) = self.connected_character(consumer, "character", &mut BTreeSet::new()) else { return Ok(None) };
-        let Some(pin) = self.graph.pin_by_key(character,"sprite") else { return Ok(None) };
-        if !self.graph.edges.values().any(|e|e.input == pin.id) { return Ok(None); }
-        let path = self.pin_string(character,"sprite")?;
-        if path.trim().is_empty() { return Err(TranspileError::MissingInputValue { node: character, key: "Sprite : chemin d’image vide".into() }); }
+        let Some(character) = self.connected_character(consumer, "character", &mut BTreeSet::new())
+        else {
+            return Ok(None);
+        };
+        let Some(pin) = self.graph.pin_by_key(character, "sprite") else {
+            return Ok(None);
+        };
+        if !self.graph.edges.values().any(|e| e.input == pin.id) {
+            return Ok(None);
+        }
+        let path = self.pin_string(character, "sprite")?;
+        if path.trim().is_empty() {
+            return Err(TranspileError::MissingInputValue {
+                node: character,
+                key: "Sprite : chemin d’image vide".into(),
+            });
+        }
         // A file at the asset root is still a file, never an emotion name.
-        Ok(Some(if path.contains('/') { path } else { format!("./{path}") }))
+        Ok(Some(if path.contains('/') {
+            path
+        } else {
+            format!("./{path}")
+        }))
     }
 
-    fn emit_character_appearance(&self, consumer: NodeId, character: &str, indent: usize, source: &mut String) -> Result<(),TranspileError> {
+    fn emit_character_appearance(
+        &self,
+        consumer: NodeId,
+        character: &str,
+        indent: usize,
+        source: &mut String,
+    ) -> Result<(), TranspileError> {
         let character = validate_identifier(character)?;
         if let Some(path) = self.connected_sprite(consumer)? {
-            push_indent(source,indent);
-            source.push_str(&format!("{character}.show({})\n",quote(&path)));
+            push_indent(source, indent);
+            source.push_str(&format!("{character}.show({})\n", quote(&path)));
         }
         Ok(())
     }
@@ -886,7 +991,9 @@ impl Emitter<'_> {
             return match source.kind {
                 NodeKind::TextValue => property_string(source.id, &source.properties, "value"),
                 NodeKind::LabelValue => property_string(source.id, &source.properties, "label"),
-                NodeKind::PositionValue => property_string(source.id, &source.properties, "position"),
+                NodeKind::PositionValue => {
+                    property_string(source.id, &source.properties, "position")
+                }
                 NodeKind::Reroute => self.pin_string(source.id, "value"),
                 NodeKind::CharacterValue => {
                     property_string(source.id, &source.properties, "character")
@@ -966,7 +1073,10 @@ impl Emitter<'_> {
         if source.kind == NodeKind::ConvertNumberToText {
             // Interpolation already renders numbers as text; avoid embedding
             // a quoted empty string inside the dialogue's quoted payload.
-            return Ok(format!("[{}]", self.expression_from_input(source.id, "value")?));
+            return Ok(format!(
+                "[{}]",
+                self.expression_from_input(source.id, "value")?
+            ));
         }
         if source.kind == NodeKind::Reroute {
             return self.pin_interpolated_text(source.id, "value");
@@ -1036,8 +1146,15 @@ impl Emitter<'_> {
         }
     }
 
-    fn constant_input(&self, node: NodeId, key: &str, active: &mut BTreeSet<NodeId>) -> Result<Option<PropertyValue>, TranspileError> {
-        if !active.insert(node) { return Err(TranspileError::ExpressionCycle(node)); }
+    fn constant_input(
+        &self,
+        node: NodeId,
+        key: &str,
+        active: &mut BTreeSet<NodeId>,
+    ) -> Result<Option<PropertyValue>, TranspileError> {
+        if !active.insert(node) {
+            return Err(TranspileError::ExpressionCycle(node));
+        }
         let pin = self.pin(node, key)?;
         let result = if let Some(edge) = self.graph.edges.values().find(|e| e.input == pin.id) {
             let source = &self.graph.nodes[&self.graph.pins[&edge.output].node];
@@ -1046,7 +1163,9 @@ impl Emitter<'_> {
                 NodeKind::Reroute => self.constant_input(source.id, "value", active)?,
                 _ => return Err(TranspileError::GeneratedSourceInvalid(format!("La broche {node}.{key} requiert une constante RVN, pas une expression dynamique"))),
             }
-        } else { pin.default_value.clone() };
+        } else {
+            pin.default_value.clone()
+        };
         active.remove(&node);
         Ok(result)
     }
@@ -1082,7 +1201,11 @@ impl Emitter<'_> {
         }
     }
 
-    fn push_cinematic_transition(&self, node: NodeId, source: &mut String) -> Result<(), TranspileError> {
+    fn push_cinematic_transition(
+        &self,
+        node: NodeId,
+        source: &mut String,
+    ) -> Result<(), TranspileError> {
         let value = self.pin_string(node, "transition")?;
         let name = match value.as_str() {
             "" | "none" => return Ok(()),
@@ -1090,7 +1213,8 @@ impl Emitter<'_> {
             "dissolve" | "dissolve(300)" => "dissolve",
             _ => return Err(TranspileError::GeneratedSourceInvalid("Les illustrations cinématiques RVN acceptent fade/dissolve sans durée personnalisée".into())),
         };
-        source.push_str(&format!(" with {name}")); Ok(())
+        source.push_str(&format!(" with {name}"));
+        Ok(())
     }
 
     fn push_transition(&self, node: NodeId, source: &mut String) -> Result<(), TranspileError> {

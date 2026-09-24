@@ -99,13 +99,28 @@ fn eval_call(name: &str, args: &[Expr], vars: &HashMap<String, Value>) -> EvalRe
         "make_color" | "make_color_rgb" => {
             let nums = expect_numbers(&evaluated, "make_color")?;
             if nums.len() != 4 || nums.iter().any(|n| !n.is_finite()) {
-                return Err(EvalError::TypeMismatch { op: "make_color".into(), left: "4 finite RGBA numbers".into(), right: "".into() });
+                return Err(EvalError::TypeMismatch {
+                    op: "make_color".into(),
+                    left: "4 finite RGBA numbers".into(),
+                    right: "".into(),
+                });
             }
-            let bytes: Vec<_> = nums.into_iter().enumerate().map(|(channel, n)| {
-                let maximum = if name == "make_color_rgb" && channel < 3 { 255.0 } else { 1.0 };
-                (n.clamp(0.0, maximum) / maximum * 255.0).round() as u8
-            }).collect();
-            Ok(Value::Str(format!("#{:02x}{:02x}{:02x}{:02x}", bytes[0], bytes[1], bytes[2], bytes[3])))
+            let bytes: Vec<_> = nums
+                .into_iter()
+                .enumerate()
+                .map(|(channel, n)| {
+                    let maximum = if name == "make_color_rgb" && channel < 3 {
+                        255.0
+                    } else {
+                        1.0
+                    };
+                    (n.clamp(0.0, maximum) / maximum * 255.0).round() as u8
+                })
+                .collect();
+            Ok(Value::Str(format!(
+                "#{:02x}{:02x}{:02x}{:02x}",
+                bytes[0], bytes[1], bytes[2], bytes[3]
+            )))
         }
         "min" => {
             let nums = expect_numbers(&evaluated, "min")?;

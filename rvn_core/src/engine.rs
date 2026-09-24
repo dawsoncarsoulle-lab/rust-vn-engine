@@ -37,7 +37,12 @@ pub fn flatten_ast(script: &mut Script, extra: &mut Vec<Statement>, counter: &mu
     flatten_with_returns(script, extra, counter, &mut Vec::new());
 }
 
-fn flatten_with_returns(script: &mut Script, extra: &mut Vec<Statement>, counter: &mut usize, returns: &mut Vec<usize>) {
+fn flatten_with_returns(
+    script: &mut Script,
+    extra: &mut Vec<Statement>,
+    counter: &mut usize,
+    returns: &mut Vec<usize>,
+) {
     for stmt in script.iter_mut() {
         match stmt {
             Statement::Use { .. } | Statement::Init { .. } => {}
@@ -229,12 +234,21 @@ impl<R: Renderer> Engine<R> {
     /// Start a clean game from this engine's already lowered script. Passing
     /// `self.script` back through `new` would lower choice calls twice and reuse
     /// internal labels, creating recursive calls instead of the original branch.
-    pub fn fresh(&self, renderer:R, rollback_depth:usize)->Result<Self,RuntimeError>{
-        Self::from_prepared_script(self.script.clone(),renderer,rollback_depth,self.branch_returns.clone())
+    pub fn fresh(&self, renderer: R, rollback_depth: usize) -> Result<Self, RuntimeError> {
+        Self::from_prepared_script(
+            self.script.clone(),
+            renderer,
+            rollback_depth,
+            self.branch_returns.clone(),
+        )
     }
 
-    fn from_prepared_script(script:Script,renderer:R,rollback_depth:usize,branch_returns:std::collections::HashSet<usize>)->Result<Self,RuntimeError>{
-
+    fn from_prepared_script(
+        script: Script,
+        renderer: R,
+        rollback_depth: usize,
+        branch_returns: std::collections::HashSet<usize>,
+    ) -> Result<Self, RuntimeError> {
         let label_table = script
             .iter()
             .enumerate()
@@ -352,12 +366,7 @@ impl<R: Renderer> Engine<R> {
     }
 
     fn exec_hide(&mut self, id: &str, transition: Transition) -> Result<(), RuntimeError> {
-        let from = self
-            .state
-            .sprites
-            .get(id)
-            .filter(|s| s.visible)
-            .cloned();
+        let from = self.state.sprites.get(id).filter(|s| s.visible).cloned();
         // Explicit removal is idempotent, including before the first appearance.
         let Some(from) = from else { return Ok(()) };
         self.state.last_transition = transition.clone();
@@ -561,8 +570,11 @@ impl<R: Renderer> Engine<R> {
     }
 
     fn record_interaction_snapshot(&mut self, stmt: &Statement) -> Result<(), RuntimeError> {
-        if matches!(stmt,Statement::Dialogue{..}) {
-            self.state.last_dialogue=Some(crate::types::DialogueSnapshot{pc:self.state.pc,vars:self.vars_for_eval()});
+        if matches!(stmt, Statement::Dialogue { .. }) {
+            self.state.last_dialogue = Some(crate::types::DialogueSnapshot {
+                pc: self.state.pc,
+                vars: self.vars_for_eval(),
+            });
         }
         self.state.current_interactive_pc = self.state.pc;
         let display = self.make_display_resolved(stmt)?;
@@ -676,9 +688,18 @@ impl<R: Renderer> Engine<R> {
             }
             Statement::Return => {
                 if !self.branch_returns.contains(&self.state.pc) {
-                    while self.state.call_stack.last().is_some_and(|pc| pc.checked_sub(1)
-                        .and_then(|caller| self.script.get(caller))
-                        .is_some_and(|s| matches!(s, Statement::If { .. } | Statement::Choice { .. } | Statement::Imagemap { .. }))) {
+                    while self.state.call_stack.last().is_some_and(|pc| {
+                        pc.checked_sub(1)
+                            .and_then(|caller| self.script.get(caller))
+                            .is_some_and(|s| {
+                                matches!(
+                                    s,
+                                    Statement::If { .. }
+                                        | Statement::Choice { .. }
+                                        | Statement::Imagemap { .. }
+                                )
+                            })
+                    }) {
                         self.state.call_stack.pop();
                     }
                 }
@@ -763,11 +784,22 @@ impl<R: Renderer> Engine<R> {
                 rotation,
                 tint,
             } => {
-                let tint = tint.map(|text| {
-                    let parsed = rvn_parser::parse_interpolated_str(&text).map_err(|_| self.eval_err(
-                        EvalError::TypeMismatch { op: "tint".into(), left: "color expression".into(), right: text.clone() }, "SpriteEffect"))?;
-                    eval_interpolated(&parsed, &self.vars_for_eval()).map_err(|e| self.eval_err(e, "SpriteEffect"))
-                }).transpose()?;
+                let tint = tint
+                    .map(|text| {
+                        let parsed = rvn_parser::parse_interpolated_str(&text).map_err(|_| {
+                            self.eval_err(
+                                EvalError::TypeMismatch {
+                                    op: "tint".into(),
+                                    left: "color expression".into(),
+                                    right: text.clone(),
+                                },
+                                "SpriteEffect",
+                            )
+                        })?;
+                        eval_interpolated(&parsed, &self.vars_for_eval())
+                            .map_err(|e| self.eval_err(e, "SpriteEffect"))
+                    })
+                    .transpose()?;
                 self.renderer.set_sprite_effect(
                     &character_id,
                     flip_x,
@@ -984,28 +1016,65 @@ impl<R: Renderer> Engine<R> {
 
     /// Re-render a recorded dialogue in the selected language without replaying
     /// commands or substituting the current value of ordinary story variables.
-    pub fn localized_dialogue_history(&self) -> Result<Vec<(Option<String>, String)>, RuntimeError> {
-        self.history.entries().iter().filter_map(|entry| {
-            if !matches!(self.script.get(entry.state.pc),Some(Statement::Dialogue{..})){return None;}
-            Some(self.resolve_recorded_dialogue(&crate::types::DialogueSnapshot{pc:entry.state.pc,vars:entry.state.last_dialogue.as_ref().map(|d|d.vars.clone()).unwrap_or_else(||entry.state.vars.clone())}))
-        }).collect()
-    }
-
-    pub fn last_dialogue_interaction(&self) -> Result<Option<Interaction>,RuntimeError>{
-        self.state.last_dialogue.as_ref().map(|snapshot|self.resolve_recorded_dialogue(snapshot).map(|(character,text)|Interaction::Dialogue{character,text})).transpose()
-    }
-
-    fn resolve_recorded_dialogue(&self,snapshot:&crate::types::DialogueSnapshot)->Result<(Option<String>,String),RuntimeError>{
-            let Some(Statement::Dialogue { character_id, text }) = self.script.get(snapshot.pc) else { return Ok((None,String::new())); };
-            let key = text_to_locale_key(text);
-            let translated = self.translate(&key);
-            let template = if translated == key { text.clone() } else {
-                match rvn_parser::parse_interpolated_str(translated) {
-                    Ok(template) => template,
-                    Err(_) => return Ok((character_id.clone(), translated.to_owned())),
+    pub fn localized_dialogue_history(
+        &self,
+    ) -> Result<Vec<(Option<String>, String)>, RuntimeError> {
+        self.history
+            .entries()
+            .iter()
+            .filter_map(|entry| {
+                if !matches!(
+                    self.script.get(entry.state.pc),
+                    Some(Statement::Dialogue { .. })
+                ) {
+                    return None;
                 }
-            };
-            eval_interpolated(&template, &snapshot.vars).map(|text|(character_id.clone(),text)).map_err(|e|self.eval_err(e,"History translation"))
+                Some(
+                    self.resolve_recorded_dialogue(&crate::types::DialogueSnapshot {
+                        pc: entry.state.pc,
+                        vars: entry
+                            .state
+                            .last_dialogue
+                            .as_ref()
+                            .map(|d| d.vars.clone())
+                            .unwrap_or_else(|| entry.state.vars.clone()),
+                    }),
+                )
+            })
+            .collect()
+    }
+
+    pub fn last_dialogue_interaction(&self) -> Result<Option<Interaction>, RuntimeError> {
+        self.state
+            .last_dialogue
+            .as_ref()
+            .map(|snapshot| {
+                self.resolve_recorded_dialogue(snapshot)
+                    .map(|(character, text)| Interaction::Dialogue { character, text })
+            })
+            .transpose()
+    }
+
+    fn resolve_recorded_dialogue(
+        &self,
+        snapshot: &crate::types::DialogueSnapshot,
+    ) -> Result<(Option<String>, String), RuntimeError> {
+        let Some(Statement::Dialogue { character_id, text }) = self.script.get(snapshot.pc) else {
+            return Ok((None, String::new()));
+        };
+        let key = text_to_locale_key(text);
+        let translated = self.translate(&key);
+        let template = if translated == key {
+            text.clone()
+        } else {
+            match rvn_parser::parse_interpolated_str(translated) {
+                Ok(template) => template,
+                Err(_) => return Ok((character_id.clone(), translated.to_owned())),
+            }
+        };
+        eval_interpolated(&template, &snapshot.vars)
+            .map(|text| (character_id.clone(), text))
+            .map_err(|e| self.eval_err(e, "History translation"))
     }
 
     /// Valide un dialogue affiché et avance au statement suivant.
@@ -1097,8 +1166,13 @@ impl<R: Renderer> Engine<R> {
         self.state = data.into_game_state();
         self.history.clear();
         self.renderer.restore_screen(&self.state);
-        if matches!(self.current_interaction(),Ok(Some(Interaction::Choice{..}))) {
-            if let Ok(Some(dialogue))=self.last_dialogue_interaction(){self.render_interaction(dialogue);}
+        if matches!(
+            self.current_interaction(),
+            Ok(Some(Interaction::Choice { .. }))
+        ) {
+            if let Ok(Some(dialogue)) = self.last_dialogue_interaction() {
+                self.render_interaction(dialogue);
+            }
         }
         if let Ok(Some(interaction)) = self.current_interaction() {
             self.render_interaction(interaction);

@@ -37,13 +37,24 @@ mod tests {
     }
 
     #[test]
-    fn restarting_prepared_choices_preserves_destinations(){
-        let original=Engine::new(parse("label start\nchoice {\n\"A\" => { \"first\" }\n\"B\" => { \"second\" }\n}\n").unwrap(),Mock::default(),32).unwrap();
-        let mut fresh=original.fresh(Mock::default(),32).unwrap();
-        assert_eq!(fresh.script,original.script);
-        assert!(matches!(fresh.step_until_interaction().unwrap(),Some(crate::Interaction::Choice{..})));
+    fn restarting_prepared_choices_preserves_destinations() {
+        let original = Engine::new(
+            parse("label start\nchoice {\n\"A\" => { \"first\" }\n\"B\" => { \"second\" }\n}\n")
+                .unwrap(),
+            Mock::default(),
+            32,
+        )
+        .unwrap();
+        let mut fresh = original.fresh(Mock::default(), 32).unwrap();
+        assert_eq!(fresh.script, original.script);
+        assert!(matches!(
+            fresh.step_until_interaction().unwrap(),
+            Some(crate::Interaction::Choice { .. })
+        ));
         fresh.submit_selection(1).unwrap();
-        assert!(matches!(fresh.step_until_interaction().unwrap(),Some(crate::Interaction::Dialogue{text,..}) if text=="second"));
+        assert!(
+            matches!(fresh.step_until_interaction().unwrap(),Some(crate::Interaction::Dialogue{text,..}) if text=="second")
+        );
         fresh.advance_dialogue().unwrap();
         assert!(fresh.step_until_interaction().unwrap().is_none());
         assert!(fresh.is_finished());
@@ -133,9 +144,14 @@ mod tests {
             // A new game must retain the distinction between authored and
             // synthetic returns, without changing serialized call-stack data.
             let mut e = original.fresh(Mock::default(), 32).unwrap();
-            assert!(matches!(e.step_until_interaction().unwrap(), Some(Interaction::Choice { .. })));
+            assert!(matches!(
+                e.step_until_interaction().unwrap(),
+                Some(Interaction::Choice { .. })
+            ));
             e.submit_selection(option).unwrap();
-            assert!(matches!(e.step_until_interaction().unwrap(), Some(Interaction::Dialogue { text, .. }) if text == "after call"));
+            assert!(
+                matches!(e.step_until_interaction().unwrap(), Some(Interaction::Dialogue { text, .. }) if text == "after call")
+            );
             assert!(e.state.call_stack.is_empty());
             e.advance_dialogue().unwrap();
             assert!(e.step_until_interaction().unwrap().is_none());
@@ -145,7 +161,9 @@ mod tests {
     #[test]
     fn ordinary_branch_completion_and_nested_real_calls_keep_their_continuations() {
         let mut e = engine("label start\ncall scene_1\n\"finished\"\njump done\nlabel scene_1\nif true { call inner }\nreturn\nlabel inner\nif true { return }\n\"must not run\"\nlabel done\n");
-        assert!(matches!(e.step_until_interaction().unwrap(), Some(Interaction::Dialogue { text, .. }) if text == "finished"));
+        assert!(
+            matches!(e.step_until_interaction().unwrap(), Some(Interaction::Dialogue { text, .. }) if text == "finished")
+        );
         assert!(e.state.call_stack.is_empty());
     }
 

@@ -4,7 +4,9 @@ use std::sync::atomic::{AtomicU8, Ordering};
 static LANGUAGE: AtomicU8 = AtomicU8::new(0);
 
 /// Select before creating the editor UI. Does not translate document content.
-pub fn set_diagnostic_english(english: bool) { LANGUAGE.store(if english { 2 } else { 1 }, Ordering::Relaxed); }
+pub fn set_diagnostic_english(english: bool) {
+    LANGUAGE.store(if english { 2 } else { 1 }, Ordering::Relaxed);
+}
 pub(crate) fn english() -> bool {
     match LANGUAGE.load(Ordering::Relaxed) {
         2 => true,

@@ -178,7 +178,11 @@ pub(crate) fn validate_document(graph: &GraphDocument) -> Vec<GraphDiagnostic> {
             ));
         }
         if !input.value_type.accepts(&output.value_type)
-            || graph.nodes.get(&input.node).is_some_and(|node| !node.kind.accepts_data_source(&output.value_type)) {
+            || graph
+                .nodes
+                .get(&input.node)
+                .is_some_and(|node| !node.kind.accepts_data_source(&output.value_type))
+        {
             diagnostics.push(GraphDiagnostic::error(
                 "incompatible_types",
                 format!(

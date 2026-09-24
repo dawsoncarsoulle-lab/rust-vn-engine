@@ -97,22 +97,44 @@ mod resize_tests {
     fn stage_fits_small_large_and_portrait_windows_without_accumulating_scale() {
         let mut app = App::new();
         let window = app.world_mut().spawn(Window::default()).id();
-        let stage = app.world_mut().spawn((SpriteStage, Transform::default())).id();
+        let stage = app
+            .world_mut()
+            .spawn((SpriteStage, Transform::default()))
+            .id();
         app.add_systems(Update, resize_sprite_stage);
-        for (width, height) in [(800.0,450.0),(1920.0,1080.0),(450.0,800.0),(1280.0,720.0)] {
-            app.world_mut().get_mut::<Window>(window).unwrap().resolution.set(width,height);
+        for (width, height) in [
+            (800.0, 450.0),
+            (1920.0, 1080.0),
+            (450.0, 800.0),
+            (1280.0, 720.0),
+        ] {
+            app.world_mut()
+                .get_mut::<Window>(window)
+                .unwrap()
+                .resolution
+                .set(width, height);
             app.update();
             let transform = app.world().get::<Transform>(stage).unwrap();
             assert!(WIN_W * transform.scale.x <= width + 0.01);
             assert!(WIN_H * transform.scale.y <= height + 0.01);
-            assert!((transform.translation.y - WIN_H * transform.scale.y / 2.0 + height / 2.0).abs() < 0.01);
+            assert!(
+                (transform.translation.y - WIN_H * transform.scale.y / 2.0 + height / 2.0).abs()
+                    < 0.01
+            );
         }
     }
 }
 
-pub fn resize_sprite_stage(windows: Query<&Window>, mut stages: Query<&mut Transform, With<SpriteStage>>) {
-    let Ok(window) = windows.get_single() else { return; };
-    let scale = (window.width() / WIN_W).min(window.height() / WIN_H).max(0.001);
+pub fn resize_sprite_stage(
+    windows: Query<&Window>,
+    mut stages: Query<&mut Transform, With<SpriteStage>>,
+) {
+    let Ok(window) = windows.get_single() else {
+        return;
+    };
+    let scale = (window.width() / WIN_W)
+        .min(window.height() / WIN_H)
+        .max(0.001);
     for mut stage in &mut stages {
         stage.scale = Vec3::new(scale, scale, 1.0);
         stage.translation.y = (WIN_H * scale - window.height()) * 0.5;
@@ -137,8 +159,15 @@ pub fn sprite_system(
     for cmd in cmds {
         match cmd {
             VnCommand::ClearSprites => {
-                for entity in queries.p0().iter().map(|(entity, _)| entity).chain(spawned_this_frame.values().copied()) {
-                    if retired.insert(entity) { commands.entity(entity).despawn_recursive(); }
+                for entity in queries
+                    .p0()
+                    .iter()
+                    .map(|(entity, _)| entity)
+                    .chain(spawned_this_frame.values().copied())
+                {
+                    if retired.insert(entity) {
+                        commands.entity(entity).despawn_recursive();
+                    }
                 }
                 spawned_this_frame.clear();
             }
@@ -149,7 +178,9 @@ pub fn sprite_system(
                 transition,
             } => {
                 let file = match &emotion {
-                    Some(path) if path.contains('/') => path.strip_prefix("assets/").unwrap_or(path).to_owned(),
+                    Some(path) if path.contains('/') => {
+                        path.strip_prefix("assets/").unwrap_or(path).to_owned()
+                    }
                     Some(emo) => format!("sprites/{}/{}.png", id, emo),
                     None => format!("sprites/{}/default.png", id),
                 };
@@ -160,11 +191,17 @@ pub fn sprite_system(
                 let transform = sprite_default_transform(&position);
                 let base = base_from_transform(&transform);
 
-                let existing = spawned_this_frame.get(&id).copied().filter(|e|!retired.contains(e)).or_else(|| queries
-                    .p0()
-                    .iter()
-                    .find(|(e, s)| s.id == id && !retired.contains(e))
-                    .map(|(entity, _)| entity));
+                let existing = spawned_this_frame
+                    .get(&id)
+                    .copied()
+                    .filter(|e| !retired.contains(e))
+                    .or_else(|| {
+                        queries
+                            .p0()
+                            .iter()
+                            .find(|(e, s)| s.id == id && !retired.contains(e))
+                            .map(|(entity, _)| entity)
+                    });
 
                 if let Some(entity) = existing {
                     commands.entity(entity).insert((
@@ -208,7 +245,9 @@ pub fn sprite_system(
                     }
 
                     let entity = ec.id();
-                    if let Ok(stage) = stages.get_single() { commands.entity(stage).add_child(entity); }
+                    if let Ok(stage) = stages.get_single() {
+                        commands.entity(stage).add_child(entity);
+                    }
                     spawned_this_frame.insert(id.clone(), entity);
                 }
             }
@@ -231,7 +270,9 @@ pub fn sprite_system(
                 }
 
                 if !found {
-                    if let Some(entity) = spawned_this_frame.get(&id).filter(|e| !retired.contains(e)) {
+                    if let Some(entity) =
+                        spawned_this_frame.get(&id).filter(|e| !retired.contains(e))
+                    {
                         commands.entity(*entity).remove::<SpriteAnimation>();
 
                         if let Some(anim) = make_fade_out(&transition) {

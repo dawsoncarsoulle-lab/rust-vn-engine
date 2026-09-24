@@ -8,7 +8,9 @@ pub fn transpile_project(graphs: &[GraphDocument]) -> Result<TranspiledScript, S
     let mut resolved = graphs.to_vec();
     resolve_label_references(&mut resolved)?;
     let graphs = resolved.as_slice();
-    if graphs.is_empty() { return Err("Le projet ne contient aucun graphe".into()); }
+    if graphs.is_empty() {
+        return Err("Le projet ne contient aucun graphe".into());
+    }
     let mut ordered: Vec<_> = graphs.iter().collect();
     ordered.sort_by_key(|g| match &g.kind {
         GraphKind::Init => (0, String::new()),
@@ -19,8 +21,13 @@ pub fn transpile_project(graphs: &[GraphDocument]) -> Result<TranspiledScript, S
     let mut characters = BTreeMap::new();
     for graph in &ordered {
         for (id, name) in &graph.characters {
-            if characters.insert(id.clone(), name.clone()).is_some_and(|old| old != *name) {
-                return Err(format!("Le personnage {id} porte des noms différents selon les graphes"));
+            if characters
+                .insert(id.clone(), name.clone())
+                .is_some_and(|old| old != *name)
+            {
+                return Err(format!(
+                    "Le personnage {id} porte des noms différents selon les graphes"
+                ));
             }
         }
     }
@@ -28,18 +35,28 @@ pub fn transpile_project(graphs: &[GraphDocument]) -> Result<TranspiledScript, S
     // A disconnected execution output ends that graph; it must not execute
     // whichever document happened to sort next in the project export.
     let mut end_label = "__blueprint_project_end".to_string();
-    while ordered.iter().any(|g| matches!(&g.kind, GraphKind::Label { name } if name == &end_label)
-        || g.nodes.values().any(|n| n.properties.get("label") == Some(&crate::PropertyValue::String(end_label.clone())))) {
+    while ordered.iter().any(|g| {
+        matches!(&g.kind, GraphKind::Label { name } if name == &end_label)
+            || g.nodes.values().any(|n| {
+                n.properties.get("label") == Some(&crate::PropertyValue::String(end_label.clone()))
+            })
+    }) {
         end_label.push('_');
     }
     for (index, graph) in ordered.iter().enumerate() {
         let mut graph = (*graph).clone();
-        graph.characters = if index == 0 { characters.clone() } else { BTreeMap::new() };
+        graph.characters = if index == 0 {
+            characters.clone()
+        } else {
+            BTreeMap::new()
+        };
         let compiled = transpile(&graph).map_err(|e| format!("Graphe {:?} : {e}", graph.kind))?;
         source.push_str(&compiled.source);
         // An explicit final jump already leaves this graph. Emitting another
         // jump after it creates unreachable code and spurious CLI warnings.
-        if matches!(graph.kind, GraphKind::Label { .. }) && !matches!(compiled.ast.last(), Some(Statement::Jump { .. })) {
+        if matches!(graph.kind, GraphKind::Label { .. })
+            && !matches!(compiled.ast.last(), Some(Statement::Jump { .. }))
+        {
             source.push_str(&format!("    jump {end_label}\n"));
         }
         source.push('\n');
@@ -54,20 +71,37 @@ pub fn transpile_project(graphs: &[GraphDocument]) -> Result<TranspiledScript, S
 /// The string remains a compatibility cache for single-document exports.
 pub fn resolve_label_references(graphs: &mut [GraphDocument]) -> Result<(), String> {
     let mut labels = BTreeMap::new();
-    let bound: BTreeSet<String> = graphs.iter().flat_map(|g|g.nodes.values()).filter_map(|n|match n.properties.get("target_graph"){Some(crate::PropertyValue::String(id))=>Some(id.clone()),_=>None}).collect();
+    let bound: BTreeSet<String> = graphs
+        .iter()
+        .flat_map(|g| g.nodes.values())
+        .filter_map(|n| match n.properties.get("target_graph") {
+            Some(crate::PropertyValue::String(id)) => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
     for graph in graphs.iter() {
-        if let GraphKind::Label{name}=&graph.kind {
-            let id=serde_json::to_string(&graph.graph_id).map_err(|e|e.to_string())?;
-            if labels.insert(id.clone(),name.clone()).is_some() && bound.contains(&id) {
+        if let GraphKind::Label { name } = &graph.kind {
+            let id = serde_json::to_string(&graph.graph_id).map_err(|e| e.to_string())?;
+            if labels.insert(id.clone(), name.clone()).is_some() && bound.contains(&id) {
                 return Err(format!("Identité de graphe dupliquée : {id}. Les copies doivent avoir une identité distincte."));
             }
         }
     }
     for graph in graphs {
-        for node in graph.nodes.values_mut().filter(|n|n.kind==crate::NodeKind::LabelValue) {
-            if let Some(crate::PropertyValue::String(id))=node.properties.get("target_graph") {
-                let name=labels.get(id).ok_or_else(||format!("Référence de label cassée au nœud {:?} : graphe {id} absent",node.id))?;
-                node.properties.insert("label".into(),crate::PropertyValue::String(name.clone()));
+        for node in graph
+            .nodes
+            .values_mut()
+            .filter(|n| n.kind == crate::NodeKind::LabelValue)
+        {
+            if let Some(crate::PropertyValue::String(id)) = node.properties.get("target_graph") {
+                let name = labels.get(id).ok_or_else(|| {
+                    format!(
+                        "Référence de label cassée au nœud {:?} : graphe {id} absent",
+                        node.id
+                    )
+                })?;
+                node.properties
+                    .insert("label".into(), crate::PropertyValue::String(name.clone()));
             }
         }
     }
@@ -76,16 +110,34 @@ pub fn resolve_label_references(graphs: &mut [GraphDocument]) -> Result<(), Stri
 
 /// Also usable after resolving `use` files, so unresolved destinations cannot
 /// escape project validation just because an import was present.
-pub fn validate_project_script(script: &Script, allow_external_imports: bool) -> Result<(), String> {
+pub fn validate_project_script(
+    script: &Script,
+    allow_external_imports: bool,
+) -> Result<(), String> {
     fn walk<'a>(statements: &'a [Statement], all: &mut Vec<&'a Statement>) {
         for statement in statements {
             all.push(statement);
             match statement {
                 Statement::Init { body } => walk(body, all),
-                Statement::If { then_branch, else_branch, .. } => { walk(then_branch, all); walk(else_branch, all); }
-                Statement::Choice { options } => for option in options { walk(&option.body, all); },
-                Statement::Imagemap { hotspots, .. } => for hotspot in hotspots { walk(&hotspot.body, all); },
-                _ => {},
+                Statement::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    walk(then_branch, all);
+                    walk(else_branch, all);
+                }
+                Statement::Choice { options } => {
+                    for option in options {
+                        walk(&option.body, all);
+                    }
+                }
+                Statement::Imagemap { hotspots, .. } => {
+                    for hotspot in hotspots {
+                        walk(&hotspot.body, all);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -94,7 +146,9 @@ pub fn validate_project_script(script: &Script, allow_external_imports: bool) ->
     let mut labels = BTreeSet::new();
     for statement in &all {
         if let Statement::Label { name } = statement {
-            if !labels.insert(name.as_str()) { return Err(format!("Label dupliqué dans le projet : {name}")); }
+            if !labels.insert(name.as_str()) {
+                return Err(format!("Label dupliqué dans le projet : {name}"));
+            }
         }
     }
     let imports = all.iter().any(|s| matches!(s, Statement::Use { .. }));
@@ -106,7 +160,9 @@ pub fn validate_project_script(script: &Script, allow_external_imports: bool) ->
                 _ => None,
             };
             if let Some(target) = target {
-                if !labels.contains(target) { return Err(format!("Label de destination introuvable : {target}")); }
+                if !labels.contains(target) {
+                    return Err(format!("Label de destination introuvable : {target}"));
+                }
             }
         }
     }

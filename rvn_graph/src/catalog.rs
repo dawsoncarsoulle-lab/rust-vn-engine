@@ -166,7 +166,15 @@ pub fn node_definition(kind: NodeKind) -> NodeDefinition {
             kind,
             Category::Character,
             "Retirer le sprite",
-            ["sprite", "hide", "masquer", "retirer", "destroy actor", "destroy", "détruire"]
+            [
+                "sprite",
+                "hide",
+                "masquer",
+                "retirer",
+                "destroy actor",
+                "destroy",
+                "détruire"
+            ]
         ),
         Kind::SpriteMove => definition!(
             kind,
@@ -264,7 +272,12 @@ pub fn node_definition(kind: NodeKind) -> NodeDefinition {
             "Vitesse du typewriter",
             ["typewriter", "speed"]
         ),
-        Kind::MakeColor => definition!(kind, Category::Expression, "Make Color", ["couleur", "color", "rgb", "rgba", "teinte"]),
+        Kind::MakeColor => definition!(
+            kind,
+            Category::Expression,
+            "Make Color",
+            ["couleur", "color", "rgb", "rgba", "teinte"]
+        ),
         Kind::Literal => definition!(
             kind,
             Category::Expression,
@@ -278,8 +291,18 @@ pub fn node_definition(kind: NodeKind) -> NodeDefinition {
             "Texte",
             ["text", "dialogue", "string"]
         ),
-        Kind::LabelValue => definition!(kind, Category::Flow, "Référence de label", ["label", "destination", "reference", "saut", "chapitre"]),
-        Kind::PositionValue => definition!(kind, Category::Scene, "Position", ["position", "left", "center", "right"]),
+        Kind::LabelValue => definition!(
+            kind,
+            Category::Flow,
+            "Référence de label",
+            ["label", "destination", "reference", "saut", "chapitre"]
+        ),
+        Kind::PositionValue => definition!(
+            kind,
+            Category::Scene,
+            "Position",
+            ["position", "left", "center", "right"]
+        ),
         Kind::CharacterValue => definition!(
             kind,
             Category::Character,

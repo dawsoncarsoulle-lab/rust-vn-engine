@@ -2,10 +2,10 @@ mod catalog;
 mod codegen;
 mod document;
 mod ids;
+mod import;
 mod migration;
 mod pin_catalog;
 mod project;
-mod import;
 mod types;
 mod validation;
 
@@ -18,5 +18,5 @@ pub use validation::*;
 pub const GRAPH_SCHEMA_VERSION: u32 = 2;
 pub use catalog::*;
 pub use codegen::*;
-pub use project::*;
 pub use import::*;
+pub use project::*;

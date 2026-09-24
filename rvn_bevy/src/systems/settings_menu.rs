@@ -571,15 +571,33 @@ pub fn apply_settings_to_runtime_system(
         if locale.current_lang() != settings.language {
             match locale.set_language(&settings.language) {
                 Ok(()) => {
-                    if let Ok(lines)=engine.0.localized_dialogue_history() {
+                    if let Ok(lines) = engine.0.localized_dialogue_history() {
                         history.clear();
-                        for (character,text) in &lines { history.add(character.as_deref().map(|id|registry.display_name(id)).unwrap_or("").into(),rvn_core::parse_text_tags(text).map(|rich|rich.plain_text()).unwrap_or_else(|_|text.clone())); }
-                        if matches!(engine.0.current_interaction(),Ok(Some(rvn_core::Interaction::Choice{..}))) {
-                            if let Ok(Some(rvn_core::Interaction::Dialogue{character,text}))=engine.0.last_dialogue_interaction() { vn_events.send(VnCommand::ShowDialogue{character,text}); }
+                        for (character, text) in &lines {
+                            history.add(
+                                character
+                                    .as_deref()
+                                    .map(|id| registry.display_name(id))
+                                    .unwrap_or("")
+                                    .into(),
+                                rvn_core::parse_text_tags(text)
+                                    .map(|rich| rich.plain_text())
+                                    .unwrap_or_else(|_| text.clone()),
+                            );
+                        }
+                        if matches!(
+                            engine.0.current_interaction(),
+                            Ok(Some(rvn_core::Interaction::Choice { .. }))
+                        ) {
+                            if let Ok(Some(rvn_core::Interaction::Dialogue { character, text })) =
+                                engine.0.last_dialogue_interaction()
+                            {
+                                vn_events.send(VnCommand::ShowDialogue { character, text });
+                            }
                         }
                     }
                     refresh_current_interaction(&mut engine, &mut vn_events);
-                },
+                }
                 Err(e) => {
                     error!(
                         "[settings] impossible de charger la langue `{}` : {}",

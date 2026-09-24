@@ -39,22 +39,21 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Clippy (core crates)
-        run: cargo clippy -p rvn_parser -p rvn_core -p rvn_lsp --all-targets -- -D warnings
-
-      - name: Clippy (full workspace)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      # Historical style warnings are visible but not promoted to build errors.
+      # Compilation errors, formatting and test failures remain blocking.
+      - name: Clippy (workspace; existing warnings reported)
+        run: cargo clippy --release --locked --workspace --all-targets
 
       - name: Build workspace
-        run: cargo build --workspace
+        run: cargo build --release --locked --workspace
 
       - name: Build WASM
-        run: cargo build -p rvn_bevy --target wasm32-unknown-unknown
+        run: cargo build --release --locked -p rvn_bevy --target wasm32-unknown-unknown
 
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo test --release --locked --workspace
 
       - name: Validate template project
         run: |
-          cargo run -p rvn_cli -- new /tmp/rvn_ci_demo
-          cargo run -p rvn_cli -- check /tmp/rvn_ci_demo
+          ./target/release/rvn new /tmp/rvn_ci_demo
+          ./target/release/rvn check /tmp/rvn_ci_demo

@@ -9,7 +9,13 @@ pub struct ImagemapZone {
 
 impl From<&rvn_parser::Hotspot> for ImagemapZone {
     fn from(value: &rvn_parser::Hotspot) -> Self {
-        Self { area: value.area.clone(), hover_area: value.hover_area.clone().unwrap_or_else(|| value.area.clone()) }
+        Self {
+            area: value.area.clone(),
+            hover_area: value
+                .hover_area
+                .clone()
+                .unwrap_or_else(|| value.area.clone()),
+        }
     }
 }
 

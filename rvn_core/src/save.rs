@@ -9,8 +9,11 @@ use std::path::{Path, PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Clone,Copy,Debug,PartialEq,Eq)]
-pub enum ResumeSlot {Auto,Quick}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResumeSlot {
+    Auto,
+    Quick,
+}
 
 // ─── ERREURS
 
@@ -296,31 +299,72 @@ pub struct SaveManager {
 }
 
 impl SaveManager {
-    fn protected_slots(&self)->Result<std::collections::BTreeSet<u32>,SaveError>{
-        #[cfg(not(target_arch="wasm32"))]
-        let json=match fs::read_to_string(self.save_dir.join("protected_slots.json")){Ok(json)=>Some(json),Err(e)if e.kind()==std::io::ErrorKind::NotFound=>None,Err(e)=>return Err(e.into())};
-        #[cfg(target_arch="wasm32")]
-        let json=Self::local_storage()?.get_item(&self.storage_key("protected_slots")).map_err(|_|SaveError::Io(std::io::Error::other("lecture des protections impossible")))?;
-        json.map(|json|serde_json::from_str(&json).map_err(SaveError::Json)).unwrap_or_else(||Ok(Default::default()))
+    fn protected_slots(&self) -> Result<std::collections::BTreeSet<u32>, SaveError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        let json = match fs::read_to_string(self.save_dir.join("protected_slots.json")) {
+            Ok(json) => Some(json),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e.into()),
+        };
+        #[cfg(target_arch = "wasm32")]
+        let json = Self::local_storage()?
+            .get_item(&self.storage_key("protected_slots"))
+            .map_err(|_| {
+                SaveError::Io(std::io::Error::other("lecture des protections impossible"))
+            })?;
+        json.map(|json| serde_json::from_str(&json).map_err(SaveError::Json))
+            .unwrap_or_else(|| Ok(Default::default()))
     }
-    pub fn is_protected(&self,slot:u32)->Result<bool,SaveError>{self.check_slot(slot)?;Ok(self.protected_slots()?.contains(&slot))}
-    pub fn set_protected(&self,slot:u32,protected:bool)->Result<(),SaveError>{
-        self.check_slot(slot)?;let mut slots=self.protected_slots()?;if protected{slots.insert(slot);}else{slots.remove(&slot);}let json=serde_json::to_string(&slots)?;
-        #[cfg(not(target_arch="wasm32"))]
-        self.write_atomic(&self.save_dir.join("protected_slots.json"),&json)?;
-        #[cfg(target_arch="wasm32")]
-        Self::local_storage()?.set_item(&self.storage_key("protected_slots"),&json).map_err(|_|SaveError::Io(std::io::Error::other("écriture des protections impossible")))?;
+    pub fn is_protected(&self, slot: u32) -> Result<bool, SaveError> {
+        self.check_slot(slot)?;
+        Ok(self.protected_slots()?.contains(&slot))
+    }
+    pub fn set_protected(&self, slot: u32, protected: bool) -> Result<(), SaveError> {
+        self.check_slot(slot)?;
+        let mut slots = self.protected_slots()?;
+        if protected {
+            slots.insert(slot);
+        } else {
+            slots.remove(&slot);
+        }
+        let json = serde_json::to_string(&slots)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        self.write_atomic(&self.save_dir.join("protected_slots.json"), &json)?;
+        #[cfg(target_arch = "wasm32")]
+        Self::local_storage()?
+            .set_item(&self.storage_key("protected_slots"), &json)
+            .map_err(|_| {
+                SaveError::Io(std::io::Error::other("écriture des protections impossible"))
+            })?;
         Ok(())
     }
-    fn check_writable(&self,slot:u32)->Result<(),SaveError>{if self.is_protected(slot)?{return Err(SaveError::SlotProtege(slot));}Ok(())}
+    fn check_writable(&self, slot: u32) -> Result<(), SaveError> {
+        if self.is_protected(slot)? {
+            return Err(SaveError::SlotProtege(slot));
+        }
+        Ok(())
+    }
     #[cfg(not(target_arch = "wasm32"))]
-    fn write_atomic(&self,path:&Path,json:&str)->Result<(),SaveError>{
+    fn write_atomic(&self, path: &Path, json: &str) -> Result<(), SaveError> {
         use std::io::Write;
-        let stamp=SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
-        let temporary=path.with_extension(format!("pending-{}-{stamp}",std::process::id()));
-        let mut file=fs::OpenOptions::new().write(true).create_new(true).open(&temporary)?;
-        let result=(||{file.write_all(json.as_bytes())?;file.sync_all()?;drop(file);fs::rename(&temporary,path)})();// Publish only a complete file.
-        if result.is_err(){let _=fs::remove_file(&temporary);}
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let temporary = path.with_extension(format!("pending-{}-{stamp}", std::process::id()));
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        let result = (|| {
+            file.write_all(json.as_bytes())?;
+            file.sync_all()?;
+            drop(file);
+            fs::rename(&temporary, path)
+        })(); // Publish only a complete file.
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
         result.map_err(SaveError::Io)
     }
     pub fn new(save_dir: impl AsRef<Path>, max_slots: u32) -> Result<Self, SaveError> {
@@ -377,22 +421,34 @@ impl SaveManager {
 
     /// Update presentation metadata without changing the saved narrative state.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn set_thumbnail(&self, slot:u32, thumbnail:String)->Result<(),SaveError>{
+    pub fn set_thumbnail(&self, slot: u32, thumbnail: String) -> Result<(), SaveError> {
         self.check_slot(slot)?;
         self.check_writable(slot)?;
-        let mut data=self.load(slot)?;
-        data.thumbnail=Some(thumbnail);
-        self.write_atomic(&self.slot_path(slot),&serde_json::to_string_pretty(&data)?)
+        let mut data = self.load(slot)?;
+        data.thumbnail = Some(thumbnail);
+        self.write_atomic(&self.slot_path(slot), &serde_json::to_string_pretty(&data)?)
     }
 
     /// Attach a delayed screenshot only if this is still the same save.
     /// Narrative state, timestamp and the on-disk format remain unchanged.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn set_resume_thumbnail(&self,slot:ResumeSlot,expected:&SaveData,thumbnail:String)->Result<bool,SaveError>{
-        let path=match slot{ResumeSlot::Auto=>self.autosave_path(),ResumeSlot::Quick=>self.quicksave_path()};
-        let mut data=self.load_from_path(path.clone())?;
-        if serde_json::to_value(&data)?!=serde_json::to_value(expected)?{return Ok(false);}
-        data.thumbnail=Some(thumbnail);self.write_atomic(&path,&serde_json::to_string_pretty(&data)?)?;Ok(true)
+    pub fn set_resume_thumbnail(
+        &self,
+        slot: ResumeSlot,
+        expected: &SaveData,
+        thumbnail: String,
+    ) -> Result<bool, SaveError> {
+        let path = match slot {
+            ResumeSlot::Auto => self.autosave_path(),
+            ResumeSlot::Quick => self.quicksave_path(),
+        };
+        let mut data = self.load_from_path(path.clone())?;
+        if serde_json::to_value(&data)? != serde_json::to_value(expected)? {
+            return Ok(false);
+        }
+        data.thumbnail = Some(thumbnail);
+        self.write_atomic(&path, &serde_json::to_string_pretty(&data)?)?;
+        Ok(true)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -407,7 +463,7 @@ impl SaveManager {
         self.check_writable(slot)?;
         let data = SaveData::from_state(state, slot, label, script_name);
         let json = serde_json::to_string_pretty(&data)?;
-        self.write_atomic(&self.slot_path(slot),&json)?;
+        self.write_atomic(&self.slot_path(slot), &json)?;
         Ok(())
     }
 
@@ -445,7 +501,7 @@ impl SaveManager {
     ) -> Result<(), SaveError> {
         let data = SaveData::from_state(state, slot, label, script_name);
         let json = serde_json::to_string_pretty(&data)?;
-        self.write_atomic(&path,&json)?;
+        self.write_atomic(&path, &json)?;
         Ok(())
     }
 
@@ -687,13 +743,39 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn delayed_resume_thumbnail_never_overwrites_a_newer_save(){
-        let directory=std::env::temp_dir().join(format!("rvn_resume_thumbnail_{}",std::process::id()));let manager=SaveManager::new(&directory,10).unwrap();let mut state=sample_state();
-        for slot in [ResumeSlot::Auto,ResumeSlot::Quick]{
-            let write=|state:&GameState|match slot{ResumeSlot::Auto=>manager.save_autosave(state,"Auto".into(),"test.rvn".into()),ResumeSlot::Quick=>manager.save_quicksave(state,"Quick".into(),"test.rvn".into())};
-            let read=||match slot{ResumeSlot::Auto=>manager.load_autosave(),ResumeSlot::Quick=>manager.load_quicksave()};
-            write(&state).unwrap();let expected=read().unwrap();let before=serde_json::to_value(&expected).unwrap();assert!(manager.set_resume_thumbnail(slot,&expected,"@save/test.png".into()).unwrap());let mut after=serde_json::to_value(read().unwrap()).unwrap();after["thumbnail"]=before["thumbnail"].clone();assert_eq!(before,after);
-            state.pc+=1;state.current_interactive_pc+=1;write(&state).unwrap();let newer=serde_json::to_value(read().unwrap()).unwrap();assert!(!manager.set_resume_thumbnail(slot,&expected,"@save/stale.png".into()).unwrap());assert_eq!(newer,serde_json::to_value(read().unwrap()).unwrap());
+    fn delayed_resume_thumbnail_never_overwrites_a_newer_save() {
+        let directory =
+            std::env::temp_dir().join(format!("rvn_resume_thumbnail_{}", std::process::id()));
+        let manager = SaveManager::new(&directory, 10).unwrap();
+        let mut state = sample_state();
+        for slot in [ResumeSlot::Auto, ResumeSlot::Quick] {
+            let write = |state: &GameState| match slot {
+                ResumeSlot::Auto => manager.save_autosave(state, "Auto".into(), "test.rvn".into()),
+                ResumeSlot::Quick => {
+                    manager.save_quicksave(state, "Quick".into(), "test.rvn".into())
+                }
+            };
+            let read = || match slot {
+                ResumeSlot::Auto => manager.load_autosave(),
+                ResumeSlot::Quick => manager.load_quicksave(),
+            };
+            write(&state).unwrap();
+            let expected = read().unwrap();
+            let before = serde_json::to_value(&expected).unwrap();
+            assert!(manager
+                .set_resume_thumbnail(slot, &expected, "@save/test.png".into())
+                .unwrap());
+            let mut after = serde_json::to_value(read().unwrap()).unwrap();
+            after["thumbnail"] = before["thumbnail"].clone();
+            assert_eq!(before, after);
+            state.pc += 1;
+            state.current_interactive_pc += 1;
+            write(&state).unwrap();
+            let newer = serde_json::to_value(read().unwrap()).unwrap();
+            assert!(!manager
+                .set_resume_thumbnail(slot, &expected, "@save/stale.png".into())
+                .unwrap());
+            assert_eq!(newer, serde_json::to_value(read().unwrap()).unwrap());
         }
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -774,18 +856,31 @@ mod tests {
 
     #[test]
     fn protected_slots_preserve_data_until_explicitly_unlocked() {
-        let dir = std::env::temp_dir().join(format!("rvn_protection_{}_{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        let dir = std::env::temp_dir().join(format!(
+            "rvn_protection_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         let mgr = SaveManager::new(&dir, 10).unwrap();
         let state = sample_state();
-        mgr.save(&state, 1, "Original".into(), "test.rvn".into()).unwrap();
+        mgr.save(&state, 1, "Original".into(), "test.rvn".into())
+            .unwrap();
         mgr.set_protected(1, true).unwrap();
         let reopened = SaveManager::new(&dir, 10).unwrap();
         assert!(reopened.is_protected(1).unwrap());
-        assert!(matches!(reopened.save(&state, 1, "Replacement".into(), "test.rvn".into()), Err(SaveError::SlotProtege(1))));
+        assert!(matches!(
+            reopened.save(&state, 1, "Replacement".into(), "test.rvn".into()),
+            Err(SaveError::SlotProtege(1))
+        ));
         assert!(matches!(reopened.delete(1), Err(SaveError::SlotProtege(1))));
         assert_eq!(reopened.load(1).unwrap().label, "Original");
         reopened.set_protected(1, false).unwrap();
-        reopened.save(&state, 1, "Replacement".into(), "test.rvn".into()).unwrap();
+        reopened
+            .save(&state, 1, "Replacement".into(), "test.rvn".into())
+            .unwrap();
         reopened.delete(1).unwrap();
         assert!(!reopened.slot_occupied(1));
         fs::remove_dir_all(dir).unwrap();
@@ -793,12 +888,22 @@ mod tests {
 
     #[test]
     fn unreadable_protection_metadata_fails_closed() {
-        let dir = std::env::temp_dir().join(format!("rvn_protection_corrupt_{}_{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        let dir = std::env::temp_dir().join(format!(
+            "rvn_protection_corrupt_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         let mgr = SaveManager::new(&dir, 10).unwrap();
         let state = sample_state();
-        mgr.save(&state, 1, "Original".into(), "test.rvn".into()).unwrap();
+        mgr.save(&state, 1, "Original".into(), "test.rvn".into())
+            .unwrap();
         fs::write(dir.join("protected_slots.json"), "invalid metadata").unwrap();
-        assert!(mgr.save(&state, 1, "Replacement".into(), "test.rvn".into()).is_err());
+        assert!(mgr
+            .save(&state, 1, "Replacement".into(), "test.rvn".into())
+            .is_err());
         assert!(mgr.delete(1).is_err());
         assert_eq!(mgr.load(1).unwrap().label, "Original");
         fs::remove_dir_all(dir).unwrap();
@@ -816,11 +921,15 @@ mod tests {
         assert!(mgr.slot_occupied(1));
 
         let loaded = mgr.load(1).unwrap();
-        let before=serde_json::to_value(&loaded).unwrap();
-        mgr.set_thumbnail(1,"@save/thumbnail_1.png".into()).unwrap();
-        let mut after=serde_json::to_value(mgr.load(1).unwrap()).unwrap();
-        after["thumbnail"]=before["thumbnail"].clone();
-        assert_eq!(before,after,"A thumbnail must not change narrative data or timestamp");
+        let before = serde_json::to_value(&loaded).unwrap();
+        mgr.set_thumbnail(1, "@save/thumbnail_1.png".into())
+            .unwrap();
+        let mut after = serde_json::to_value(mgr.load(1).unwrap()).unwrap();
+        after["thumbnail"] = before["thumbnail"].clone();
+        assert_eq!(
+            before, after,
+            "A thumbnail must not change narrative data or timestamp"
+        );
         let gs = loaded.into_game_state();
         assert_eq!(gs.pc, 7);
         assert_eq!(gs.background_image, "plage.png");

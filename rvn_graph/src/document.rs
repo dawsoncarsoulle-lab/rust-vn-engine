@@ -168,11 +168,22 @@ impl GraphDocument {
         // doivent être présentes dès sa création. L'éditeur peut ainsi proposer
         // un inspecteur typé sans connaître des valeurs implicites propres au codegen.
         let defaults = match kind {
-            NodeKind::Label => vec![("label", PropertyValue::String(
-                if self.nodes.values().filter(|n| n.kind == NodeKind::Label).count() == 1 {
-                    String::new()
-                } else { format!("label_{}", node) }
-            ))],
+            NodeKind::Label => vec![(
+                "label",
+                PropertyValue::String(
+                    if self
+                        .nodes
+                        .values()
+                        .filter(|n| n.kind == NodeKind::Label)
+                        .count()
+                        == 1
+                    {
+                        String::new()
+                    } else {
+                        format!("label_{}", node)
+                    },
+                ),
+            )],
             NodeKind::MakeColor => vec![("rgb_max", PropertyValue::Int(255))],
             NodeKind::Literal => vec![("value", PropertyValue::String(String::new()))],
             NodeKind::TextValue => vec![("value", PropertyValue::String(String::new()))],
@@ -231,10 +242,20 @@ impl GraphDocument {
                 vec![("params", PropertyValue::StringList(Vec::new()))]
             }
             NodeKind::SpriteEffect => ["flip_x", "flip_y", "scale", "rotation", "tint"]
-                .into_iter().map(|key| (match key {
-                    "flip_x" => "apply_flip_x", "flip_y" => "apply_flip_y",
-                    "scale" => "apply_scale", "rotation" => "apply_rotation", _ => "apply_tint",
-                }, PropertyValue::Bool(false))).collect(),
+                .into_iter()
+                .map(|key| {
+                    (
+                        match key {
+                            "flip_x" => "apply_flip_x",
+                            "flip_y" => "apply_flip_y",
+                            "scale" => "apply_scale",
+                            "rotation" => "apply_rotation",
+                            _ => "apply_tint",
+                        },
+                        PropertyValue::Bool(false),
+                    )
+                })
+                .collect(),
             NodeKind::Imagemap => {
                 vec![("hotspots", PropertyValue::StringList(Vec::new()))]
             }
@@ -248,31 +269,70 @@ impl GraphDocument {
 
     /// Typed, connectable arguments. Legacy string arrays are kept as strings
     /// when explicitly upgraded; numeric-looking old text is never reinterpreted.
-    pub fn resize_value_inputs(&mut self, node: NodeId, count: usize) -> Result<(), GraphEditError> {
-        let owner = self.nodes.get(&node).ok_or(GraphEditError::NodeNotFound(node))?;
+    pub fn resize_value_inputs(
+        &mut self,
+        node: NodeId,
+        count: usize,
+    ) -> Result<(), GraphEditError> {
+        let owner = self
+            .nodes
+            .get(&node)
+            .ok_or(GraphEditError::NodeNotFound(node))?;
         if !matches!(owner.kind, NodeKind::FunctionCall | NodeKind::ListLiteral) {
-            return Err(GraphEditError::WrongNodeKind { node, expected: NodeKind::FunctionCall, found: owner.kind });
+            return Err(GraphEditError::WrongNodeKind {
+                node,
+                expected: NodeKind::FunctionCall,
+                found: owner.kind,
+            });
         }
-        let legacy_key = if owner.kind == NodeKind::FunctionCall { "args" } else { "items" };
+        let legacy_key = if owner.kind == NodeKind::FunctionCall {
+            "args"
+        } else {
+            "items"
+        };
         let legacy = match owner.properties.get(legacy_key) {
-            Some(PropertyValue::StringList(values)) => values.clone(), _ => Vec::new(),
+            Some(PropertyValue::StringList(values)) => values.clone(),
+            _ => Vec::new(),
         };
         let count = count.min(128);
         for index in 0..count {
             let key = format!("item_{index}");
             if self.pin_by_key(node, &key).is_none() {
-                let pin = self.add_pin(node, key, format!("[{index}]"), PinDirection::Input,
-                    ValueType::Any, PinCardinality::One)?;
-                self.pins.get_mut(&pin).unwrap().default_value = Some(legacy.get(index)
-                    .map(|v| PropertyValue::String(v.clone())).unwrap_or(PropertyValue::Int(0)));
+                let pin = self.add_pin(
+                    node,
+                    key,
+                    format!("[{index}]"),
+                    PinDirection::Input,
+                    ValueType::Any,
+                    PinCardinality::One,
+                )?;
+                self.pins.get_mut(&pin).unwrap().default_value = Some(
+                    legacy
+                        .get(index)
+                        .map(|v| PropertyValue::String(v.clone()))
+                        .unwrap_or(PropertyValue::Int(0)),
+                );
             }
         }
-        let removed: BTreeSet<_> = self.nodes[&node].pins.iter().copied().filter(|id| {
-            self.pins[id].key.strip_prefix("item_").and_then(|s| s.parse::<usize>().ok())
-                .is_some_and(|index| index >= count)
-        }).collect();
-        self.nodes.get_mut(&node).unwrap().pins.retain(|id| !removed.contains(id));
-        self.edges.retain(|_, e| !removed.contains(&e.input) && !removed.contains(&e.output));
+        let removed: BTreeSet<_> = self.nodes[&node]
+            .pins
+            .iter()
+            .copied()
+            .filter(|id| {
+                self.pins[id]
+                    .key
+                    .strip_prefix("item_")
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .is_some_and(|index| index >= count)
+            })
+            .collect();
+        self.nodes
+            .get_mut(&node)
+            .unwrap()
+            .pins
+            .retain(|id| !removed.contains(id));
+        self.edges
+            .retain(|_, e| !removed.contains(&e.input) && !removed.contains(&e.output));
         self.pins.retain(|id, _| !removed.contains(id));
         self.set_property(node, "input_count", PropertyValue::Int(count as i64))?;
         Ok(())
@@ -447,7 +507,11 @@ impl GraphDocument {
             ValueType::Bool,
             PinCardinality::One,
         )?;
-        self.set_property(node, format!("option_{index}_condition"), PropertyValue::String(String::new()))?;
+        self.set_property(
+            node,
+            format!("option_{index}_condition"),
+            PropertyValue::String(String::new()),
+        )?;
         Ok(ChoiceOptionPins {
             index,
             branch,
@@ -602,7 +666,11 @@ impl GraphDocument {
         }
         if labels.len() < previous_len {
             for index in labels.len()..previous_len {
-                self.nodes.get_mut(&node).unwrap().properties.remove(&format!("option_{index}_condition"));
+                self.nodes
+                    .get_mut(&node)
+                    .unwrap()
+                    .properties
+                    .remove(&format!("option_{index}_condition"));
             }
             let removed: BTreeSet<_> = (labels.len()..previous_len)
                 .flat_map(|index| {
@@ -706,10 +774,12 @@ impl GraphDocument {
             .filter(|pin| !pin.value_type.is_execution())
             .filter(|pin| {
                 let node = &self.nodes[&pin.node];
-                node.kind != NodeKind::MakeColor && !(matches!(node.kind, NodeKind::FunctionCall | NodeKind::ListLiteral)
-                    && node.properties.contains_key("input_count"))
+                node.kind != NodeKind::MakeColor
+                    && !(matches!(node.kind, NodeKind::FunctionCall | NodeKind::ListLiteral)
+                        && node.properties.contains_key("input_count"))
                     && !(node.kind == NodeKind::SpriteEffect
-                        && node.properties.get(&format!("apply_{}", pin.key)) == Some(&PropertyValue::Bool(false)))
+                        && node.properties.get(&format!("apply_{}", pin.key))
+                            == Some(&PropertyValue::Bool(false)))
             })
             .filter(|pin| {
                 !matches!(
@@ -720,9 +790,7 @@ impl GraphDocument {
             // Le nom affiché par un SET est son identité, pas une valeur de
             // graphe. UE l'intègre au nœud SET et ne crée jamais une fausse
             // constante texte reliée à une broche `name`.
-            .filter(|pin| {
-                self.nodes[&pin.node].kind != NodeKind::SetVariable
-            })
+            .filter(|pin| self.nodes[&pin.node].kind != NodeKind::SetVariable)
             // Le patron est volontairement édité dans le nœud Format Text,
             // comme dans UE5. Il ne doit pas être extrait dans une constante.
             .filter(|pin| {
@@ -818,38 +886,82 @@ impl GraphDocument {
     }
 
     /// Consume an old explicit emotion once; never recreate a disconnected sprite.
-    pub fn materialize_legacy_sprite_sources(&mut self) -> Result<usize,GraphEditError> {
-        fn source(g:&GraphDocument,node:NodeId,key:&str,seen:&mut BTreeSet<NodeId>) -> Option<NodeId> {
-            if !seen.insert(node) {return None;}
-            let pin=g.pin_by_key(node,key)?;
-            let edge=g.edges.values().find(|e|e.input==pin.id)?;
-            let owner=g.pins.get(&edge.output)?.node;
-            if g.nodes[&owner].kind==NodeKind::Reroute {source(g,owner,"value",seen)} else {Some(owner)}
-        }
-        let mut candidates=Vec::new();
-        for node in self.nodes.values().filter(|n|n.kind==NodeKind::SpriteShow) {
-            let Some(character)=source(self,node.id,"character",&mut BTreeSet::new()).filter(|id|self.nodes[id].kind==NodeKind::CharacterValue) else {continue};
-            let Some(PropertyValue::String(id))=self.nodes[&character].properties.get("character") else {continue};
-            let Some(pin)=self.pin_by_key(character,"sprite") else {continue};
-            if self.edges.values().any(|e|e.input==pin.id) {continue;}
-            let emotion=source(self,node.id,"emotion",&mut BTreeSet::new()).and_then(|id|self.nodes[&id].properties.get("value"))
-                .or_else(||self.pin_by_key(node.id,"emotion").and_then(|p|p.default_value.as_ref()));
-            let Some(PropertyValue::String(emotion))=emotion.filter(|v|matches!(v,PropertyValue::String(s) if !s.is_empty())) else {continue};
-            let path=if emotion.contains('/') {emotion.clone()} else {format!("sprites/{id}/{emotion}.png")};
-            candidates.push((node.id,character,pin.id,path));
-        }
-        for (show,character,input,path) in &candidates {
-            let pos=self.nodes[character].position;
-            let image=self.add_catalog_node(NodeKind::SpriteAsset,[pos[0]-280.0,pos[1]+160.0])?;
-            self.set_property(image,"path",PropertyValue::String(path.clone()))?;
-            self.place_without_overlap(image);
-            let output=self.pin_by_key(image,"value").unwrap().id;
-            self.connect(output,*input)?;
-            if let Some(pin)=self.pin_by_key(*show,"emotion").map(|p|p.id) {
-                self.edges.retain(|_,e|e.input!=pin);
-                self.pins.get_mut(&pin).unwrap().default_value=None;
+    pub fn materialize_legacy_sprite_sources(&mut self) -> Result<usize, GraphEditError> {
+        fn source(
+            g: &GraphDocument,
+            node: NodeId,
+            key: &str,
+            seen: &mut BTreeSet<NodeId>,
+        ) -> Option<NodeId> {
+            if !seen.insert(node) {
+                return None;
             }
-            self.nodes.get_mut(character).unwrap().properties.remove("emotion");
+            let pin = g.pin_by_key(node, key)?;
+            let edge = g.edges.values().find(|e| e.input == pin.id)?;
+            let owner = g.pins.get(&edge.output)?.node;
+            if g.nodes[&owner].kind == NodeKind::Reroute {
+                source(g, owner, "value", seen)
+            } else {
+                Some(owner)
+            }
+        }
+        let mut candidates = Vec::new();
+        for node in self
+            .nodes
+            .values()
+            .filter(|n| n.kind == NodeKind::SpriteShow)
+        {
+            let Some(character) = source(self, node.id, "character", &mut BTreeSet::new())
+                .filter(|id| self.nodes[id].kind == NodeKind::CharacterValue)
+            else {
+                continue;
+            };
+            let Some(PropertyValue::String(id)) =
+                self.nodes[&character].properties.get("character")
+            else {
+                continue;
+            };
+            let Some(pin) = self.pin_by_key(character, "sprite") else {
+                continue;
+            };
+            if self.edges.values().any(|e| e.input == pin.id) {
+                continue;
+            }
+            let emotion = source(self, node.id, "emotion", &mut BTreeSet::new())
+                .and_then(|id| self.nodes[&id].properties.get("value"))
+                .or_else(|| {
+                    self.pin_by_key(node.id, "emotion")
+                        .and_then(|p| p.default_value.as_ref())
+                });
+            let Some(PropertyValue::String(emotion)) =
+                emotion.filter(|v| matches!(v,PropertyValue::String(s) if !s.is_empty()))
+            else {
+                continue;
+            };
+            let path = if emotion.contains('/') {
+                emotion.clone()
+            } else {
+                format!("sprites/{id}/{emotion}.png")
+            };
+            candidates.push((node.id, character, pin.id, path));
+        }
+        for (show, character, input, path) in &candidates {
+            let pos = self.nodes[character].position;
+            let image =
+                self.add_catalog_node(NodeKind::SpriteAsset, [pos[0] - 280.0, pos[1] + 160.0])?;
+            self.set_property(image, "path", PropertyValue::String(path.clone()))?;
+            self.place_without_overlap(image);
+            let output = self.pin_by_key(image, "value").unwrap().id;
+            self.connect(output, *input)?;
+            if let Some(pin) = self.pin_by_key(*show, "emotion").map(|p| p.id) {
+                self.edges.retain(|_, e| e.input != pin);
+                self.pins.get_mut(&pin).unwrap().default_value = None;
+            }
+            self.nodes
+                .get_mut(character)
+                .unwrap()
+                .properties
+                .remove("emotion");
         }
         Ok(candidates.len())
     }
@@ -1144,7 +1256,10 @@ impl GraphDocument {
             return Err(GraphEditError::InvalidDirection { output, input });
         }
         if !input_pin.value_type.accepts(&output_pin.value_type)
-            || !self.nodes[&input_pin.node].kind.accepts_data_source(&output_pin.value_type) {
+            || !self.nodes[&input_pin.node]
+                .kind
+                .accepts_data_source(&output_pin.value_type)
+        {
             return Err(GraphEditError::IncompatibleTypes {
                 output: output_pin.value_type.clone(),
                 input: input_pin.value_type.clone(),
@@ -1201,24 +1316,40 @@ impl GraphDocument {
     /// Upgrade normalized RGB inputs without changing their rendered color.
     /// Connected sources are left intact and explicitly scaled at the color input.
     pub fn upgrade_color_range(&mut self) -> Result<usize, GraphEditError> {
-        let legacy: Vec<_> = self.nodes.values().filter(|n| n.kind == NodeKind::MakeColor
-            && n.properties.get("rgb_max") != Some(&PropertyValue::Int(255))).map(|n| n.id).collect();
+        let legacy: Vec<_> = self
+            .nodes
+            .values()
+            .filter(|n| {
+                n.kind == NodeKind::MakeColor
+                    && n.properties.get("rgb_max") != Some(&PropertyValue::Int(255))
+            })
+            .map(|n| n.id)
+            .collect();
         for node in &legacy {
             for (index, key) in ["r", "g", "b"].into_iter().enumerate() {
-                let Some(pin) = self.pin_by_key(*node, key).map(|p| p.id) else { continue; };
+                let Some(pin) = self.pin_by_key(*node, key).map(|p| p.id) else {
+                    continue;
+                };
                 if let Some(edge) = self.edges.values().find(|e| e.input == pin).cloned() {
                     let pos = self.nodes[node].position;
-                    let scale = self.add_catalog_node(NodeKind::MathMultiply, [pos[0] - 220.0, pos[1] + index as f64 * 90.0])?;
+                    let scale = self.add_catalog_node(
+                        NodeKind::MathMultiply,
+                        [pos[0] - 220.0, pos[1] + index as f64 * 90.0],
+                    )?;
                     let left = self.pin_by_key(scale, "left").unwrap().id;
                     let right = self.pin_by_key(scale, "right").unwrap().id;
                     let result = self.pin_by_key(scale, "value").unwrap().id;
-                    self.pins.get_mut(&right).unwrap().default_value = Some(PropertyValue::Float(255.0));
+                    self.pins.get_mut(&right).unwrap().default_value =
+                        Some(PropertyValue::Float(255.0));
                     self.remove_edge(edge.id);
                     self.connect(edge.output, left)?;
                     self.connect(result, pin)?;
                 } else if let Some(value) = &mut self.pins.get_mut(&pin).unwrap().default_value {
-                    *value = match value { PropertyValue::Float(n) => PropertyValue::Float(*n * 255.0),
-                        PropertyValue::Int(n) => PropertyValue::Float(*n as f64 * 255.0), _ => value.clone() };
+                    *value = match value {
+                        PropertyValue::Float(n) => PropertyValue::Float(*n * 255.0),
+                        PropertyValue::Int(n) => PropertyValue::Float(*n as f64 * 255.0),
+                        _ => value.clone(),
+                    };
                 }
             }
             self.set_property(*node, "rgb_max", PropertyValue::Int(255))?;
@@ -1265,27 +1396,67 @@ impl GraphDocument {
                 .max()
                 .unwrap_or(1),
         );
-        let legacy_characters: Vec<_> = graph.nodes.values()
-            .filter(|node| node.kind == NodeKind::CharacterValue && graph.pin_by_key(node.id, "sprite").is_none())
-            .map(|node| node.id).collect();
+        let legacy_characters: Vec<_> = graph
+            .nodes
+            .values()
+            .filter(|node| {
+                node.kind == NodeKind::CharacterValue
+                    && graph.pin_by_key(node.id, "sprite").is_none()
+            })
+            .map(|node| node.id)
+            .collect();
         for node in legacy_characters {
-            let _ = graph.add_pin(node, "sprite", "Sprite", PinDirection::Input,
-                ValueType::Asset(AssetKind::Sprite), PinCardinality::One);
+            let _ = graph.add_pin(
+                node,
+                "sprite",
+                "Sprite",
+                PinDirection::Input,
+                ValueType::Asset(AssetKind::Sprite),
+                PinCardinality::One,
+            );
         }
-        let legacy_calls: Vec<_> = graph.nodes.values()
-            .filter(|node| node.kind == NodeKind::Call && graph.pin_by_key(node.id, "exec_out").is_none())
-            .map(|node| node.id).collect();
+        let legacy_calls: Vec<_> = graph
+            .nodes
+            .values()
+            .filter(|node| {
+                node.kind == NodeKind::Call && graph.pin_by_key(node.id, "exec_out").is_none()
+            })
+            .map(|node| node.id)
+            .collect();
         for node in legacy_calls {
-            graph.add_pin(node, "exec_out", "Après retour", PinDirection::Output,
-                ValueType::Execution, PinCardinality::Many).expect("existing Call node");
+            graph
+                .add_pin(
+                    node,
+                    "exec_out",
+                    "Après retour",
+                    PinDirection::Output,
+                    ValueType::Execution,
+                    PinCardinality::Many,
+                )
+                .expect("existing Call node");
         }
-        let legacy_music: Vec<_> = graph.nodes.values()
-            .filter(|node| node.kind == NodeKind::MusicStop && graph.pin_by_key(node.id, "transition").is_none())
-            .map(|node| node.id).collect();
+        let legacy_music: Vec<_> = graph
+            .nodes
+            .values()
+            .filter(|node| {
+                node.kind == NodeKind::MusicStop
+                    && graph.pin_by_key(node.id, "transition").is_none()
+            })
+            .map(|node| node.id)
+            .collect();
         for node in legacy_music {
-            let id = graph.add_pin(node, "transition", "Transition", PinDirection::Input,
-                ValueType::Transition, PinCardinality::One).expect("existing MusicStop node");
-            graph.pins.get_mut(&id).unwrap().default_value = Some(PropertyValue::String("none".into()));
+            let id = graph
+                .add_pin(
+                    node,
+                    "transition",
+                    "Transition",
+                    PinDirection::Input,
+                    ValueType::Transition,
+                    PinCardinality::One,
+                )
+                .expect("existing MusicStop node");
+            graph.pins.get_mut(&id).unwrap().default_value =
+                Some(PropertyValue::String("none".into()));
         }
         Ok((graph, report))
     }

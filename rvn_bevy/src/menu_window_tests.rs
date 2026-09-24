@@ -10,10 +10,13 @@ fn fixture() -> App {
     doc.add_dialogue_page();
     doc.add_choices_page();
     doc.add_quick_actions_page();
-    app.insert_resource(Menus { doc: Some(doc), ..default() });
-    app.insert_resource(VnEngine(rvn_core::Engine::new(
-        vec![], crate::bevy_renderer::BevyRenderer::new(), 32,
-    ).unwrap()));
+    app.insert_resource(Menus {
+        doc: Some(doc),
+        ..default()
+    });
+    app.insert_resource(VnEngine(
+        rvn_core::Engine::new(vec![], crate::bevy_renderer::BevyRenderer::new(), 32).unwrap(),
+    ));
     app.insert_resource(State::new(VnState::Waiting));
     app.init_resource::<SaveMenuState>();
     app.init_resource::<SettingsMenuState>();
@@ -26,7 +29,11 @@ fn fixture() -> App {
     });
     app.init_resource::<DialogueHistory>();
     app.insert_resource(ProjectPaths::new(
-        default(), default(), default(), default(), default(),
+        default(),
+        default(),
+        default(),
+        default(),
+        default(),
     ));
     app.init_resource::<Theme>();
     app.insert_resource(MenuFont(default()));
@@ -34,19 +41,36 @@ fn fixture() -> App {
     app.init_resource::<crate::systems::settings_menu::Settings>();
     app.init_resource::<MenuState>();
     app.init_resource::<TypewriterState>();
-    app.insert_resource(VnRenderState { choice_options: vec!["A".into(), "B".into()], ..default() });
-    app.world_mut().spawn((DialogueBox, Style::default(), Visibility::Inherited));
-    app.world_mut().spawn((ChoiceContainer, Visibility::Inherited));
-    app.add_systems(Update, (render_quick_actions, render_choices, render_narrative).chain());
+    app.insert_resource(VnRenderState {
+        choice_options: vec!["A".into(), "B".into()],
+        ..default()
+    });
+    app.world_mut()
+        .spawn((DialogueBox, Style::default(), Visibility::Inherited));
+    app.world_mut()
+        .spawn((ChoiceContainer, Visibility::Inherited));
+    app.add_systems(
+        Update,
+        (render_quick_actions, render_choices, render_narrative).chain(),
+    );
     app
 }
 
 fn counts(app: &mut App) -> (usize, usize, usize) {
     let world = app.world_mut();
     (
-        world.query_filtered::<Entity, With<QuickActionsRoot>>().iter(world).count(),
-        world.query_filtered::<Entity, With<ChoicesRoot>>().iter(world).count(),
-        world.query_filtered::<Entity, With<NarrativeRoot>>().iter(world).count(),
+        world
+            .query_filtered::<Entity, With<QuickActionsRoot>>()
+            .iter(world)
+            .count(),
+        world
+            .query_filtered::<Entity, With<ChoicesRoot>>()
+            .iter(world)
+            .count(),
+        world
+            .query_filtered::<Entity, With<NarrativeRoot>>()
+            .iter(world)
+            .count(),
     )
 }
 
@@ -55,11 +79,19 @@ fn narrative_renderers_survive_window_destruction() {
     let mut app = fixture();
     let window = app.world_mut().spawn(Window::default()).id();
     app.update();
-    assert_eq!(counts(&mut app), (1, 1, 1), "normal dialogue and choice rendering");
+    assert_eq!(
+        counts(&mut app),
+        (1, 1, 1),
+        "normal dialogue and choice rendering"
+    );
     app.world_mut().despawn(window);
     app.update();
     app.update();
-    assert_eq!(counts(&mut app), (1, 1, 1), "no extra UI spawned during shutdown");
+    assert_eq!(
+        counts(&mut app),
+        (1, 1, 1),
+        "no extra UI spawned during shutdown"
+    );
 }
 
 #[test]

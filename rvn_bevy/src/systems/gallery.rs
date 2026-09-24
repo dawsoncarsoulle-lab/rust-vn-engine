@@ -6,7 +6,12 @@ use crate::resources::{
 
 #[derive(Component)]
 pub struct GalleryOverlay;
-#[derive(Component)]pub(crate) struct GalleryColors{pub normal:Color,pub hover:Color,pub pressed:Color}
+#[derive(Component)]
+pub(crate) struct GalleryColors {
+    pub normal: Color,
+    pub hover: Color,
+    pub pressed: Color,
+}
 
 #[derive(Component, Clone)]
 pub enum GalleryButton {
@@ -57,7 +62,12 @@ pub fn spawn_gallery_overlay(
         ))
         .with_children(|parent| {
             parent.spawn(TextBundle::from_section(
-                engine.0.locale.as_ref().map(|l| l.translate("Galerie des souvenirs")).unwrap_or("Galerie des souvenirs"),
+                engine
+                    .0
+                    .locale
+                    .as_ref()
+                    .map(|l| l.translate("Galerie des souvenirs"))
+                    .unwrap_or("Galerie des souvenirs"),
                 TextStyle {
                     font_size: 48.0,
                     color: Color::WHITE,
@@ -103,7 +113,16 @@ pub fn spawn_gallery_overlay(
                 }
             }
 
-            spawn_gallery_button(parent, engine.0.locale.as_ref().map(|l| l.translate("Retour")).unwrap_or("Retour"), GalleryButton::Back);
+            spawn_gallery_button(
+                parent,
+                engine
+                    .0
+                    .locale
+                    .as_ref()
+                    .map(|l| l.translate("Retour"))
+                    .unwrap_or("Retour"),
+                GalleryButton::Back,
+            );
         });
 }
 
@@ -300,7 +319,12 @@ fn spawn_gallery_button(parent: &mut ChildBuilder, label: &str, action: GalleryB
 pub fn gallery_interaction_system(
     mut commands: Commands,
     mut interaction_query: Query<
-        (&Interaction, &GalleryButton, &mut BackgroundColor,Option<&GalleryColors>),
+        (
+            &Interaction,
+            &GalleryButton,
+            &mut BackgroundColor,
+            Option<&GalleryColors>,
+        ),
         (Changed<Interaction>, With<Button>),
     >,
     overlay_query: Query<Entity, With<GalleryOverlay>>,
@@ -312,22 +336,33 @@ pub fn gallery_interaction_system(
     if keys.just_pressed(KeyCode::Escape) {
         keys.clear_just_pressed(KeyCode::Escape);
         if state.selected_cg.take().is_some() {
-            for entity in &overlay_query { commands.entity(entity).despawn_recursive(); }
+            for entity in &overlay_query {
+                commands.entity(entity).despawn_recursive();
+            }
         } else {
             next_state.set(menu.return_to.take().unwrap_or(VnState::TitleScreen));
         }
         return;
     }
-    for (interaction, button, mut bg_color,colors) in interaction_query.iter_mut() {
+    for (interaction, button, mut bg_color, colors) in interaction_query.iter_mut() {
         match interaction {
             Interaction::Hovered => {
-                *bg_color = colors.map(|c|c.hover).unwrap_or(Color::srgba(0.25, 0.25, 0.45, 1.0)).into();
+                *bg_color = colors
+                    .map(|c| c.hover)
+                    .unwrap_or(Color::srgba(0.25, 0.25, 0.45, 1.0))
+                    .into();
             }
             Interaction::None => {
-                *bg_color = colors.map(|c|c.normal).unwrap_or_else(||gallery_button_color(button, &state)).into();
+                *bg_color = colors
+                    .map(|c| c.normal)
+                    .unwrap_or_else(|| gallery_button_color(button, &state))
+                    .into();
             }
             Interaction::Pressed => {
-                *bg_color = colors.map(|c|c.pressed).unwrap_or(Color::srgba(0.35, 0.35, 0.65, 1.0)).into();
+                *bg_color = colors
+                    .map(|c| c.pressed)
+                    .unwrap_or(Color::srgba(0.35, 0.35, 0.65, 1.0))
+                    .into();
                 match button {
                     GalleryButton::Back if state.selected_cg.is_some() => {
                         state.selected_cg = None;

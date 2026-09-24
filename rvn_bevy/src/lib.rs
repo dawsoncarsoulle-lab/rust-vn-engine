@@ -19,16 +19,16 @@
 mod bevy_renderer;
 mod components;
 mod project_paths;
+#[cfg(not(target_arch = "wasm32"))]
+mod qa_playthrough;
 mod resources;
 mod systems;
 mod vn_command;
-#[cfg(not(target_arch = "wasm32"))]
-mod qa_playthrough;
 use crate::bevy_renderer::BevyRenderer;
 mod menu_documents;
-mod save_thumbnails;
 #[cfg(not(target_arch = "wasm32"))]
 mod menu_preview_data;
+mod save_thumbnails;
 use crate::project_paths::ProjectPaths;
 use crate::resources::{
     CgAssetRegistry, CharacterRegistry, ChoiceFocus, DialogueHistory, GalleryState, ImagemapState,
@@ -119,9 +119,9 @@ mod window_configuration_tests {
     }
     #[test]
     fn legacy_windows_allow_resize_and_explicit_fixed_windows_remain_supported() {
-        let legacy:WindowSection=toml::from_str("width = 1280\nheight = 720\n").unwrap();
+        let legacy: WindowSection = toml::from_str("width = 1280\nheight = 720\n").unwrap();
         assert!(legacy.resizable.unwrap_or(true));
-        let fixed:WindowSection=toml::from_str("resizable = false\n").unwrap();
+        let fixed: WindowSection = toml::from_str("resizable = false\n").unwrap();
         assert!(!fixed.resizable.unwrap_or(true));
     }
 }
@@ -255,9 +255,13 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
     // Build saves directory path relative to project dir
     let saves_dir: PathBuf = if let Some(directory) = std::env::var_os("RVN_QA_OUTPUT") {
         let directory = PathBuf::from(directory);
-        if !directory.is_dir() { return Err("RVN_QA_OUTPUT must be an existing directory".into()); }
+        if !directory.is_dir() {
+            return Err("RVN_QA_OUTPUT must be an existing directory".into());
+        }
         directory.join("saves")
-    } else { project_dir.join(&cfg.paths.saves) };
+    } else {
+        project_dir.join(&cfg.paths.saves)
+    };
 
     // 4. Load locale configuration from config.toml in the assets directory if present.
     let config_toml_path = assets_dir.join("config.toml");
@@ -395,153 +399,153 @@ fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
     #[cfg(not(target_arch = "wasm32"))]
     app.add_plugins(menu_preview_data::MenuPreviewDataPlugin);
     app.add_plugins(
-            DefaultPlugins
-                .set(AssetPlugin {
-                    file_path: asset_root,
-                    watch_for_changes_override: Some(true),
-                    ..default()
-                })
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: cfg.project.title.clone(),
-                        resolution: (window_width, window_height).into(),
-                        resizable: cfg.window.resizable.unwrap_or(true),
-                        ..default()
-                    }),
+        DefaultPlugins
+            .set(AssetPlugin {
+                file_path: asset_root,
+                watch_for_changes_override: Some(true),
+                ..default()
+            })
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: cfg.project.title.clone(),
+                    resolution: (window_width, window_height).into(),
+                    resizable: cfg.window.resizable.unwrap_or(true),
                     ..default()
                 }),
-        )
-        // Resources
-        .insert_resource(theme)
-        .insert_resource(ProjectTitle(cfg.project.title.clone()))
-        .insert_resource(theme_watcher)
-        .insert_resource(VnEngine(engine))
-        .insert_resource(VnRenderState::default())
-        .insert_resource(crate::resources::SkipMode::default())
-        .insert_resource(ImagemapState::default())
-        .insert_resource(MusicEntity::default())
-        .insert_resource(MusicPlaybackState::default())
-        .insert_resource(MusicVolume::default())
-        .insert_resource(TypewriterConfig::default())
-        .insert_resource(TypewriterState::default())
-        .insert_resource(MenuState::default())
-        .insert_resource(GalleryState::default())
-        .insert_resource(CharacterRegistry::default())
-        .insert_resource(cg_registry)
-        .insert_resource(music_registry)
-        .insert_resource(DialogueHistory::default())
-        .insert_resource(ChoiceFocus::default())
-        .insert_resource(ScriptErrorMessage::default())
-        .insert_resource(locale_config_res)
-        // Insert project path resource for save/load operations
-        // Insert settings resource and UI states
-        .insert_resource(settings)
-        .insert_resource(SettingsMenuState::default())
-        .insert_resource(SaveMenuState::default())
-        .insert_resource(persistent_resource)
-        // Save menu and project paths
-        .insert_resource(project_paths)
-        // Ressources de debug : état (visible / caché) et requête de pas-à-pas
-        .insert_resource(DebugOverlayState::default())
-        .insert_resource(DebugStepRequest::default())
-        // Events & States
-        .add_plugins(menu_documents::MenuDocumentsPlugin)
-        .add_event::<VnCommand>()
-        .add_event::<PlayerInput>()
-        .init_state::<VnState>()
-        // Startup systems
-        .add_systems(Startup, (setup_camera, setup_ui, build_character_registry))
-        // State transition systems
-        .add_systems(OnEnter(VnState::TitleScreen), spawn_title_screen)
-        .add_systems(OnExit(VnState::TitleScreen), despawn_title_screen)
-        .add_systems(OnExit(VnState::Gallery), despawn_gallery_overlay)
-        .add_systems(OnEnter(VnState::Menu), spawn_menu_overlay)
-        .add_systems(OnExit(VnState::Menu), despawn_menu_overlay)
-        .add_systems(OnEnter(VnState::History), spawn_history_overlay)
-        .add_systems(OnExit(VnState::History), despawn_history_overlay)
-        .add_systems(OnEnter(VnState::Error), spawn_error_overlay)
-        .add_systems(OnExit(VnState::Error), despawn_error_overlay)
-        // Update systems
-        .add_systems(
-            Update,
+                ..default()
+            }),
+    )
+    // Resources
+    .insert_resource(theme)
+    .insert_resource(ProjectTitle(cfg.project.title.clone()))
+    .insert_resource(theme_watcher)
+    .insert_resource(VnEngine(engine))
+    .insert_resource(VnRenderState::default())
+    .insert_resource(crate::resources::SkipMode::default())
+    .insert_resource(ImagemapState::default())
+    .insert_resource(MusicEntity::default())
+    .insert_resource(MusicPlaybackState::default())
+    .insert_resource(MusicVolume::default())
+    .insert_resource(TypewriterConfig::default())
+    .insert_resource(TypewriterState::default())
+    .insert_resource(MenuState::default())
+    .insert_resource(GalleryState::default())
+    .insert_resource(CharacterRegistry::default())
+    .insert_resource(cg_registry)
+    .insert_resource(music_registry)
+    .insert_resource(DialogueHistory::default())
+    .insert_resource(ChoiceFocus::default())
+    .insert_resource(ScriptErrorMessage::default())
+    .insert_resource(locale_config_res)
+    // Insert project path resource for save/load operations
+    // Insert settings resource and UI states
+    .insert_resource(settings)
+    .insert_resource(SettingsMenuState::default())
+    .insert_resource(SaveMenuState::default())
+    .insert_resource(persistent_resource)
+    // Save menu and project paths
+    .insert_resource(project_paths)
+    // Ressources de debug : état (visible / caché) et requête de pas-à-pas
+    .insert_resource(DebugOverlayState::default())
+    .insert_resource(DebugStepRequest::default())
+    // Events & States
+    .add_plugins(menu_documents::MenuDocumentsPlugin)
+    .add_event::<VnCommand>()
+    .add_event::<PlayerInput>()
+    .init_state::<VnState>()
+    // Startup systems
+    .add_systems(Startup, (setup_camera, setup_ui, build_character_registry))
+    // State transition systems
+    .add_systems(OnEnter(VnState::TitleScreen), spawn_title_screen)
+    .add_systems(OnExit(VnState::TitleScreen), despawn_title_screen)
+    .add_systems(OnExit(VnState::Gallery), despawn_gallery_overlay)
+    .add_systems(OnEnter(VnState::Menu), spawn_menu_overlay)
+    .add_systems(OnExit(VnState::Menu), despawn_menu_overlay)
+    .add_systems(OnEnter(VnState::History), spawn_history_overlay)
+    .add_systems(OnExit(VnState::History), despawn_history_overlay)
+    .add_systems(OnEnter(VnState::Error), spawn_error_overlay)
+    .add_systems(OnExit(VnState::Error), despawn_error_overlay)
+    // Update systems
+    .add_systems(
+        Update,
+        (
+            theme_reload_system,
+            apply_theme_system,
+            locale_reload_system,     // ← hot-reload locales
+            locale_lang_watch_system, // ← surveille __lang variable
+            title_interaction_system.run_if(in_state(VnState::TitleScreen)),
+            title_background_resize_system.run_if(in_state(VnState::TitleScreen)),
+            spawn_gallery_overlay.run_if(in_state(VnState::Gallery)),
+            gallery_interaction_system.run_if(in_state(VnState::Gallery)),
+            stepping_system.run_if(in_state(VnState::Stepping)),
             (
-                theme_reload_system,
-                apply_theme_system,
-                locale_reload_system,     // ← hot-reload locales
-                locale_lang_watch_system, // ← surveille __lang variable
-                title_interaction_system.run_if(in_state(VnState::TitleScreen)),
-                title_background_resize_system.run_if(in_state(VnState::TitleScreen)),
-                spawn_gallery_overlay.run_if(in_state(VnState::Gallery)),
-                gallery_interaction_system.run_if(in_state(VnState::Gallery)),
-                stepping_system.run_if(in_state(VnState::Stepping)),
-                (
-                    background_system,
-                    background_cover_resize_system,
-                    sprite_system,
-                    systems::sprite::resize_sprite_stage,
-                    sprite_animation_system,
-                    cinematic_system,
-                    cinematic_cover_resize_system,
-                    dialogue_system,
-                    choice_system,
-                    imagemap_system,
-                    audio_system,
-                    audio_unlock_system
-                        .after(audio_system)
-                        .after(title_interaction_system),
-                    typewriter_config_system,
-                    script_finished_system,
-                )
-                    .after(stepping_system),
-                imagemap_dimensions_system,
-                imagemap_hover_system,
-                imagemap_cleanup_system.run_if(not(in_state(VnState::Waiting))),
-                update_choice_buttons,
-                fade_system.run_if(in_state(VnState::Animating)),
-                audio_fade_system,
-                persistent_unlock_system,
-            ),
-        )
-        .add_systems(
-            Update,
-            (
-                typewriter_system.run_if(in_state(VnState::Waiting)),
-                input_system.run_if(in_state(VnState::Waiting)),
-                choice_interaction_system.run_if(in_state(VnState::Waiting)),
-                menu_input_system.run_if(in_state(VnState::Menu)),
-                menu_interaction_system.run_if(in_state(VnState::Menu)),
-                history_input_system.run_if(in_state(VnState::History)),
-                player_input_system
-                    .after(input_system)
-                    .after(choice_interaction_system)
-                    .after(menu_input_system)
-                    .after(history_input_system),
-            ),
-        )
-        .add_systems(
-            Update,
-            (
-                spawn_save_menu_overlay.run_if(in_state(VnState::Menu)),
-                save_menu_interaction_system.run_if(in_state(VnState::Menu)),
-                despawn_save_menu_overlay,
-                spawn_settings_menu_overlay.run_if(in_state(VnState::Menu)),
-                settings_menu_interaction_system.run_if(in_state(VnState::Menu)),
-                update_settings_value_text_system.run_if(in_state(VnState::Menu)),
-                apply_settings_to_runtime_system,
-                despawn_settings_menu_overlay,
-            ),
-        )
-        .add_systems(Update, update_debug_overlay_system)
-        // Debug overlay : toggling, spawn/despawn et gestion du step F10
-        .add_systems(
-            Update,
-            (
-                debug_toggle_system,
-                spawn_or_despawn_debug_overlay_system,
-                debug_step_input_system,
-            ),
-        )
-        .run();
+                background_system,
+                background_cover_resize_system,
+                sprite_system,
+                systems::sprite::resize_sprite_stage,
+                sprite_animation_system,
+                cinematic_system,
+                cinematic_cover_resize_system,
+                dialogue_system,
+                choice_system,
+                imagemap_system,
+                audio_system,
+                audio_unlock_system
+                    .after(audio_system)
+                    .after(title_interaction_system),
+                typewriter_config_system,
+                script_finished_system,
+            )
+                .after(stepping_system),
+            imagemap_dimensions_system,
+            imagemap_hover_system,
+            imagemap_cleanup_system.run_if(not(in_state(VnState::Waiting))),
+            update_choice_buttons,
+            fade_system.run_if(in_state(VnState::Animating)),
+            audio_fade_system,
+            persistent_unlock_system,
+        ),
+    )
+    .add_systems(
+        Update,
+        (
+            typewriter_system.run_if(in_state(VnState::Waiting)),
+            input_system.run_if(in_state(VnState::Waiting)),
+            choice_interaction_system.run_if(in_state(VnState::Waiting)),
+            menu_input_system.run_if(in_state(VnState::Menu)),
+            menu_interaction_system.run_if(in_state(VnState::Menu)),
+            history_input_system.run_if(in_state(VnState::History)),
+            player_input_system
+                .after(input_system)
+                .after(choice_interaction_system)
+                .after(menu_input_system)
+                .after(history_input_system),
+        ),
+    )
+    .add_systems(
+        Update,
+        (
+            spawn_save_menu_overlay.run_if(in_state(VnState::Menu)),
+            save_menu_interaction_system.run_if(in_state(VnState::Menu)),
+            despawn_save_menu_overlay,
+            spawn_settings_menu_overlay.run_if(in_state(VnState::Menu)),
+            settings_menu_interaction_system.run_if(in_state(VnState::Menu)),
+            update_settings_value_text_system.run_if(in_state(VnState::Menu)),
+            apply_settings_to_runtime_system,
+            despawn_settings_menu_overlay,
+        ),
+    )
+    .add_systems(Update, update_debug_overlay_system)
+    // Debug overlay : toggling, spawn/despawn et gestion du step F10
+    .add_systems(
+        Update,
+        (
+            debug_toggle_system,
+            spawn_or_despawn_debug_overlay_system,
+            debug_step_input_system,
+        ),
+    )
+    .run();
 
     Ok(())
 }
@@ -682,14 +686,24 @@ pub async fn run_game_web(project_root: &str) -> Result<(), String> {
     );
     let engine = build_engine(script, &cfg, &cfg.project.main_script, locale_mgr)?;
 
-    let raw_config:toml::Value=toml::from_str(&rvn_toml_content).map_err(|e|format!("Configuration : {e}"))?;
-    let menu_source=if let Some(path)=raw_config.get("paths").and_then(|p|p.get("menus")).and_then(toml::Value::as_str){
+    let raw_config: toml::Value =
+        toml::from_str(&rvn_toml_content).map_err(|e| format!("Configuration : {e}"))?;
+    let menu_source = if let Some(path) = raw_config
+        .get("paths")
+        .and_then(|p| p.get("menus"))
+        .and_then(toml::Value::as_str)
+    {
         Some(fetch_text(&format!("{root}/{path}")).await?)
-    }else{fetch_optional_text(&format!("{root}/menus.rvnui")).await};
-    let menus=if let Some(source)=menu_source{
-        let doc=rvn_ui::Document::from_json(&source)?;
-        doc.validate()?;Some(doc)
-    }else{None};
+    } else {
+        fetch_optional_text(&format!("{root}/menus.rvnui")).await
+    };
+    let menus = if let Some(source) = menu_source {
+        let doc = rvn_ui::Document::from_json(&source)?;
+        doc.validate()?;
+        Some(doc)
+    } else {
+        None
+    };
     let theme_content = fetch_optional_text(&format!("{root}/{}", cfg.paths.theme))
         .await
         .unwrap_or_default();

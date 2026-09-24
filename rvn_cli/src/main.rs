@@ -523,12 +523,19 @@ fn detect_platform() -> Result<String> {
 }
 
 fn desktop_executable_name(name: &str, os: &str) -> String {
-    if os == "windows" { format!("{name}.exe") } else { name.into() }
+    if os == "windows" {
+        format!("{name}.exe")
+    } else {
+        name.into()
+    }
 }
 
 #[test]
 fn desktop_targets_and_executable_names() {
-    assert_eq!(desktop_platform("windows", "x86_64").unwrap(), "windows-x64");
+    assert_eq!(
+        desktop_platform("windows", "x86_64").unwrap(),
+        "windows-x64"
+    );
     assert_eq!(desktop_platform("linux", "x86_64").unwrap(), "linux-x64");
     assert_eq!(desktop_executable_name("My_game", "windows"), "My_game.exe");
     assert_eq!(desktop_executable_name("My_game", "linux"), "My_game");
@@ -567,7 +574,9 @@ fn create_dist_structure(project_dir: &Path, game_name: &str, platform: &str) ->
 fn build_runtime() -> Result<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         let bundled = exe.with_file_name(format!("rvn_bevy{}", std::env::consts::EXE_SUFFIX));
-        if bundled.is_file() { return Ok(bundled); }
+        if bundled.is_file() {
+            return Ok(bundled);
+        }
     }
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -1016,14 +1025,34 @@ fn copy_project_notices(project_dir: &Path, dist_dir: &Path) -> Result<()> {
 
 fn copy_custom_menus(project_dir: &Path, dist_dir: &Path) -> Result<()> {
     let config: toml::Value = toml::from_str(&fs::read_to_string(project_dir.join("rvn.toml"))?)?;
-    let configured=config.get("paths").and_then(|p|p.get("menus")).and_then(toml::Value::as_str);
-    if let Some(menus) = configured.or_else(||project_dir.join("menus.rvnui").is_file().then_some("menus.rvnui")) {
+    let configured = config
+        .get("paths")
+        .and_then(|p| p.get("menus"))
+        .and_then(toml::Value::as_str);
+    if let Some(menus) = configured.or_else(|| {
+        project_dir
+            .join("menus.rvnui")
+            .is_file()
+            .then_some("menus.rvnui")
+    }) {
         let relative = Path::new(menus);
-        anyhow::ensure!(!relative.is_absolute() && !relative.components().any(|c|matches!(c,std::path::Component::ParentDir)), "Le fichier de menus doit être dans le projet");
-        let doc=rvn_ui::Document::from_json(&fs::read_to_string(project_dir.join(relative))?).map_err(anyhow::Error::msg)?;
+        anyhow::ensure!(
+            !relative.is_absolute()
+                && !relative
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir)),
+            "Le fichier de menus doit être dans le projet"
+        );
+        let doc = rvn_ui::Document::from_json(&fs::read_to_string(project_dir.join(relative))?)
+            .map_err(anyhow::Error::msg)?;
         doc.validate().map_err(anyhow::Error::msg)?;
-        let assets=config.get("paths").and_then(|p|p.get("assets")).and_then(toml::Value::as_str).unwrap_or("assets");
-        doc.validate_resources(&project_dir.join(assets)).map_err(anyhow::Error::msg)?;
+        let assets = config
+            .get("paths")
+            .and_then(|p| p.get("assets"))
+            .and_then(toml::Value::as_str)
+            .unwrap_or("assets");
+        doc.validate_resources(&project_dir.join(assets))
+            .map_err(anyhow::Error::msg)?;
         copy_file_relative(project_dir, dist_dir, relative)?;
     }
     Ok(())
@@ -1040,16 +1069,27 @@ mod distribution_regressions {
                     include_dir::DirEntry::Dir(child) => visit(child),
                     include_dir::DirEntry::File(file) => {
                         let path = file.path().to_string_lossy();
-                        if file.path().file_name().and_then(|name| name.to_str()) == Some(".gitkeep") {
-                            assert!(file.contents().is_empty(), "{path} must only preserve an empty directory");
+                        if file.path().file_name().and_then(|name| name.to_str())
+                            == Some(".gitkeep")
+                        {
+                            assert!(
+                                file.contents().is_empty(),
+                                "{path} must only preserve an empty directory"
+                            );
                             continue;
                         }
                         assert!(!path.starts_with("assets/sprites/eileen/"), "{path}");
                         assert!(!path.starts_with("assets/music/"), "{path}");
                         if path.ends_with(".rvn") || path.ends_with(".toml") {
                             let text = file.contents_utf8().unwrap();
-                            for reference in ["theme.ogg", "theme_intro.ogg", "theme_clearing.ogg",
-                                              "eileen.show(", "eileen.move(", "eileen.hide("] {
+                            for reference in [
+                                "theme.ogg",
+                                "theme_intro.ogg",
+                                "theme_clearing.ogg",
+                                "eileen.show(",
+                                "eileen.move(",
+                                "eileen.hide(",
+                            ] {
                                 assert!(!text.contains(reference), "{path}: {reference}");
                             }
                         }
@@ -1062,21 +1102,31 @@ mod distribution_regressions {
 
     #[test]
     fn root_blueprint_script_and_custom_menus_are_packaged() {
-        let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let root=std::env::temp_dir().join(format!("rvn-package-test-{stamp}"));
-        let dist=root.join("out");fs::create_dir_all(&dist).unwrap();
-        fs::write(root.join("rvn.toml"),"[paths]\nmenus='menus.rvnui'\n").unwrap();
-        let menu=rvn_ui::Document::defaults().to_json().unwrap();
-        fs::write(root.join("menus.rvnui"),&menu).unwrap();
-        fs::write(root.join("CREDITS.md"),"Attribution: CC BY artist").unwrap();
-        copy_project_notices(&root,&dist).unwrap();
-        assert_eq!(fs::read_to_string(dist.join("CREDITS.md")).unwrap(),"Attribution: CC BY artist");
-        copy_custom_menus(&root,&dist).unwrap();
-        assert_eq!(fs::read_to_string(dist.join("menus.rvnui")).unwrap(),menu);
-        write_web_script_manifest(&root,&dist,Path::new("project.generated.rvn")).unwrap();
-        assert!(fs::read_to_string(dist.join("rvn_web_manifest.toml")).unwrap().contains("project.generated.rvn"));
-        fs::write(root.join("rvn.toml"),"[paths]\nmenus='../outside'\n").unwrap();
-        assert!(copy_custom_menus(&root,&dist).is_err());fs::remove_dir_all(root).unwrap();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rvn-package-test-{stamp}"));
+        let dist = root.join("out");
+        fs::create_dir_all(&dist).unwrap();
+        fs::write(root.join("rvn.toml"), "[paths]\nmenus='menus.rvnui'\n").unwrap();
+        let menu = rvn_ui::Document::defaults().to_json().unwrap();
+        fs::write(root.join("menus.rvnui"), &menu).unwrap();
+        fs::write(root.join("CREDITS.md"), "Attribution: CC BY artist").unwrap();
+        copy_project_notices(&root, &dist).unwrap();
+        assert_eq!(
+            fs::read_to_string(dist.join("CREDITS.md")).unwrap(),
+            "Attribution: CC BY artist"
+        );
+        copy_custom_menus(&root, &dist).unwrap();
+        assert_eq!(fs::read_to_string(dist.join("menus.rvnui")).unwrap(), menu);
+        write_web_script_manifest(&root, &dist, Path::new("project.generated.rvn")).unwrap();
+        assert!(fs::read_to_string(dist.join("rvn_web_manifest.toml"))
+            .unwrap()
+            .contains("project.generated.rvn"));
+        fs::write(root.join("rvn.toml"), "[paths]\nmenus='../outside'\n").unwrap();
+        assert!(copy_custom_menus(&root, &dist).is_err());
+        fs::remove_dir_all(root).unwrap();
     }
 }
 

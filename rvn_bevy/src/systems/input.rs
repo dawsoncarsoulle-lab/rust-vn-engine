@@ -8,15 +8,17 @@ use crate::resources::{
     ChoiceFocus, DialogueHistory, ImagemapState, MenuState, PersistentDataResource,
     ScriptErrorMessage, SkipMode, TypewriterState, VnEngine, VnRenderState, VnState,
 };
-use crate::systems::save_menu::{
-    apply_loaded_game, record_resume_target, SaveMenuState,
-};
+use crate::systems::save_menu::{apply_loaded_game, record_resume_target, SaveMenuState};
 use crate::systems::typewriter::apply_visible_sections;
 use crate::vn_command::{PlayerInput, VnCommand};
 use rvn_core::error::ScriptError;
 use rvn_core::persistent::LastResumeTarget;
 #[derive(bevy::ecs::system::SystemParam)]
-pub struct InputSaveContext<'w>{paths:Res<'w,ProjectPaths>,confirmation:ResMut<'w,crate::systems::save_menu::SaveConfirmation>,thumbnails:ResMut<'w,crate::save_thumbnails::SaveThumbnails>}
+pub struct InputSaveContext<'w> {
+    paths: Res<'w, ProjectPaths>,
+    confirmation: ResMut<'w, crate::systems::save_menu::SaveConfirmation>,
+    thumbnails: ResMut<'w, crate::save_thumbnails::SaveThumbnails>,
+}
 
 pub fn input_system(
     cameras: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
@@ -30,13 +32,26 @@ pub fn input_system(
     mut choice_focus: ResMut<ChoiceFocus>,
     mut skip_mode: ResMut<SkipMode>,
     mut player_events: EventWriter<PlayerInput>,
-    ui_buttons: Query<&Interaction,Or<(With<crate::menu_documents::MenuElement>,With<crate::menu_documents::UiInputBlocker>)>>,
-    ui_scrollbars:Query<&Interaction,With<crate::menu_documents::Scrollbar>>,
-    ui_lists:Query<(&Node,&GlobalTransform,&crate::menu_documents::MenuScroll)>,
-    custom_menus:Res<crate::menu_documents::Menus>,
+    ui_buttons: Query<
+        &Interaction,
+        Or<(
+            With<crate::menu_documents::MenuElement>,
+            With<crate::menu_documents::UiInputBlocker>,
+        )>,
+    >,
+    ui_scrollbars: Query<&Interaction, With<crate::menu_documents::Scrollbar>>,
+    ui_lists: Query<(&Node, &GlobalTransform, &crate::menu_documents::MenuScroll)>,
+    custom_menus: Res<crate::menu_documents::Menus>,
 ) {
     // A UI activation must not also advance dialogue or select an imagemap zone.
-    if ui_buttons.iter().chain(ui_scrollbars.iter()).any(|i|*i==Interaction::Pressed){scroll_events.clear();return;}
+    if ui_buttons
+        .iter()
+        .chain(ui_scrollbars.iter())
+        .any(|i| *i == Interaction::Pressed)
+    {
+        scroll_events.clear();
+        return;
+    }
     // ── Escape → menu ────────────────────────────────────────────────────────
     if keys.just_pressed(KeyCode::Escape) {
         player_events.send(PlayerInput::ToggleMenu);
@@ -55,12 +70,20 @@ pub fn input_system(
 
     // ── Scroll haut / ArrowUp hors-choix → historique ────────────────────────
     let mut scrolled_up = false;
-    let over_scroll=windows.get_single().ok().and_then(|w|w.cursor_position()).is_some_and(|cursor|ui_lists.iter().any(|(node,transform,scroll)|{
-        let min=transform.translation().truncate()-node.size()*0.5;
-        scroll.content_height>node.size().y&&cursor.cmpge(min).all()&&cursor.cmplt(min+node.size()).all()
-    }));
+    let over_scroll = windows
+        .get_single()
+        .ok()
+        .and_then(|w| w.cursor_position())
+        .is_some_and(|cursor| {
+            ui_lists.iter().any(|(node, transform, scroll)| {
+                let min = transform.translation().truncate() - node.size() * 0.5;
+                scroll.content_height > node.size().y
+                    && cursor.cmpge(min).all()
+                    && cursor.cmplt(min + node.size()).all()
+            })
+        });
     for event in scroll_events.read() {
-        if event.y > 0.0&&!over_scroll {
+        if event.y > 0.0 && !over_scroll {
             scrolled_up = true;
         }
     }
@@ -76,8 +99,10 @@ pub fn input_system(
         if mouse.just_pressed(MouseButton::Left) {
             if let Ok(win) = windows.get_single() {
                 if let Some(pos) = win.cursor_position() {
-                    let world=cameras.get_single().ok().and_then(|(camera,transform)|camera.viewport_to_world_2d(transform,pos));
-                    if let Some(idx) = world.and_then(|p|imagemap_state.hit_test_world(p)) {
+                    let world = cameras.get_single().ok().and_then(|(camera, transform)| {
+                        camera.viewport_to_world_2d(transform, pos)
+                    });
+                    if let Some(idx) = world.and_then(|p| imagemap_state.hit_test_world(p)) {
                         player_events.send(PlayerInput::Choose(idx));
                     }
                 }
@@ -89,7 +114,10 @@ pub fn input_system(
     // ── Choix ─────────────────────────────────────────────────────────────────
     let n = render_state.choice_options.len();
     if n > 0 {
-        if !custom_menus.choices_interactive(){choice_focus.clear();return;}
+        if !custom_menus.choices_interactive() {
+            choice_focus.clear();
+            return;
+        }
         let digit_keys = [
             (KeyCode::Digit1, 0usize),
             (KeyCode::Digit2, 1),
@@ -193,9 +221,11 @@ pub fn player_input_system(
     mut saves: InputSaveContext,
     mut dialogue_text_query: Query<&mut Text, With<DialogueText>>,
 ) {
-    let project_paths=&saves.paths;
+    let project_paths = &saves.paths;
     for input in events.read() {
-        if saves.confirmation.active(){continue;}
+        if saves.confirmation.active() {
+            continue;
+        }
         match input {
             PlayerInput::Advance => {
                 if let Err(e) = engine.0.advance_dialogue() {
@@ -284,7 +314,10 @@ pub fn player_input_system(
             }
 
             PlayerInput::QuickSave => {
-                match SaveManager::new(&project_paths.saves, crate::systems::save_menu::SUPPORTED_SLOTS) {
+                match SaveManager::new(
+                    &project_paths.saves,
+                    crate::systems::save_menu::SUPPORTED_SLOTS,
+                ) {
                     Ok(mgr) => {
                         if let Err(e) = mgr.save_quicksave(
                             &engine.0.state,
@@ -298,7 +331,11 @@ pub fn player_input_system(
                                     &mut persistent,
                                     LastResumeTarget::quicksave(data.timestamp),
                                 );
-                                saves.thumbnails.request_resume(rvn_core::save::ResumeSlot::Quick,&engine,data);
+                                saves.thumbnails.request_resume(
+                                    rvn_core::save::ResumeSlot::Quick,
+                                    &engine,
+                                    data,
+                                );
                             }
                             info!("[quick_save] sauvegarde rapide écrite");
                         }
@@ -308,17 +345,32 @@ pub fn player_input_system(
             }
 
             PlayerInput::QuickLoad => {
-                let operation=(0,crate::systems::save_menu::SaveMenuMode::Load);
-                let approved=saves.confirmation.approved==Some(operation);
-                if approved{saves.confirmation.approved=None;}
-                if !approved{
-                    if saves.confirmation.pending.is_some(){return;}
-                    if SaveManager::new(&project_paths.saves,crate::systems::save_menu::SUPPORTED_SLOTS).ok().is_some_and(|m|m.load_quicksave().is_ok()){
-                        saves.confirmation.pending=Some(operation);saves.confirmation.quick_return=Some(current_state.get().clone());next_state.set(VnState::Menu);
+                let operation = (0, crate::systems::save_menu::SaveMenuMode::Load);
+                let approved = saves.confirmation.approved == Some(operation);
+                if approved {
+                    saves.confirmation.approved = None;
+                }
+                if !approved {
+                    if saves.confirmation.pending.is_some() {
+                        return;
+                    }
+                    if SaveManager::new(
+                        &project_paths.saves,
+                        crate::systems::save_menu::SUPPORTED_SLOTS,
+                    )
+                    .ok()
+                    .is_some_and(|m| m.load_quicksave().is_ok())
+                    {
+                        saves.confirmation.pending = Some(operation);
+                        saves.confirmation.quick_return = Some(current_state.get().clone());
+                        next_state.set(VnState::Menu);
                     }
                     return;
                 }
-                match SaveManager::new(&project_paths.saves, crate::systems::save_menu::SUPPORTED_SLOTS) {
+                match SaveManager::new(
+                    &project_paths.saves,
+                    crate::systems::save_menu::SUPPORTED_SLOTS,
+                ) {
                     Ok(mgr) => match mgr.load_quicksave() {
                         Ok(data) => {
                             engine.0.load_data(data);

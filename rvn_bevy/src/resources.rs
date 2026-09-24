@@ -189,10 +189,22 @@ impl ImagemapState {
         }
         let src_x = (world.x / crate::systems::WIN_W + 0.5) * self.source_w;
         let src_y = (0.5 - world.y / crate::systems::WIN_H) * self.source_h;
-        if !src_x.is_finite() || !src_y.is_finite() || src_x < 0.0 || src_y < 0.0 || src_x >= self.source_w || src_y >= self.source_h {return None;}
+        if !src_x.is_finite()
+            || !src_y.is_finite()
+            || src_x < 0.0
+            || src_y < 0.0
+            || src_x >= self.source_w
+            || src_y >= self.source_h
+        {
+            return None;
+        }
         for (idx, zone) in self.hotspots.iter().enumerate() {
-            let r=&zone.area;
-            if src_x >= r.x1 as f32 && src_x < r.x2 as f32 && src_y >= r.y1 as f32 && src_y < r.y2 as f32 {
+            let r = &zone.area;
+            if src_x >= r.x1 as f32
+                && src_x < r.x2 as f32
+                && src_y >= r.y1 as f32
+                && src_y < r.y2 as f32
+            {
                 return Some(idx);
             }
         }

@@ -34,23 +34,33 @@ impl Reader {
                     .or_else(|| v.as_integer().map(|n| n as f64))
                     .filter(|n| n.is_finite())
                     .map(|n| n as f32)
-                    .ok_or_else(|| diagnostic!("{path} : nombre fini attendu", "{path}: expected a finite number"))
+                    .ok_or_else(|| {
+                        diagnostic!(
+                            "{path} : nombre fini attendu",
+                            "{path}: expected a finite number"
+                        )
+                    })
             })
             .transpose()
     }
     fn boolean(&mut self, path: &str) -> Result<Option<bool>, String> {
         self.take(path)
             .map(|v| {
-                v.as_bool()
-                    .ok_or_else(|| diagnostic!("{path} : booléen attendu", "{path}: expected a boolean"))
+                v.as_bool().ok_or_else(|| {
+                    diagnostic!("{path} : booléen attendu", "{path}: expected a boolean")
+                })
             })
             .transpose()
     }
     fn color(&mut self, path: &str) -> Result<Option<[f32; 4]>, String> {
         self.text(path)?
             .map(|s| {
-                parse_color(&s)
-                    .ok_or_else(|| diagnostic!("{path} : couleur #RRGGBB ou #RRGGBBAA attendue", "{path}: expected a #RRGGBB or #RRGGBBAA color"))
+                parse_color(&s).ok_or_else(|| {
+                    diagnostic!(
+                        "{path} : couleur #RRGGBB ou #RRGGBBAA attendue",
+                        "{path}: expected a #RRGGBB or #RRGGBBAA color"
+                    )
+                })
             })
             .transpose()
     }
@@ -190,7 +200,12 @@ impl Document {
                 "cover" => ImageFit::Cover,
                 "contain" => ImageFit::Contain,
                 "stretch" => ImageFit::Stretch,
-                other => return Err(diagnostic!("Mode d’image inconnu : {other}", "Unknown image mode: {other}")),
+                other => {
+                    return Err(diagnostic!(
+                        "Mode d’image inconnu : {other}",
+                        "Unknown image mode: {other}"
+                    ))
+                }
             };
             title.elements.insert(0, e);
         }
@@ -200,12 +215,19 @@ impl Document {
         let order = match r.take("title_screen.button_order") {
             Some(v) => v
                 .as_array()
-                .ok_or(diagnostic!("button_order : liste attendue", "button_order: expected a list"))?
+                .ok_or(diagnostic!(
+                    "button_order : liste attendue",
+                    "button_order: expected a list"
+                ))?
                 .iter()
                 .map(|v| {
-                    v.as_str()
-                        .map(str::to_string)
-                        .ok_or(diagnostic!("button_order : texte attendu", "button_order: expected text").to_string())
+                    v.as_str().map(str::to_string).ok_or(
+                        diagnostic!(
+                            "button_order : texte attendu",
+                            "button_order: expected text"
+                        )
+                        .to_string(),
+                    )
                 })
                 .collect::<Result<Vec<_>, _>>()?,
             None => keys.iter().map(|s| s.to_string()).collect(),
@@ -236,7 +258,10 @@ impl Document {
         let mut seen = BTreeSet::new();
         for key in order {
             if !seen.insert(key.clone()) {
-                return Err(diagnostic!("Bouton dupliqué : {key}", "Duplicate button: {key}"));
+                return Err(diagnostic!(
+                    "Bouton dupliqué : {key}",
+                    "Duplicate button: {key}"
+                ));
             }
             let action = match key.as_str() {
                 "continue" => Action::Continue,
@@ -246,7 +271,10 @@ impl Document {
                 "gallery" => Action::Gallery,
                 "quit" => Action::Quit,
                 _ => {
-                    warnings.push(diagnostic!("Bouton non converti : {key}", "Button not converted: {key}"));
+                    warnings.push(diagnostic!(
+                        "Bouton non converti : {key}",
+                        "Button not converted: {key}"
+                    ));
                     continue;
                 }
             };
@@ -255,7 +283,10 @@ impl Document {
                 .iter()
                 .find(|e| e.kind == Kind::Button && e.action == action)
                 .cloned()
-                .ok_or(diagnostic!("Bouton standard absent", "Missing standard button"))?;
+                .ok_or(diagnostic!(
+                    "Bouton standard absent",
+                    "Missing standard button"
+                ))?;
             let shown = r
                 .boolean(&format!("title_screen.buttons.visibility.{key}"))?
                 .or(r.boolean(&format!("title_screen.show_{key}"))?)
@@ -301,8 +332,11 @@ impl Document {
                 e.rect[1] -= shift;
             }
             warnings.push(
-                diagnostic!("Boutons du titre : groupe remonté pour garder le dernier bouton accessible.", "Title buttons: group moved up to keep the last button accessible.")
-                    .into(),
+                diagnostic!(
+                    "Boutons du titre : groupe remonté pour garder le dernier bouton accessible.",
+                    "Title buttons: group moved up to keep the last button accessible."
+                )
+                .into(),
             );
         }
         title.elements.retain(|e| e.kind != Kind::Button);
@@ -310,7 +344,11 @@ impl Document {
         if r.boolean("title_screen.enabled")? == Some(false) {
             title.role = None;
             warnings.push(
-                diagnostic!("Écran titre désactivé : la page importée n’a pas de rôle de démarrage.", "Title screen disabled: the imported page has no startup role.").into(),
+                diagnostic!(
+                    "Écran titre désactivé : la page importée n’a pas de rôle de démarrage.",
+                    "Title screen disabled: the imported page has no startup role."
+                )
+                .into(),
             );
         }
         let box_height = r.number("textbox.height")?.unwrap_or(174.0);

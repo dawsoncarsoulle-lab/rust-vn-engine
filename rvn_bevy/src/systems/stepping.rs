@@ -23,7 +23,7 @@ pub fn stepping_system(
     mut step_req: ResMut<DebugStepRequest>,
     project_paths: Res<ProjectPaths>,
     mut persistent: ResMut<PersistentDataResource>,
-    mut thumbnails:ResMut<crate::save_thumbnails::SaveThumbnails>,
+    mut thumbnails: ResMut<crate::save_thumbnails::SaveThumbnails>,
 ) {
     // En mode debug, on ne progresse que si un step a été demandé (touche F10).
     if debug_state.visible {
@@ -60,7 +60,10 @@ pub fn stepping_system(
         || matches!(interaction, Some(Interaction::Choice { .. }));
 
     if should_autosave {
-        match SaveManager::new(&project_paths.saves, crate::systems::save_menu::SUPPORTED_SLOTS) {
+        match SaveManager::new(
+            &project_paths.saves,
+            crate::systems::save_menu::SUPPORTED_SLOTS,
+        ) {
             Ok(mgr) => {
                 if let Err(e) = mgr.save_autosave(
                     &engine.0.state,
@@ -73,7 +76,7 @@ pub fn stepping_system(
                         &mut persistent,
                         LastResumeTarget::autosave(data.timestamp),
                     );
-                    thumbnails.request_resume(rvn_core::save::ResumeSlot::Auto,&engine,data);
+                    thumbnails.request_resume(rvn_core::save::ResumeSlot::Auto, &engine, data);
                 }
             }
             Err(e) => error!("[autosave] SaveManager indisponible: {e}"),
@@ -180,7 +183,14 @@ mod tests {
             let NextState::Pending(actual) = app.world().resource::<NextState<VnState>>() else {
                 panic!("ending did not select a destination");
             };
-            assert_eq!(*actual, if enabled { VnState::TitleScreen } else { VnState::Finished });
+            assert_eq!(
+                *actual,
+                if enabled {
+                    VnState::TitleScreen
+                } else {
+                    VnState::Finished
+                }
+            );
         }
     }
 }
