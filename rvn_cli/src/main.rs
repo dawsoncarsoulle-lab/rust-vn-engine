@@ -1020,6 +1020,24 @@ fn copy_project_notices(project_dir: &Path, dist_dir: &Path) -> Result<()> {
     for name in ["CREDITS.md", "LICENSE", "LICENSE.md", "LICENSE.txt"] {
         copy_optional_file_relative(project_dir, dist_dir, Path::new(name))?;
     }
+    let runtime_notices = dist_dir.join("rust-vn-notices");
+    fs::create_dir_all(&runtime_notices)?;
+    fs::write(
+        runtime_notices.join("LICENSE-MIT.txt"),
+        include_str!("../../LICENSE-MIT"),
+    )?;
+    fs::write(
+        runtime_notices.join("LICENSE-APACHE.txt"),
+        include_str!("../../docs/licenses/Apache-2.0.txt"),
+    )?;
+    fs::write(
+        runtime_notices.join("LICENSE-DejaVu.txt"),
+        include_str!("../../rvn_bevy/resources/DejaVuSans-LICENSE.txt"),
+    )?;
+    fs::write(
+        runtime_notices.join("THIRD-PARTY-NOTICES.txt"),
+        include_str!("../../RUNTIME-NOTICES.txt"),
+    )?;
     Ok(())
 }
 
@@ -1114,6 +1132,12 @@ mod distribution_regressions {
         fs::write(root.join("menus.rvnui"), &menu).unwrap();
         fs::write(root.join("CREDITS.md"), "Attribution: CC BY artist").unwrap();
         copy_project_notices(&root, &dist).unwrap();
+        assert!(dist.join("rust-vn-notices/LICENSE-MIT.txt").is_file());
+        assert!(dist.join("rust-vn-notices/LICENSE-APACHE.txt").is_file());
+        assert!(dist.join("rust-vn-notices/LICENSE-DejaVu.txt").is_file());
+        assert!(dist
+            .join("rust-vn-notices/THIRD-PARTY-NOTICES.txt")
+            .is_file());
         assert_eq!(
             fs::read_to_string(dist.join("CREDITS.md")).unwrap(),
             "Attribution: CC BY artist"
