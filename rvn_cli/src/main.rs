@@ -1033,6 +1033,30 @@ fn copy_custom_menus(project_dir: &Path, dist_dir: &Path) -> Result<()> {
 mod distribution_regressions {
     use super::*;
     #[test]
+    fn legacy_template_does_not_embed_removed_test_sprites_or_music() {
+        fn visit(dir: &Dir<'_>) {
+            for entry in dir.entries() {
+                match entry {
+                    include_dir::DirEntry::Dir(child) => visit(child),
+                    include_dir::DirEntry::File(file) => {
+                        let path = file.path().to_string_lossy();
+                        assert!(!path.starts_with("assets/sprites/eileen/"), "{path}");
+                        assert!(!path.starts_with("assets/music/"), "{path}");
+                        if path.ends_with(".rvn") || path.ends_with(".toml") {
+                            let text = file.contents_utf8().unwrap();
+                            for reference in ["theme.ogg", "theme_intro.ogg", "theme_clearing.ogg",
+                                              "eileen.show(", "eileen.move(", "eileen.hide("] {
+                                assert!(!text.contains(reference), "{path}: {reference}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        visit(&DEFAULT_TEMPLATE);
+    }
+
+    #[test]
     fn root_blueprint_script_and_custom_menus_are_packaged() {
         let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
         let root=std::env::temp_dir().join(format!("rvn-package-test-{stamp}"));
