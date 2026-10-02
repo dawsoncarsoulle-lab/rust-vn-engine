@@ -25,10 +25,39 @@ mod resources;
 mod systems;
 mod vn_command;
 use crate::bevy_renderer::BevyRenderer;
+mod accessibility;
+mod composed_motion;
+mod custom_canvas;
+mod layered_characters;
 mod menu_documents;
 #[cfg(not(target_arch = "wasm32"))]
 mod menu_preview_data;
+#[cfg(all(feature = "video", not(target_arch = "wasm32")))]
+mod native_video;
+mod portable_images;
+mod programmable_ui;
 mod save_thumbnails;
+#[cfg(target_os = "linux")]
+mod speech_linux;
+#[cfg(target_arch = "wasm32")]
+mod speech_web;
+#[cfg(target_os = "windows")]
+mod speech_windows;
+#[cfg(not(target_arch = "wasm32"))]
+mod speech_worker;
+#[cfg(all(feature = "video", not(target_arch = "wasm32")))]
+mod video_audio;
+#[cfg(all(feature = "video", not(target_arch = "wasm32")))]
+mod video_decoder;
+#[cfg(all(feature = "video", not(target_arch = "wasm32")))]
+mod video_transport;
+mod video_visual;
+#[cfg(target_arch = "wasm32")]
+mod web_accessibility;
+#[cfg(target_arch = "wasm32")]
+mod web_inputs;
+#[cfg(target_arch = "wasm32")]
+mod web_video;
 use crate::project_paths::ProjectPaths;
 use crate::resources::{
     CgAssetRegistry, CharacterRegistry, ChoiceFocus, DialogueHistory, GalleryState, ImagemapState,
@@ -108,6 +137,32 @@ struct WindowSection {
 mod window_configuration_tests {
     use super::WindowSection;
     #[test]
+    fn optional_configs_default_only_when_missing_not_when_invalid() {
+        use super::{parse_optional_toml, AppConfig};
+        assert_eq!(
+            parse_optional_toml::<AppConfig>(None, "config.toml")
+                .unwrap()
+                .locale
+                .current,
+            "fr"
+        );
+        assert!(
+            parse_optional_toml::<AppConfig>(Some("[locale]\ncurrent = 42"), "config.toml")
+                .err()
+                .unwrap()
+                .contains("config.toml")
+        );
+        assert!(parse_optional_toml::<super::Theme>(
+            Some("[textbox]\nheight = \"wrong\""),
+            "theme.toml"
+        )
+        .is_err());
+        assert!(
+            parse_optional_toml::<super::Theme>(Some("[textbox]\nheight = 190"), "theme.toml")
+                .is_ok()
+        );
+    }
+    #[test]
     fn typewriter_preference_round_trips_and_legacy_settings_keep_default() {
         let mut data = rvn_core::persistent::PersistentData::default();
         data.typewriter = Some(false);
@@ -172,6 +227,33 @@ impl Default for PathsSection {
 struct AppConfig {
     #[serde(default)]
     locale: LocaleConfigFile,
+}
+
+fn parse_optional_toml<T: serde::de::DeserializeOwned + Default>(
+    source: Option<&str>,
+    path: &str,
+) -> Result<T, String> {
+    match source {
+        None => Ok(T::default()),
+        Some(source) => toml::from_str(source)
+            .map_err(|error| format!("Invalid configuration `{path}`: {error}")),
+    }
+}
+
+fn load_optional_toml<T: serde::de::DeserializeOwned + Default>(
+    path: &std::path::Path,
+) -> Result<T, String> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => Some(content),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(format!(
+                "Cannot read configuration `{}`: {error}",
+                path.display()
+            ))
+        }
+    };
+    parse_optional_toml(content.as_deref(), &path.display().to_string())
 }
 
 #[derive(Deserialize)]
@@ -265,10 +347,7 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
 
     // 4. Load locale configuration from config.toml in the assets directory if present.
     let config_toml_path = assets_dir.join("config.toml");
-    let app_config: AppConfig = std::fs::read_to_string(&config_toml_path)
-        .ok()
-        .and_then(|s| toml::from_str(&s).ok())
-        .unwrap_or_default();
+    let app_config: AppConfig = load_optional_toml(&config_toml_path)?;
     let mut locale_cfg = app_config.locale;
     for lang in discover_locale_langs(&locales_dir) {
         if !locale_cfg
@@ -300,8 +379,7 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
     let engine = build_engine(script, &cfg, &script_path.display().to_string(), locale_mgr)?;
 
     // 9. Load the UI theme and set up the watcher.
-    let theme_content = std::fs::read_to_string(&theme_path).unwrap_or_default();
-    let theme: Theme = toml::from_str(&theme_content).unwrap_or_default();
+    let theme: Theme = load_optional_toml(&theme_path)?;
     let theme_watcher = ThemeWatcher::new(theme_path.to_string_lossy().to_string());
 
     // 11. Set the Bevy asset root to the configured assets directory.
@@ -450,6 +528,12 @@ fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
     .insert_resource(DebugStepRequest::default())
     // Events & States
     .add_plugins(menu_documents::MenuDocumentsPlugin)
+    .add_plugins(programmable_ui::ProgrammableUiPlugin)
+    .add_plugins(custom_canvas::CustomCanvasPlugin)
+    .add_plugins(accessibility::AccessibilityPlugin)
+    .add_plugins(composed_motion::ComposedMotionPlugin)
+    .add_plugins(layered_characters::LayeredCharactersPlugin)
+    .add_plugins(portable_images::PortableImagesPlugin)
     .add_event::<VnCommand>()
     .add_event::<PlayerInput>()
     .init_state::<VnState>()
@@ -483,10 +567,10 @@ fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
                 background_cover_resize_system,
                 sprite_system,
                 systems::sprite::resize_sprite_stage,
-                sprite_animation_system,
+                sprite_animation_system.after(layered_characters::synchronize),
                 cinematic_system,
                 cinematic_cover_resize_system,
-                dialogue_system,
+                dialogue_system.after(typewriter_config_system),
                 choice_system,
                 imagemap_system,
                 audio_system,
@@ -544,8 +628,12 @@ fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
             spawn_or_despawn_debug_overlay_system,
             debug_step_input_system,
         ),
-    )
-    .run();
+    );
+    #[cfg(all(feature = "video", not(target_arch = "wasm32")))]
+    app.add_plugins(native_video::NativeVideoPlugin);
+    #[cfg(target_arch = "wasm32")]
+    app.add_plugins(web_video::WebVideoPlugin);
+    app.run();
 
     Ok(())
 }
@@ -614,27 +702,30 @@ pub async fn run_game_web(project_root: &str) -> Result<(), String> {
     let cfg: RvnToml = toml::from_str(&rvn_toml_content)
         .map_err(|e| format!("Impossible de parser rvn.toml: {e}"))?;
 
-    let manifest = fetch_optional_text(&format!("{root}/rvn_web_manifest.toml"))
-        .await
-        .and_then(|content| toml::from_str::<WebScriptManifest>(&content).ok())
-        .map(|manifest| manifest.scripts)
-        .unwrap_or_else(|| vec![cfg.project.main_script.clone()]);
+    let manifest_url = format!("{root}/rvn_web_manifest.toml");
+    let manifest = match fetch_optional_configuration(&manifest_url).await? {
+        Some(content) => {
+            toml::from_str::<WebScriptManifest>(&content)
+                .map_err(|error| format!("Invalid configuration `{manifest_url}`: {error}"))?
+                .scripts
+        }
+        None => vec![cfg.project.main_script.clone()],
+    };
     let script = load_web_scripts(root, &cfg.project.main_script, &manifest).await?;
 
     let assets_dir = PathBuf::from(&cfg.paths.assets);
     let locales_dir = PathBuf::from(&cfg.paths.locales);
     let saves_dir = PathBuf::from(&cfg.paths.saves);
     let theme_path = PathBuf::from(&cfg.paths.theme);
-    let asset_manifest = fetch_optional_text(&format!("{root}/rvn_web_assets.toml"))
-        .await
-        .and_then(|content| toml::from_str::<WebAssetManifest>(&content).ok())
-        .unwrap_or_default();
+    let manifest_url = format!("{root}/rvn_web_assets.toml");
+    let manifest_content = fetch_optional_configuration(&manifest_url).await?;
+    let asset_manifest: WebAssetManifest =
+        parse_optional_toml(manifest_content.as_deref(), &manifest_url)?;
 
     let app_config = if asset_manifest.has_config_toml {
-        fetch_optional_text(&format!("{root}/{}/config.toml", cfg.paths.assets))
-            .await
-            .and_then(|s| toml::from_str::<AppConfig>(&s).ok())
-            .unwrap_or_default()
+        let path = format!("{root}/{}/config.toml", cfg.paths.assets);
+        let content = fetch_text(&path).await?;
+        parse_optional_toml::<AppConfig>(Some(&content), &path)?
     } else {
         AppConfig::default()
     };
@@ -704,10 +795,9 @@ pub async fn run_game_web(project_root: &str) -> Result<(), String> {
     } else {
         None
     };
-    let theme_content = fetch_optional_text(&format!("{root}/{}", cfg.paths.theme))
-        .await
-        .unwrap_or_default();
-    let theme: Theme = toml::from_str(&theme_content).unwrap_or_default();
+    let theme_url = format!("{root}/{}", cfg.paths.theme);
+    let theme_content = fetch_optional_configuration(&theme_url).await?;
+    let theme: Theme = parse_optional_toml(theme_content.as_deref(), &theme_url)?;
     let theme_watcher = ThemeWatcher::new(cfg.paths.theme.clone());
     let cg_registry = CgAssetRegistry(asset_manifest.cgs);
     prefetch_audio_files(root, &asset_manifest.music).await;
@@ -910,6 +1000,38 @@ async fn fetch_bytes_for_cache(url: &str) -> Result<(), String> {
     .await
     .map_err(|_| format!("lecture binaire impossible pour `{url}`"))?;
     Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_optional_configuration(url: &str) -> Result<Option<String>, String> {
+    use wasm_bindgen::JsCast;
+    let window = web_sys::window().ok_or_else(|| "window unavailable".to_string())?;
+    let value = wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(url))
+        .await
+        .map_err(|_| format!("Cannot load configuration `{url}`"))?;
+    let response: web_sys::Response = value
+        .dyn_into()
+        .map_err(|_| format!("Invalid HTTP response for `{url}`"))?;
+    if response.status() == 404 {
+        return Ok(None);
+    }
+    if !response.ok() {
+        return Err(format!(
+            "Cannot load configuration `{url}`: HTTP {}",
+            response.status()
+        ));
+    }
+    let content = wasm_bindgen_futures::JsFuture::from(
+        response
+            .text()
+            .map_err(|_| format!("Invalid text response for `{url}`"))?,
+    )
+    .await
+    .map_err(|_| format!("Cannot read configuration `{url}`"))?;
+    content
+        .as_string()
+        .map(Some)
+        .ok_or_else(|| format!("Non UTF-8 configuration `{url}`"))
 }
 
 #[cfg(target_arch = "wasm32")]

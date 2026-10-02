@@ -1,0 +1,386 @@
+// L’Atlas des Brumes — original playable showcase, 2026-10-02.
+// The distributed/editor source is main.rvn. This is the story authoring section.
+
+function atlas_reward(index, count) {
+    return list_set(atlas_quantities,index,atlas_quantities[index]+count)
+}
+
+function atlas_dial_points() {
+    return [[0,-1],[0.707,-0.707],[1,0],[0.707,0.707],[0,1],[-0.707,0.707],[-1,0],[-0.707,-0.707]]
+}
+
+function atlas_dial_draw(state, props, frame) {
+    local gold = [0.82,0.67,0.37,1]
+    local light = [0.32,0.90,0.91,1]
+    local ink = [0.025,0.065,0.085,1]
+    local drawing = [
+        canvas_rect([0,0,1920,1080],[0.01,0.025,0.03,0.78],0),
+        canvas_group([380,170,1,1,0,1],[],atlas_panel("LE CADRAN DES MARÉES","Aligner les trois anneaux pour réveiller l’observatoire.")),
+        canvas_text("LUNE  2",[470,380],gold,30),
+        canvas_text("MARÉE  5",[470,440],gold,30),
+        canvas_text("VENT  1",[470,500],gold,30),
+        canvas_text("Un clic sélectionne et tourne un anneau.",[470,580],[0.74,0.80,0.77,1],21),
+        canvas_text("1 / 2 / 3 : anneau · ← / → : tourner",[470,620],[0.74,0.80,0.77,1],21),
+        canvas_text("Molette : tourner · Entrée : vérifier",[470,660],[0.74,0.80,0.77,1],21),
+        canvas_text(state["notice"],[470,720],light,22)
+    ]
+    local points = atlas_dial_points()
+    local ring = 0
+    while ring < 3 {
+        local radius = 234 - ring * 65
+        local color = gold
+        if state["selected"] == ring {set color = light}
+        set drawing = list_append(drawing,canvas_ellipse([1220-radius,500-radius,radius*2,radius*2],color))
+        set drawing = list_append(drawing,canvas_ellipse([1225-radius,505-radius,radius*2-10,radius*2-10],ink))
+        local marker = state["rings"][ring]
+        local step = 0
+        while step < 8 {
+            local p = points[step]
+            set drawing = list_append(drawing,canvas_line([[1220+p[0]*(radius-18),500+p[1]*(radius-18)],[1220+p[0]*(radius-30),500+p[1]*(radius-30)]],color,3))
+            if step == marker {
+                set drawing = list_append(drawing,canvas_ellipse([1211+p[0]*(radius-16),491+p[1]*(radius-16),18,18],light))
+            }
+            set step = step + 1
+        }
+        set drawing = list_append(drawing,canvas_hit("ring_"+ring,[1220-radius,500-radius,radius*2,radius*2]))
+        set ring = ring + 1
+    }
+    return list_concat(drawing,[
+        canvas_ellipse([1196,476,48,48],light),
+        canvas_text(""+state["rings"][0]+"  /  "+state["rings"][1]+"  /  "+state["rings"][2],[1125,790],gold,30),
+        canvas_rect([470,795,350,56],[0.12,0.32,0.33,1],8),
+        canvas_text("VÉRIFIER L’ALIGNEMENT",[494,810],[0.96,0.9,0.72,1],21),
+        canvas_hit("verify",[470,795,350,56]),
+        canvas_rect([1320,835,130,42],[0.2,0.14,0.1,1],8),
+        canvas_text("Retour",[1348,844],gold,20),
+        canvas_hit("cancel",[1320,835,130,42])
+    ])
+}
+
+function atlas_dial_turn(state, direction) {
+    local index = state["selected"]
+    local value = state["rings"][index] + direction
+    if value > 7 {set value = 0}
+    if value < 0 {set value = 7}
+    return dict_set(state,"rings",list_set(state["rings"],index,value))
+}
+
+handler atlas_dial_event(event) {
+    local state = event["state"]
+    local value = event["value"]
+    local verify = false
+    if event["kind"] == "pointer_down" {
+        local hit = dict_get(value,"hit","")
+        if hit == "cancel" {ui.close("atlas_dial") return 0}
+        if hit == "verify" {set verify = true}
+        if hit == "ring_0" {set state = dict_set(state,"selected",0) set state = atlas_dial_turn(state,1)}
+        if hit == "ring_1" {set state = dict_set(state,"selected",1) set state = atlas_dial_turn(state,1)}
+        if hit == "ring_2" {set state = dict_set(state,"selected",2) set state = atlas_dial_turn(state,1)}
+    }
+    if event["kind"] == "wheel" {
+        local direction = 1
+        if dict_get(value,"dy",0) > 0 {set direction = -1}
+        set state = atlas_dial_turn(state,direction)
+    }
+    if event["kind"] == "key" and dict_get(value,"pressed",false) {
+        local code = value["code"]
+        if code == "Digit1" {set state = dict_set(state,"selected",0)}
+        if code == "Digit2" {set state = dict_set(state,"selected",1)}
+        if code == "Digit3" {set state = dict_set(state,"selected",2)}
+        if code == "ArrowLeft" {set state = atlas_dial_turn(state,-1)}
+        if code == "ArrowRight" {set state = atlas_dial_turn(state,1)}
+        if code == "Enter" {set verify = true}
+        if code == "Escape" {ui.close("atlas_dial") return 0}
+    }
+    if verify {
+        if state["rings"] == [2,5,1] {
+            set atlas_puzzle_solved = true
+            ui.close("atlas_dial")
+            return 0
+        }
+        set state = dict_set(state,"notice","Le mécanisme attend 2 / 5 / 1. Les anneaux restent en place.")
+    }
+    ui.set_state(event["screen"],event["element"],state)
+}
+
+screen atlas_dial() {
+    return component("dial_root","canvas",{
+            "rect":[0,0,1920,1080],"auto_background":false,
+            "draw":"atlas_dial_draw","props":{},
+            "state":{"rings":[0,0,0],"selected":0,"notice":"Les indices sont gravés à gauche du cadran."},
+            "accessible_label":"Cadran des marées. Alignez les anneaux Lune2, Marée5 et Vent1 avec1,2,3 et les flèches.",
+            "events":{"pointer_down":"atlas_dial_event","wheel":"atlas_dial_event","key":"atlas_dial_event"}
+        },[])
+}
+
+init {
+    character.create("keeper","Maëlys")
+    character.create("lantern","Lanterne")
+    set first_name = "Alix"
+    set last_name = "Vey"
+    set origin = "rivage"
+    set atlas_reduced_motion = false
+    set atlas_high_contrast = false
+    set atlas_text_scale = 1.0
+    set atlas_self_voicing = false
+    set atlas_page = 1
+    set atlas_view = 1.0
+    set atlas_selected = 0
+    set atlas_marker = 0
+    set atlas_destination = ""
+    set atlas_location = "havre"
+    set atlas_open = false
+    set atlas_notice = "Bienvenue : identité à gauche, inventaire au centre, carte à droite."
+    set atlas_quest = "Au Havre, rencontrer Maëlys pour commencer le voyage."
+    set atlas_equipped = "boussole"
+    set atlas_quantities = [1,0,0,1,0,1,3,0,1,0,0,0,0,0,0,1,1,0]
+    set atlas_gold = 125
+    set atlas_health = 5
+    set atlas_max_health = 6
+    set atlas_has_compass = true
+    set atlas_has_lantern = false
+    set atlas_keeper_trust = 0
+    set atlas_crossing_ready = false
+    set atlas_melody_played = false
+    set atlas_puzzle_solved = false
+    set atlas_seen_havre = false
+    set atlas_seen_clairiere = false
+    set atlas_seen_observatoire = false
+    set atlas_seen_archives = false
+    set atlas_seen_falaises = false
+    set atlas_finished = false
+    set atlas_draw = 0
+}
+
+label start
+typewriter.speed(38)
+scene "scenes/harbor.png" with dissolve
+music.play("music/fog_theme.wav") with fade
+music.volume("0.32")
+accessibility.configure({"text_scale":1.0,"high_contrast":false,"reduced_motion":false,"self_voicing":false})
+ui.open("atlas_hud",[],false,2)
+jump explore
+
+label explore
+set atlas_has_lantern = atlas_quantities[1] > 0
+set atlas_destination = ""
+set atlas_open = true
+ui.open("atlas",[],true,20)
+ui.focus("atlas","atlas_surface")
+// Finite, saveable lifetime fence: closing the atlas removes its motion track
+// and releases wait on the next tick, so travel needs no extra dialogue click.
+motion.play("ui:atlas/atlas_root",motion_pause(86400))
+motion.wait("ui:atlas/atlas_root")
+ui.close("atlas")
+set atlas_open = false
+call atlas_apply_accessibility
+if atlas_destination == "havre" {jump atlas_visit_havre}
+if atlas_destination == "clairiere" {jump atlas_visit_clairiere}
+if atlas_destination == "observatoire" {jump atlas_visit_observatoire}
+if atlas_destination == "archives" {jump atlas_visit_archives}
+if atlas_destination == "falaises" {jump atlas_visit_falaises}
+if atlas_destination == "tour" {jump atlas_visit_tour}
+choice {
+    "Explorer [atlas_location_name(atlas_location)]" => {
+        if atlas_location == "havre" {jump atlas_visit_havre}
+        if atlas_location == "clairiere" {jump atlas_visit_clairiere}
+        if atlas_location == "observatoire" {jump atlas_visit_observatoire}
+        if atlas_location == "archives" {jump atlas_visit_archives}
+        if atlas_location == "falaises" {jump atlas_visit_falaises}
+        jump atlas_visit_tour
+    }
+    "Rouvrir l’Atlas" => {jump explore}
+    "Voir l’ouverture animée" => {call atlas_prologue jump explore}
+    "Lire les commandes" => {
+        "Dans l’Atlas : Q/E ou Page précédente/suivante changent de volet. Flèches et Entrée naviguent dans les objets et lieux. La souris sélectionne, survole et active."
+        "Échap ferme l’Atlas ; hors Atlas, Échap ouvre le menu système. F5/F6 sauvegardent et chargent rapidement hors Atlas. F8 ouvre les préférences accessibles du moteur."
+        "Les noms, possessions, choix, puzzles, animations et positions du menu sont conservés dans les sauvegardes. Le rollback reste disponible pendant les dialogues."
+        jump explore
+    }
+}
+
+label atlas_visit_havre
+set atlas_location = "havre"
+scene "scenes/harbor.png" with dissolve
+if not atlas_seen_havre {
+    set atlas_seen_havre = true
+    call atlas_keeper_outfit
+    keeper "[first_name] [last_name]… Un nom à inscrire dans l’Atlas. La brume a effacé cinq de nos routes. Aidez-moi à rallumer le phare."
+    choice {
+        "Partager mes relevés avec Maëlys" => {
+            set atlas_keeper_trust = atlas_keeper_trust + 2
+            keeper "Alors nous voyagerons ensemble. Une carte appartient à toutes celles et ceux qui l’habitent."
+        }
+        "Négocier une récompense" => {
+            set atlas_gold = atlas_gold + 30
+            keeper "Trente écus, et la même mission. La confiance se gagne en chemin."
+        }
+    }
+    set atlas_quantities = atlas_reward(1,1)
+    set atlas_quantities = atlas_reward(4,1)
+    set atlas_quantities = atlas_reward(11,1)
+    set atlas_quantities = atlas_reward(14,1)
+    set atlas_has_lantern = true
+    character.attributes("keeper",{"accessory":"lantern"})
+    if atlas_keeper_trust > 0 {character.attributes("keeper",{"face":"smile"})}
+    set atlas_notice = "Reçus : lanterne, sceau, amulette et fiole."
+    set atlas_quest = "Clairière : retrouver le grappin et le fragment de l’Atlas."
+    keeper "Prenez cette lanterne et mon sceau. La Clairière cache un fragment ; les Archives sauront le lire. L’Observatoire est un détour qui peut nous aider."
+    keeper.hide() with dissolve
+} else {
+    "Le Havre vous accueille, [first_name]. Les marins ont reconnu le sceau accroché à votre sac."
+    choice {
+        "Se reposer — restaurer la vitalité" => {set atlas_health = atlas_max_health set atlas_notice = "Repos au Havre : vitalité restaurée."}
+        "Acheter un élixir — 15 écus" if atlas_gold >= 15 => {set atlas_gold = atlas_gold - 15 set atlas_quantities = atlas_reward(6,1) set atlas_notice = "Un élixir rejoint l’inventaire."}
+        "Repartir" => {set atlas_notice = "Les routes attendent votre prochain choix."}
+    }
+}
+jump explore
+
+label atlas_visit_clairiere
+set atlas_location = "clairiere"
+scene "scenes/forest.png" with fade
+if not atlas_seen_clairiere {
+    if not atlas_has_lantern {
+        "La forêt se referme dès les premières racines. Maëlys garde au Havre la lanterne capable de réveiller ces chemins."
+        set atlas_quest = "Havre : rencontrer Maëlys avant d’entrer dans la forêt."
+        jump explore
+    }
+    "Une passerelle cassée coupe la Clairière d’Azur. Au pied des racines, une malle porte un signe en forme de vent."
+    choice {
+        "Suivre la boussole" if atlas_equipped == "boussole" => {
+            set atlas_keeper_trust = atlas_keeper_trust + 1
+            "L’aiguille s’aligne sur les pierres les plus sûres. Vous contournez le torrent sans vous blesser."
+        }
+        "Tendre la corde" if atlas_quantities[8] > 0 => {"Votre corde tendue entre deux branches vous fait traverser."}
+        "Sauter de pierre en pierre" => {
+            set atlas_draw = random(1,6)
+            if atlas_draw <= 3 {set atlas_health = atlas_health - 1 "Une pierre glisse. Une égratignure, mais vous atteignez l’autre rive."}
+            else {"Votre saut est précis. Vous atteignez la malle, le sac encore sec."}
+        }
+    }
+    set atlas_seen_clairiere = true
+    set atlas_quantities = atlas_reward(2,1)
+    set atlas_quantities = atlas_reward(10,1)
+    set atlas_quantities = atlas_reward(17,1)
+    set atlas_gold = atlas_gold + 20
+    set atlas_crossing_ready = true
+    call atlas_crossing
+    if not atlas_crossing_ready {
+        set atlas_notice = "La traversée attend une boussole et une lanterne."
+        jump explore
+    }
+    "La malle renferme un grappin, un sifflet de terre cuite et le fragment recherché. Votre équipement ouvre maintenant la route des Falaises."
+    set atlas_notice = "Trouvés : grappin, sifflet, fragment et20 écus."
+    set atlas_quest = "Archives : présenter le fragment pour recevoir la clé du phare."
+} else {
+    "Le torrent murmure sous la passerelle. Le chemin est désormais sûr, et vos annotations restent dans le carnet."
+}
+jump explore
+
+label atlas_visit_observatoire
+set atlas_location = "observatoire"
+scene "scenes/temple.png" with dissolve
+if not atlas_puzzle_solved {
+    "Votre lanterne révèle trois mots gravés : Lune2, Marée5, Vent1. Les anneaux de l’observatoire peuvent encore tourner."
+    ui.open("atlas_dial",[],true,22)
+    ui.focus("atlas_dial","dial_root")
+    motion.play("ui:atlas_dial/dial_root",motion_pause(86400))
+    motion.wait("ui:atlas_dial/dial_root")
+    ui.close("atlas_dial")
+}
+if atlas_puzzle_solved and not atlas_seen_observatoire {
+    set atlas_seen_observatoire = true
+    set atlas_quantities = atlas_reward(9,1)
+    set atlas_quantities = atlas_reward(12,1)
+    set atlas_keeper_trust = atlas_keeper_trust + 1
+    call atlas_temple_vision
+    "Les constellations se relient. Une lentille et une relique remontent du mécanisme ; vous avez appris à lire la mémoire de la brume."
+    set atlas_notice = "Cadran résolu : monocle et relique obtenus."
+} else {
+    if atlas_puzzle_solved {"Les anneaux gardent votre alignement. Le ciel paraît plus proche."}
+    else {"Vous laissez les anneaux en silence. Les indices resteront là si vous revenez."}
+}
+jump explore
+
+label atlas_visit_archives
+set atlas_location = "archives"
+scene "scenes/temple.png" with blur
+if not atlas_seen_archives {
+    if atlas_quantities[17] > 0 {
+        set atlas_seen_archives = true
+        "Le sceau de Maëlys ouvre les Archives. Vous placez le fragment dans la rainure d’une table d’obsidienne."
+        if atlas_quantities[9] > 0 {"Le monocle révèle une signature invisible : le phare n’était pas une arme, mais une promesse de retour." set atlas_keeper_trust = atlas_keeper_trust + 1}
+        else {"Les archivistes déchiffrent les lignes estompées pour vous. Le phare guidait jadis tous les voyageurs."}
+        set atlas_quantities = atlas_reward(7,1)
+        set atlas_notice = "La clé ancienne ouvre désormais la Tour, une fois le cristal trouvé."
+        set atlas_quest = "Falaises : équiper le grappin et recueillir un cristal de lumière."
+        "Une clé ancienne sort de la table. Il manque seulement un cristal de lumière pour réveiller le phare : cherchez-le aux Falaises."
+    } else {
+        "Votre sceau ouvre la porte, mais les archivistes demandent le fragment de la Clairière avant d’ouvrir le coffre."
+        set atlas_quest = "Retourner à la Clairière pour trouver le fragment."
+    }
+} else {"Les archivistes classent vos relevés sous le nom [last_name]. La clé attend déjà dans votre sac."}
+jump explore
+
+label atlas_visit_falaises
+set atlas_location = "falaises"
+scene "scenes/forest.png" with slideleft
+if not atlas_seen_falaises {
+    if atlas_equipped == "grappin" {
+        set atlas_seen_falaises = true
+        "Le grappin mord la corniche. La lumière enfermée dans la roche répond à celle de votre lanterne."
+        set atlas_quantities = atlas_reward(13,2)
+        set atlas_notice = "Deux cristaux rejoignent l’inventaire. La Tour est accessible avec la clé."
+        set atlas_quest = "Tour du Veilleur : insérer la clé et rallumer le phare."
+        "Vous recueillez deux cristaux. La carte révèle une dernière route vers la Tour du Veilleur."
+    } else {
+        "Le vent vous retient au pied des corniches. Posséder le grappin ne suffit pas : équipez-le dans l’inventaire, puis revenez."
+        set atlas_notice = "Équipez le grappin dans l’inventaire avant d’explorer les Falaises."
+    }
+} else {"Vos cordages brillent le long de la falaise. La route est sûre pour les prochains voyageurs."}
+jump explore
+
+label atlas_visit_tour
+set atlas_location = "tour"
+scene "scenes/temple.png" with fade
+if not atlas_finished {
+    "La clé ouvre le socle du phare. Les deux cristaux se mettent à résonner. Vous pouvez canaliser leur lumière de deux façons."
+    if atlas_melody_played {"Le sifflet porte encore la mélodie de la forêt. Une troisième voie se dessine entre les deux cristaux."}
+    choice {
+        "Partager la lumière avec les six routes" if atlas_keeper_trust >= 2 => {jump atlas_end_light}
+        "Écouter la mélodie du sifflet" if atlas_melody_played => {set atlas_keeper_trust = atlas_keeper_trust + 1 jump atlas_end_light}
+        "Rallumer le phare depuis la Tour" => {jump atlas_end_mist}
+    }
+} else {
+    "Le phare continue de briller. L’aventure est achevée ; vous pouvez explorer librement les pages, les lieux et les souvenirs."
+    jump explore
+}
+
+label atlas_end_light
+set atlas_finished = true
+set atlas_quest = "Atlas accompli : les six routes sont reliées. Exploration libre."
+unlock_ending "atlas_shared_light"
+cinematic "atlas_memory" with dissolve
+"La lumière parcourt les six routes comme un trait d’encre vivante. La brume ne disparaît pas : elle devient un ciel pour celles et ceux qui voyagent."
+"[first_name] [last_name], cartographe du [origin], inscrit un dernier nom dans le carnet : Maëlys. Le vôtre reste à côté."
+cinematic hide with dissolve
+jump atlas_epilogue
+
+label atlas_end_mist
+set atlas_finished = true
+set atlas_quest = "Phare rallumé : les routes pourront encore grandir. Exploration libre."
+unlock_ending "atlas_beacon"
+cinematic "atlas_memory" with fade
+"Le phare perce la brume. Une seule lumière suffit pour que les bateaux trouvent de nouveau le Havre. Les autres routes attendront votre prochain voyage."
+cinematic hide with fade
+jump atlas_epilogue
+
+label atlas_epilogue
+sfx.play("sfx/beacon.wav")
+set persistent.atlas_completed = true
+if persistent.atlas_completed {"Votre signature a rejoint les archives des voyageurs, au-delà de cette partie."}
+"Fin de L’Atlas des Brumes. Les choix, objets et détour par l’observatoire ont façonné cette conclusion. Le souvenir et la fin ont rejoint la galerie du moteur."
+"Le jeu reste ouvert pour tester l’inventaire, la carte et les préférences. Sauvegarde, chargement, historique et rollback sont disponibles dans le menu système hors Atlas."
+set atlas_notice = "Aventure achevée. Vous pouvez continuer à explorer et à tester le menu."
+jump explore

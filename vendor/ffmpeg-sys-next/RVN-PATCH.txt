@@ -1,0 +1,39 @@
+Upstream: ffmpeg-sys-next 9.0.0, https://github.com/zmwangx/rust-ffmpeg-sys
+Source: crates.io ffmpeg-sys-next 9.0.0 source archive.
+Archive SHA256: 9b939bf79dd5949412a4b81cfe21a07f48ea21b47fcbb5f57816c8c2de5ae30b
+Upstream Git revision: 80b7dd8327c3539159f37d8ca5423c75d6cd2e57
+License: WTFPL, as declared by the upstream Cargo manifest. LICENSE.WTFPL
+contains the identical WTFPL v2 text supplied by ffmpeg-next 9.0.0.
+
+rust-VN modifications:
+hwcontext_wrapper.h: bind available libavutil hardware-context headers without
+generating the full external SDK APIs. CUDA and Direct3D use opaque handles and
+integer-width stand-ins. D3D11 is gated on d3d11.h; D3D12 requires all three
+Direct3D 12 SDK headers before including its optional hardware context.
+MinGW distributions may provide d3d12.h without d3d12video.h, and guard macros
+alone cannot prevent Clang from reporting a missing included file.
+
+hwcontext_stubs/: bindgen-only header shims provide the external types referenced
+by FFmpeg's Vulkan, VideoToolbox, VAAPI and QSV headers. Handles and pointer-only
+structures remain opaque; the shims do not implement these SDKs or enable their
+hardware accelerators. Vulkan's embedded-by-value VkPhysicalDeviceFeatures2
+uses its structural layout and a 240-byte static assertion for the validated
+64-bit ABI. build.rs prepends the shim include directory and tracks the wrapper
+and shim headers as build inputs. Real SDK headers are deliberately not imported
+through those shim paths.
+
+The rust-VN distributed FFmpeg runtime decodes VP8/Vorbis in software and is
+built with hardware acceleration disabled. These bindings do not constitute
+hardware-decoding or cross-platform SDK qualification. The Linux x86_64 video
+build was verified with BINDGEN_EXTRA_CLANG_ARGS=--target=x86_64-unknown-linux-gnu
+and LIBCLANG_PATH set to the selected LLVM library directory. Bindgen must use
+the intended target, not a different default Clang ABI; 32-bit builds are not
+qualified by the current Vulkan layout assertion.
+
+build.rs / dynamic_link.rs: on Linux, a dynamic FFMPEG_DIR build links the
+exact versioned shared objects selected from that prefix. This prevents a
+transitive system-library search path from silently choosing a different
+FFmpeg ABI than the headers used to generate bindings. Prefix escapes,
+missing and unversioned objects are rejected. Static builds, builds without
+FFMPEG_DIR and other target platforms retain upstream link selection.
+The helper includes isolated filesystem tests runnable with rustc --test.

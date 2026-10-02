@@ -28,6 +28,30 @@ pub fn migrate_graph_value(mut value: Value) -> Result<(Value, MigrationReport),
         version = 2;
         steps.push("v1_to_v2_typed_variables");
     }
+    if version == 2 && value.is_object() {
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("schema_version".into(), Value::from(3));
+        version = 3;
+        steps.push("v2_to_v3_explicit_text_conversions");
+    }
+    if version == 3 && value.is_object() {
+        migrate_v3_to_v4(&mut value);
+        version = 4;
+        steps.push("v3_to_v4_advanced_authoring");
+    }
+    if version == 4 && value.is_object() {
+        // The new canvas nodes do not change any existing pins, identities or
+        // expressions. Versioning still prevents an older editor from silently
+        // opening a graph whose programmable drawing it cannot execute.
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("schema_version".into(), Value::from(5));
+        version = 5;
+        steps.push("v4_to_v5_programmable_canvas");
+    }
     Ok((
         value,
         MigrationReport {
@@ -36,6 +60,87 @@ pub fn migrate_graph_value(mut value: Value) -> Result<(Value, MigrationReport),
             steps,
         },
     ))
+}
+
+fn migrate_v3_to_v4(value: &mut Value) {
+    let object = value.as_object_mut().unwrap();
+    let kinds: std::collections::BTreeMap<_, _> = object
+        .get("nodes")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|nodes| nodes.values())
+        .filter_map(|node| {
+            Some((
+                node.get("id")?.as_u64()?,
+                node.get("kind")?.as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    let mut next = object
+        .get("next_pin_id")
+        .and_then(Value::as_u64)
+        .unwrap_or(1)
+        .max(
+            object
+                .get("pins")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flat_map(|pins| pins.keys())
+                .filter_map(|key| key.parse::<u64>().ok())
+                .max()
+                .unwrap_or(0)
+                .saturating_add(1),
+        );
+    if let Some(pins) = object.get_mut("pins").and_then(Value::as_object_mut) {
+        for pin in pins.values_mut() {
+            if pin
+                .get("node")
+                .and_then(Value::as_u64)
+                .and_then(|id| kinds.get(&id))
+                .is_some_and(|kind| kind == "motion_tween")
+                && pin.get("key").and_then(Value::as_str) == Some("curve")
+            {
+                pin.as_object_mut()
+                    .unwrap()
+                    .insert("value_type".into(), Value::String("any".into()));
+            }
+        }
+        for (id, kind) in &kinds {
+            if kind == "layered_image"
+                && !pins.values().any(|pin| {
+                    pin.get("node").and_then(Value::as_u64) == Some(*id)
+                        && pin.get("key").and_then(Value::as_str) == Some("options")
+                })
+            {
+                let pin = next;
+                next = next.saturating_add(1);
+                pins.insert(pin.to_string(),serde_json::json!({"id":pin,"node":id,"key":"options","label":"Variantes et règles","direction":"input","value_type":"any","cardinality":"one","default_value":null}));
+            }
+        }
+    }
+    let added: Vec<_> = object
+        .get("pins")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|pins| pins.values())
+        .filter(|pin| pin.get("key").and_then(Value::as_str) == Some("options"))
+        .filter_map(|pin| Some((pin.get("node")?.as_u64()?, pin.get("id")?.as_u64()?)))
+        .collect();
+    if let Some(nodes) = object.get_mut("nodes").and_then(Value::as_object_mut) {
+        for (node, pin) in added {
+            if let Some(pins) = nodes
+                .get_mut(&node.to_string())
+                .and_then(|node| node.get_mut("pins"))
+                .and_then(Value::as_array_mut)
+            {
+                if !pins.iter().any(|id| id.as_u64() == Some(pin)) {
+                    pins.push(Value::from(pin));
+                }
+            }
+        }
+    }
+    object.insert("next_pin_id".into(), Value::from(next));
+    object.insert("schema_version".into(), Value::from(4));
 }
 
 fn migrate_v1_to_v2(value: &mut Value) {

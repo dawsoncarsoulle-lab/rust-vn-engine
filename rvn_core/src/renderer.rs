@@ -5,6 +5,91 @@ use std::io;
 // ─── TRAIT ───────────────────────────────────────────────────────────────────
 
 pub trait Renderer {
+    /// Report successful legacy loads without pretending their story identity
+    /// was verified. Default keeps existing third-party renderers compatible.
+    fn loaded_compatibility(&mut self, _compatibility: crate::engine::LoadCompatibility) {}
+    fn supports_accessibility(&self) -> bool {
+        false
+    }
+    fn update_accessibility(
+        &mut self,
+        settings: &rvn_ui::accessibility::AccessibilitySettings,
+    ) -> Result<(), String> {
+        if settings == &Default::default() {
+            Ok(())
+        } else {
+            Err("This renderer does not support accessibility settings".into())
+        }
+    }
+    fn accessibility_speech(
+        &mut self,
+        _request: &rvn_ui::accessibility::SpeechRequest,
+    ) -> Result<(), String> {
+        Err("This renderer does not support speech synthesis".into())
+    }
+    /// Side-effect-free preflight before committing any interface or policy.
+    fn validate_accessibility_speech(
+        &self,
+        request: &rvn_ui::accessibility::SpeechRequest,
+    ) -> Result<(), String> {
+        if !self.supports_accessibility() {
+            return Err("This renderer does not support speech synthesis".into());
+        }
+        if let rvn_ui::accessibility::SpeechRequest::Speak(text) = request {
+            rvn_ui::accessibility::validate_speech(text)?;
+        }
+        Ok(())
+    }
+    fn supports_video(&self) -> bool {
+        false
+    }
+    fn update_videos(&mut self, views: &[crate::video::VideoView]) -> Result<(), String> {
+        if views.is_empty() {
+            Ok(())
+        } else {
+            Err("This renderer does not support video playback".into())
+        }
+    }
+    fn supports_layered_characters(&self) -> bool {
+        false
+    }
+    fn update_layered_characters(
+        &mut self,
+        views: &[crate::composition::LayeredView],
+    ) -> Result<(), String> {
+        if views.is_empty() {
+            Ok(())
+        } else {
+            Err("This renderer does not support layered characters".into())
+        }
+    }
+    fn supports_composable_motion(&self) -> bool {
+        false
+    }
+    fn update_motions(&mut self, views: &[crate::motion::MotionView]) -> Result<(), String> {
+        if views.is_empty() {
+            Ok(())
+        } else {
+            Err("This renderer does not support composable animations".into())
+        }
+    }
+    fn supports_programmable_ui(&self) -> bool {
+        false
+    }
+    fn supports_custom_canvas(&self) -> bool {
+        false
+    }
+    /// Unsupported capabilities must fail before the engine commits game state.
+    fn update_interfaces(
+        &mut self,
+        screens: &[rvn_ui::programmable::ScreenView],
+    ) -> Result<(), String> {
+        if screens.is_empty() {
+            Ok(())
+        } else {
+            Err("This renderer does not support programmable interfaces".into())
+        }
+    }
     fn set_background(&mut self, path: &str, transition: &Transition);
     fn show_cinematic(&mut self, _id: &str, _transition: Option<&str>) {}
     fn hide_cinematic(&mut self, _transition: Option<&str>) {}
@@ -107,6 +192,11 @@ pub trait Renderer {
 pub struct TerminalRenderer;
 
 impl Renderer for TerminalRenderer {
+    fn loaded_compatibility(&mut self, compatibility: crate::engine::LoadCompatibility) {
+        if compatibility == crate::engine::LoadCompatibility::LegacyUnchecked {
+            eprintln!("[save] Older save loaded. Compatibility with an edited story cannot be verified. Keep your original save.");
+        }
+    }
     fn set_background(&mut self, path: &str, t: &Transition) {
         println!("[bg] {path}  [{t}]");
     }

@@ -1,0 +1,7 @@
+# This example deliberately uses no external images, audio or fonts.
+# Cet exemple n'utilise volontairement aucun média externe.
+
+[locale]
+default = "en"
+current = "en"
+available = ["en", "fr"]

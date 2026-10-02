@@ -106,7 +106,7 @@ pub(super) fn render_quick_actions(
 }
 
 #[derive(Component)]
-pub(super) struct ChoicesRoot;
+pub(crate) struct ChoicesRoot;
 #[derive(Component)]
 pub(super) struct ChoiceAppearance {
     pub(super) normal: Color,
@@ -463,7 +463,7 @@ pub(super) fn choice_scroll_bounds(
 }
 
 #[derive(Component)]
-pub(super) struct NarrativeRoot;
+pub(crate) struct NarrativeRoot;
 #[derive(Component)]
 pub(super) struct NarrativeText {
     base: TextStyle,

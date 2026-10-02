@@ -84,6 +84,344 @@ pub fn node_definition(kind: NodeKind) -> NodeDefinition {
             "Configuration",
             ["config", "project"]
         ),
+        Kind::FunctionEntry => definition!(
+            kind,
+            Category::Event,
+            "Entrée de fonction",
+            ["function", "parameters", "paramètres", "local"]
+        ),
+        Kind::ScreenEntry => definition!(
+            kind,
+            Category::Event,
+            "Écran réutilisable",
+            ["screen", "interface", "parameters", "paramètres"]
+        ),
+        Kind::HandlerEntry => definition!(
+            kind,
+            Category::Event,
+            "Événement d’interface",
+            ["handler", "event", "événement", "click"]
+        ),
+        Kind::LocalVariable => definition!(
+            kind,
+            Category::Variable,
+            "Variable locale",
+            ["local", "variable"]
+        ),
+        Kind::UiOpen => definition!(
+            kind,
+            Category::Interaction,
+            "Ouvrir une interface",
+            ["ui", "screen", "open", "interface", "modal"]
+        ),
+        Kind::UiClose => definition!(
+            kind,
+            Category::Interaction,
+            "Fermer une interface",
+            ["ui", "screen", "close", "interface"]
+        ),
+        Kind::UiFocus => definition!(
+            kind,
+            Category::Interaction,
+            "Focaliser un contrôle",
+            ["ui", "screen", "focus", "interface"]
+        ),
+        Kind::UiSetState => definition!(
+            kind,
+            Category::Interaction,
+            "Modifier l’état du composant",
+            ["ui", "set_state", "canvas", "state", "état", "mini-game"]
+        ),
+        Kind::UiComponent => definition!(
+            kind,
+            Category::Interaction,
+            "Composant d’interface",
+            [
+                "ui",
+                "component",
+                "button",
+                "input",
+                "text",
+                "container",
+                "interface"
+            ]
+        ),
+        Kind::CanvasRect => definition!(
+            kind,
+            Category::Expression,
+            "Dessiner un rectangle",
+            ["canvas", "draw", "rect", "dessin", "rectangle"]
+        ),
+        Kind::CanvasEllipse => definition!(
+            kind,
+            Category::Expression,
+            "Dessiner une ellipse",
+            ["canvas", "draw", "ellipse", "circle", "cercle"]
+        ),
+        Kind::CanvasLine => definition!(
+            kind,
+            Category::Expression,
+            "Dessiner une ligne",
+            ["canvas", "draw", "line", "polyline", "ligne"]
+        ),
+        Kind::CanvasPolygon => definition!(
+            kind,
+            Category::Expression,
+            "Dessiner un polygone",
+            ["canvas", "draw", "polygon", "polygone"]
+        ),
+        Kind::CanvasText => definition!(
+            kind,
+            Category::Expression,
+            "Dessiner du texte",
+            ["canvas", "draw", "text", "texte"]
+        ),
+        Kind::CanvasImage => definition!(
+            kind,
+            Category::Expression,
+            "Dessiner une image",
+            ["canvas", "draw", "image", "sprite"]
+        ),
+        Kind::CanvasGroup => definition!(
+            kind,
+            Category::Expression,
+            "Transformer un groupe de dessin",
+            ["canvas", "draw", "group", "transform", "clip", "groupe"]
+        ),
+        Kind::CanvasHit => definition!(
+            kind,
+            Category::Expression,
+            "Zone interactive du dessin",
+            ["canvas", "hit", "region", "interaction", "zone"]
+        ),
+        Kind::MotionPlay => definition!(
+            kind,
+            Category::Scene,
+            "Lire une animation",
+            [
+                "motion",
+                "animation",
+                "play",
+                "sprite",
+                "background",
+                "interface"
+            ]
+        ),
+        Kind::MotionStop => definition!(
+            kind,
+            Category::Scene,
+            "Arrêter une animation",
+            ["motion", "animation", "stop"]
+        ),
+        Kind::MotionWait => definition!(
+            kind,
+            Category::Flow,
+            "Attendre la fin d’une animation",
+            ["motion", "animation", "wait", "completion"]
+        ),
+        Kind::MotionTween => definition!(
+            kind,
+            Category::Expression,
+            "Interpolation animée",
+            ["motion", "animation", "tween", "transform", "ease"]
+        ),
+        Kind::MotionSpline => definition!(
+            kind,
+            Category::Expression,
+            "Trajectoire spline",
+            ["motion", "animation", "spline", "path", "trajectoire"]
+        ),
+        Kind::MotionBezier => definition!(
+            kind,
+            Category::Expression,
+            "Courbe Bézier",
+            ["motion", "animation", "bezier", "curve", "interpolation"]
+        ),
+        Kind::MotionCurve => definition!(
+            kind,
+            Category::Expression,
+            "Courbe personnalisée",
+            ["motion", "animation", "function", "curve", "interpolation"]
+        ),
+        Kind::MotionPause => definition!(
+            kind,
+            Category::Expression,
+            "Pause animée",
+            ["motion", "animation", "pause", "delay"]
+        ),
+        Kind::MotionSequence => definition!(
+            kind,
+            Category::Expression,
+            "Séquence d’animations",
+            ["motion", "animation", "sequence"]
+        ),
+        Kind::MotionParallel => definition!(
+            kind,
+            Category::Expression,
+            "Animations parallèles",
+            ["motion", "animation", "parallel"]
+        ),
+        Kind::MotionRepeat => definition!(
+            kind,
+            Category::Expression,
+            "Répéter une animation",
+            ["motion", "animation", "repeat", "loop"]
+        ),
+        Kind::MotionFrames => definition!(
+            kind,
+            Category::Expression,
+            "Succession d’images",
+            ["motion", "animation", "frames", "images"]
+        ),
+        Kind::CharacterCompose => definition!(
+            kind,
+            Category::Character,
+            "Composer un personnage",
+            ["character", "layered", "composition", "calques"]
+        ),
+        Kind::CharacterAttributes => definition!(
+            kind,
+            Category::Character,
+            "Attributs du personnage",
+            ["character", "attributes", "expression", "outfit", "tenue"]
+        ),
+        Kind::LayeredImage => definition!(
+            kind,
+            Category::Character,
+            "Composition multicouche",
+            ["layered_image", "composition", "layers", "calques"]
+        ),
+        Kind::ImageLayer => definition!(
+            kind,
+            Category::Character,
+            "Calque d’image",
+            [
+                "image_layer",
+                "layer",
+                "image",
+                "group",
+                "attribute",
+                "calque"
+            ]
+        ),
+        Kind::ImageLayers => definition!(
+            kind,
+            Category::Character,
+            "Découvrir les calques",
+            [
+                "image_layers",
+                "discover",
+                "auto",
+                "variant",
+                "attributes",
+                "images",
+                "calques"
+            ]
+        ),
+        Kind::VideoPlay => definition!(
+            kind,
+            Category::Scene,
+            "Lire une vidéo",
+            ["video", "movie", "play", "cinematic", "cinématique"]
+        ),
+        Kind::VideoPause => definition!(
+            kind,
+            Category::Scene,
+            "Mettre une vidéo en pause",
+            ["video", "pause"]
+        ),
+        Kind::VideoResume => definition!(
+            kind,
+            Category::Scene,
+            "Reprendre une vidéo",
+            ["video", "resume", "reprendre"]
+        ),
+        Kind::VideoStop => definition!(
+            kind,
+            Category::Scene,
+            "Arrêter une vidéo",
+            ["video", "stop", "arrêter"]
+        ),
+        Kind::VideoSkip => definition!(
+            kind,
+            Category::Flow,
+            "Passer une vidéo",
+            ["video", "skip", "passer"]
+        ),
+        Kind::VideoSeek => definition!(
+            kind,
+            Category::Scene,
+            "Déplacer la lecture vidéo",
+            ["video", "seek", "position"]
+        ),
+        Kind::VideoVolume => definition!(
+            kind,
+            Category::Audio,
+            "Volume d’une vidéo",
+            ["video", "volume", "audio"]
+        ),
+        Kind::VideoWait => definition!(
+            kind,
+            Category::Flow,
+            "Attendre la fin d’une vidéo",
+            ["video", "wait", "completion"]
+        ),
+        Kind::VideoClip => definition!(
+            kind,
+            Category::Expression,
+            "Ressource vidéo",
+            [
+                "video_clip",
+                "movie",
+                "video",
+                "subtitles",
+                "poster",
+                "mask"
+            ]
+        ),
+        Kind::AccessibilityConfigure => definition!(
+            kind,
+            Category::Interaction,
+            "Configurer l’accessibilité",
+            [
+                "accessibility",
+                "accessibilité",
+                "contrast",
+                "scale",
+                "voice",
+                "motion"
+            ]
+        ),
+        Kind::AccessibilitySpeak => definition!(
+            kind,
+            Category::Audio,
+            "Lire un texte à voix haute",
+            ["accessibility", "speech", "voice", "tts", "lecture"]
+        ),
+        Kind::AccessibilityStop => definition!(
+            kind,
+            Category::Audio,
+            "Arrêter la lecture vocale",
+            ["accessibility", "speech", "stop", "voice", "tts"]
+        ),
+        Kind::FunctionReturn => definition!(
+            kind,
+            Category::Flow,
+            "Retourner une valeur",
+            ["return", "function", "result", "résultat"]
+        ),
+        Kind::While => definition!(
+            kind,
+            Category::Flow,
+            "Tant que",
+            ["while", "loop", "boucle"]
+        ),
+        Kind::ForEach => definition!(
+            kind,
+            Category::Flow,
+            "Pour chaque",
+            ["for", "each", "list", "collection", "boucle"]
+        ),
         Kind::CharacterCreate => definition!(
             kind,
             Category::Character,
@@ -419,13 +757,20 @@ pub fn node_definition(kind: NodeKind) -> NodeDefinition {
         Kind::ConvertNumberToText => definition!(
             kind,
             Category::Expression,
-            "Convertir Nombre en Texte",
-            ["convertir", "conversion", "nombre", "texte", "string"]
+            "Convertir Nombre en Chaîne",
+            [
+                "convertir",
+                "conversion",
+                "nombre",
+                "chaîne",
+                "texte",
+                "string"
+            ]
         ),
         Kind::ConvertTextToInt => definition!(
             kind,
             Category::Expression,
-            "Convertir Texte en Entier",
+            "Convertir Chaîne en Entier",
             [
                 "convertir",
                 "conversion",
@@ -433,6 +778,32 @@ pub fn node_definition(kind: NodeKind) -> NodeDefinition {
                 "entier",
                 "string",
                 "int"
+            ]
+        ),
+        Kind::ConvertStringToText => definition!(
+            kind,
+            Category::Expression,
+            "Convertir Chaîne en Texte",
+            [
+                "convertir",
+                "conversion",
+                "chaîne",
+                "texte",
+                "string",
+                "text"
+            ]
+        ),
+        Kind::ConvertTextToString => definition!(
+            kind,
+            Category::Expression,
+            "Convertir Texte en Chaîne",
+            [
+                "convertir",
+                "conversion",
+                "texte",
+                "chaîne",
+                "text",
+                "string"
             ]
         ),
         Kind::VariableReference => definition!(
@@ -456,6 +827,13 @@ pub fn node_definition(kind: NodeKind) -> NodeDefinition {
             dynamic
         ),
         Kind::MathAdd => definition!(kind, Category::Expression, "+", ["addition", "add", "+"]),
+        Kind::StringAppend => definition!(
+            kind,
+            Category::Expression,
+            "Append",
+            ["append", "concat", "string", "concaténation"],
+            dynamic
+        ),
         Kind::MathSubtract => definition!(
             kind,
             Category::Expression,
@@ -510,7 +888,23 @@ pub fn node_definition(kind: NodeKind) -> NodeDefinition {
             kind,
             Category::Expression,
             "Fonction",
-            ["min", "max", "abs", "random"],
+            [
+                "min",
+                "max",
+                "abs",
+                "random",
+                "len",
+                "contains",
+                "list_append",
+                "list_insert",
+                "list_remove",
+                "list_set",
+                "list_concat",
+                "list_slice",
+                "inventory",
+                "inventaire",
+                "collection"
+            ],
             dynamic
         ),
         Kind::ListLiteral => definition!(
@@ -538,6 +932,55 @@ pub fn node_definition(kind: NodeKind) -> NodeDefinition {
 }
 
 pub const ALL_NODE_KINDS: &[NodeKind] = &[
+    NodeKind::FunctionEntry,
+    NodeKind::ScreenEntry,
+    NodeKind::HandlerEntry,
+    NodeKind::LocalVariable,
+    NodeKind::UiOpen,
+    NodeKind::UiClose,
+    NodeKind::UiFocus,
+    NodeKind::UiSetState,
+    NodeKind::UiComponent,
+    NodeKind::CanvasRect,
+    NodeKind::CanvasEllipse,
+    NodeKind::CanvasLine,
+    NodeKind::CanvasPolygon,
+    NodeKind::CanvasText,
+    NodeKind::CanvasImage,
+    NodeKind::CanvasGroup,
+    NodeKind::CanvasHit,
+    NodeKind::MotionPlay,
+    NodeKind::MotionStop,
+    NodeKind::MotionWait,
+    NodeKind::MotionTween,
+    NodeKind::MotionSpline,
+    NodeKind::MotionBezier,
+    NodeKind::MotionCurve,
+    NodeKind::MotionPause,
+    NodeKind::MotionSequence,
+    NodeKind::MotionParallel,
+    NodeKind::MotionRepeat,
+    NodeKind::MotionFrames,
+    NodeKind::CharacterCompose,
+    NodeKind::CharacterAttributes,
+    NodeKind::LayeredImage,
+    NodeKind::ImageLayer,
+    NodeKind::ImageLayers,
+    NodeKind::VideoPlay,
+    NodeKind::VideoPause,
+    NodeKind::VideoResume,
+    NodeKind::VideoStop,
+    NodeKind::VideoSkip,
+    NodeKind::VideoSeek,
+    NodeKind::VideoVolume,
+    NodeKind::VideoWait,
+    NodeKind::VideoClip,
+    NodeKind::AccessibilityConfigure,
+    NodeKind::AccessibilitySpeak,
+    NodeKind::AccessibilityStop,
+    NodeKind::FunctionReturn,
+    NodeKind::While,
+    NodeKind::ForEach,
     NodeKind::Use,
     NodeKind::Init,
     NodeKind::Config,
@@ -604,10 +1047,13 @@ pub const ALL_NODE_KINDS: &[NodeKind] = &[
     NodeKind::ConvertIntToFloat,
     NodeKind::ConvertNumberToText,
     NodeKind::ConvertTextToInt,
+    NodeKind::ConvertStringToText,
+    NodeKind::ConvertTextToString,
     NodeKind::VariableReference,
     NodeKind::BinaryOperator,
     NodeKind::UnaryOperator,
     NodeKind::MathAdd,
+    NodeKind::StringAppend,
     NodeKind::MathSubtract,
     NodeKind::MathMultiply,
     NodeKind::MathDivide,

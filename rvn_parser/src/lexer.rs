@@ -41,6 +41,20 @@ pub enum Token<'a> {
     Call,
     #[token("return")]
     Return,
+    #[token("function")]
+    Function,
+    #[token("screen")]
+    Screen,
+    #[token("handler")]
+    Handler,
+    #[token("local")]
+    Local,
+    #[token("while")]
+    While,
+    #[token("for")]
+    For,
+    #[token("in")]
+    In,
     #[token("scene")]
     Scene,
     #[token("cinematic")]
@@ -129,7 +143,7 @@ pub enum Token<'a> {
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
     Ident(&'a str),
 
-    #[regex(r#""([^"\\]|\\t|\\u|\\n|\\")*""#)]
+    #[regex(r#""([^"\\]|\\.)*""#)]
     String(&'a str),
 
     // Match integer literals without a leading minus.  Negative numbers are lexed as a

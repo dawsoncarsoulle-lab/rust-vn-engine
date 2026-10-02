@@ -3,6 +3,9 @@ name = "rvn_cli"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+video = ["rvn_bevy/video"]
+
 [dependencies]
 clap = { version = "4.5.3", features = ["derive"] }
 include_dir = "0.7"
@@ -15,6 +18,7 @@ rvn_parser = { path = "../rvn_parser" }
 rvn_graph = { path = "../rvn_graph" }
 rvn_ui = { path = "../rvn_ui" }
 notify = "6"
+sha2 = "0.10"
 owo-colors = "4.2"
 
 [[bin]]

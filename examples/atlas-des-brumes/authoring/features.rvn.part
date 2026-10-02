@@ -1,0 +1,184 @@
+// L’Atlas des Brumes — les gestes, les visages et les souvenirs de la quête.
+// L’aventure principale possède les variables et crée keeper / lantern.
+
+function atlas_mist_curve(t) {
+    return t * t * (3 - 2 * t)
+}
+
+function atlas_keeper_accessories(attributes) {
+    if attributes["outfit"] == "travel" and attributes["accessory"] == "lantern" {
+        return {"accessory":"lantern"}
+    }
+    return {"accessory":""}
+}
+
+function atlas_keeper_portrait() {
+    return layered_image([600,1000],
+        {"outfit":"", "face":"neutral", "accessory":"", "variant":""}, [
+            image_layer("body", "layers/keeper_body.png", {}),
+            image_layer("coat", "layers/keeper_coat.png", {
+                "group":"outfit", "attribute":"travel"
+            }),
+            image_layer("neutral", "layers/keeper_neutral.png", {
+                "group":"face", "attribute":"neutral"
+            }),
+            image_layer("smile", "layers/keeper_smile.png", {
+                "group":"face", "attribute":"smile"
+            }),
+            image_layer("lantern", "layers/keeper_lantern.png", {
+                "group":"accessory", "attribute":"lantern",
+                "when":{"outfit":"travel"}
+            })
+        ], {
+            "variants":{"evening":{"outfit":"travel"}},
+            "rules":{
+                "evening_welcome":{
+                    "when":{"variant":"evening"},
+                    "set":{"face":"smile"}
+                }
+            },
+            "selector":"atlas_keeper_accessories"
+        })
+}
+
+function atlas_lantern_flight(seconds) {
+    return motion_parallel([
+        motion_spline(seconds, [
+            {"x":-520, "y":-120},
+            {"x":-200, "y":-320},
+            {"x":200, "y":-240},
+            {"x":440, "y":-140}
+        ], motion_curve("atlas_mist_curve", 65)),
+        motion_tween(seconds,
+            // Le sprite VN a un gabarit portrait : ce rapport préserve l’image carrée.
+            {"scale_x":0.40, "scale_y":0.22, "rotation":-18, "opacity":0.72},
+            {"scale_x":0.40, "scale_y":0.22, "rotation":22, "opacity":1},
+            motion_bezier(0.22,0.1,0.68,0.96)),
+        motion_repeat(4, motion_frames([
+            "sprites/lantern/default.png",
+            "sprites/lantern/bright.png"
+        ], 2))
+    ])
+}
+
+function atlas_prologue_clip(cinematic_mode) {
+    return video_clip("movies/prologue.webm", {
+        "rect":[0,0,1280,720], "cinematic":cinematic_mode,
+        "skippable":true, "keep_last_frame":false, "volume":0.16,
+        "poster":"scenes/harbor.png",
+        "subtitles":[
+            {"start":0, "end":2, "text":"Il existe des îles que les cartes ont oubliées."},
+            {"start":2, "end":4, "text":"Chaque soir, la brume referme leurs chemins."},
+            {"start":4, "end":6, "text":"Une lumière attend encore quelqu’un au port."}
+        ]
+    })
+}
+
+function atlas_echo_clip() {
+    return video_clip("movies/prologue.webm", {
+        // Le repère vidéo de scène est 1280 × 720 ; les interfaces sont 1920 × 1080.
+        "rect":[224,64,832,468], "layer":2,
+        "skippable":true, "keep_last_frame":false, "volume":0,
+        "poster":"scenes/harbor.png",
+        "subtitles":[
+            {"start":0, "end":2, "text":"La pierre se souvient du premier phare."},
+            {"start":2, "end":4, "text":"Sa lumière ne chassait pas la brume : elle lui répondait."},
+            {"start":4, "end":6, "text":"L’Atlas s’ouvre à ceux qui écoutent."}
+        ]
+    })
+}
+
+label atlas_apply_accessibility
+accessibility.configure({
+    "text_scale":atlas_text_scale,
+    "high_contrast":atlas_high_contrast,
+    "reduced_motion":atlas_reduced_motion,
+    "self_voicing":atlas_self_voicing
+})
+return
+
+label atlas_prologue
+music.volume("0.22")
+if not atlas_reduced_motion {
+    music.stop() with fade
+    video.play("atlas_prologue_movie", atlas_prologue_clip(true))
+    video.wait("atlas_prologue_movie")
+    video.stop("atlas_prologue_movie")
+}
+music.play("music/fog_theme.wav") with fade
+"La brume avale les routes, jamais les promesses. Ce soir, l’île vous a rendu son port."
+return
+
+label atlas_keeper_outfit
+character.compose("keeper", atlas_keeper_portrait())
+keeper.show() at right
+keeper "Maëlys, gardienne du phare. Je garde les cartes que la mer refuse d’emporter."
+character.attributes("keeper", {"outfit":"travel"})
+if atlas_keeper_trust > 0 {
+    character.attributes("keeper", {"face":"smile"})
+    keeper "Vous êtes revenu avec une promesse tenue. Alors je peux vous confier le chemin."
+} else {
+    keeper "Je prends mon manteau. La forêt écoute les voix, mais elle reconnaît les lumières."
+}
+if atlas_has_lantern {
+    character.attributes("keeper", {"accessory":"lantern"})
+    keeper "Gardez cette lanterne près du cœur. La boussole indiquera où aller ; sa flamme vous dira quand."
+}
+return
+
+label atlas_crossing
+set atlas_crossing_ready = false
+if not atlas_has_compass {
+    "Sans boussole, les passerelles semblent toutes mener au même reflet. Retournez au port chercher un cap."
+    return
+}
+if not atlas_has_lantern {
+    "La boussole s’agite, mais aucun passage ne répond. Une lumière du phare pourrait réveiller les balises."
+    return
+}
+keeper.hide()
+sfx.play("sfx/beacon.wav")
+if atlas_reduced_motion {
+    "Vous posez la lanterne sur la première balise. Les trois suivantes s’allument, une à une ; la route est sûre."
+} else {
+    lantern.show("default") at center
+    motion.play("background", motion_tween(4,
+        {"tint_r":0.84, "tint_g":0.9, "tint_b":1},
+        {"tint_r":1, "tint_g":1, "tint_b":1}, "ease_in_out"))
+    motion.play("sprite:lantern", atlas_lantern_flight(4))
+    motion.wait("sprite:lantern")
+    motion.play("sprite:lantern", motion_sequence([
+        motion_pause(0.2),
+        motion_tween(0.4, {}, {"opacity":0}, "ease_in")
+    ]))
+    motion.wait("sprite:lantern")
+    motion.stop("sprite:lantern")
+    motion.stop("background")
+    lantern.hide()
+    "La flamme dessine une courbe entre les balises. Là où elle passe, la forêt révèle une passerelle oubliée."
+}
+set atlas_crossing_ready = true
+return
+
+label atlas_temple_vision
+character.attributes("keeper", {"variant":"evening"})
+if atlas_has_lantern {
+    character.attributes("keeper", {"accessory":"lantern"})
+}
+keeper.show() at right
+if not atlas_reduced_motion {
+    motion.play("layer:keeper/lantern", motion_sequence([
+        motion_tween(0.5, {"opacity":0.7}, {"opacity":1}, "ease_out"),
+        motion_pause(0.3),
+        motion_tween(0.5, {}, {"opacity":0.85}, "ease_in_out")
+    ]))
+    video.play("atlas_stone_memory", atlas_echo_clip())
+    video.wait("atlas_stone_memory")
+    video.stop("atlas_stone_memory")
+    motion.wait("layer:keeper/lantern")
+    motion.stop("layer:keeper/lantern")
+}
+keeper "Le phare n’était pas un rempart contre la brume. C’était une invitation à retrouver le monde."
+"Dans la pierre, trois lignes rejoignent le port, la forêt et le temple. L’Atlas attend votre dernier choix."
+keeper.hide()
+return

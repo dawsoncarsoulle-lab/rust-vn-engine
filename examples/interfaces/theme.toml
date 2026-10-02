@@ -1,0 +1,17 @@
+[textbox]
+background_color = "#101827EE"
+height = 174.0
+padding = 32.0
+
+[text.dialogue]
+font_size = 24.0
+color = "#F0F4FA"
+
+[title_screen]
+enabled = true
+
+[title_screen.buttons.style]
+background_color = "#152638EE"
+hover_color = "#25465FFF"
+pressed_color = "#326080FF"
+text_color = "#F0F4FA"

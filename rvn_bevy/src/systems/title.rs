@@ -725,10 +725,14 @@ pub fn title_interaction_system(
                         ) {
                             Ok(mgr) => match resolve_continue_data(&mgr, &persistent) {
                                 Ok((data, target)) => {
+                                    match engine.0.load_data(data) {
+                                        Ok(rvn_core::engine::LoadCompatibility::LegacyUnchecked) => warn!("Ancienne sauvegarde : compatibilité après modification de l’histoire non vérifiable"),
+                                        Ok(_) => {},
+                                        Err(error) => { error!("Reprise refusée : {error}"); continue; }
+                                    }
                                     if let Some(target) = target {
                                         record_resume_target(&mut persistent, target);
                                     }
-                                    engine.0.load_data(data);
                                     apply_loaded_game(
                                         &mut engine,
                                         &mut render_state,

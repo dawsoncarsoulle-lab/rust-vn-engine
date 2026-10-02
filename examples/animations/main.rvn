@@ -1,0 +1,61 @@
+// The same named factories are editable as function Blueprints.
+function entrance(seconds) {
+    return motion_parallel([
+        motion_tween(seconds, {"x":-160, "opacity":0.1}, {"x":180, "opacity":1}, "ease_out"),
+        motion_sequence([
+            motion_tween(seconds / 2, {"scale_x":0.8,"scale_y":0.8}, {"scale_x":1.08,"scale_y":1.08}, "ease_in_out"),
+            motion_tween(seconds / 2, {}, {"scale_x":1,"scale_y":1}, "ease_in_out")
+        ]),
+        motion_tween(seconds, {"rotation":-12}, {"rotation":12,"pivot_x":0.2,"pivot_y":0.8}, "linear")
+    ])
+}
+// Pure functions are sampled once: saved playback cannot change if this
+// function or a game variable changes after the animation starts.
+function gentle_curve(t) {return t*t*(3-2*t)}
+function curved_flight(seconds) {
+    return motion_parallel([
+        motion_spline(seconds,[{"x":0,"y":0},{"x":320,"y":-200},{"x":640,"y":100},{"x":950,"y":0}],motion_curve("gentle_curve",65)),
+        motion_tween(seconds,{}, {"rotation":45},motion_bezier(0.25,0.1,0.75,0.9))
+    ])
+}
+screen motion_panel() {
+    return component("root","panel",{},[
+        component("card","image",{"rect":[1260,160,420,260],"image":"card-one.png","accessible_label":"Animated geometric card"},[]),
+        component("caption","text",{"rect":[1170,550,630,72],"text":"Saved, seekable animations","text_key":"motion.caption"},[])
+    ])
+}
+init {character.create("token","Token")}
+label start
+scene "backdrop.png"
+token.show("default") at left
+ui.open("motion_panel",[],false,0)
+motion.play("background",motion_tween(4,{}, {"tint_r":0.7,"tint_g":0.8},"linear"))
+motion.play("sprite:token",entrance(4))
+motion.play("ui:motion_panel/card",motion_parallel([
+    entrance(4),
+    motion_repeat(4,motion_frames(["card-one.png","card-two.png"],2))
+]))
+"motion.intro"
+motion.wait("sprite:token")
+"motion.after_wait"
+motion.play("sprite:token",motion_sequence([
+    motion_tween(1,{}, {"y":-100},"ease_out"),
+    motion_pause(0.5),
+    motion_tween(1,{}, {"y":0},"ease_in")
+]))
+motion.wait("sprite:token")
+motion.stop("background")
+motion.stop("sprite:token")
+motion.stop("ui:motion_panel/card")
+"motion.stopped"
+token.hide()
+ui.close("motion_panel")
+"motion.end"
+// Advanced section: the existing geometric resources are sufficient.
+token.show("default") at left
+motion.play("sprite:token",curved_flight(5))
+"motion.spline"
+motion.wait("sprite:token")
+"motion.curve"
+motion.stop("sprite:token")
+token.hide()

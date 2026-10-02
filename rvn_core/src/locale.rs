@@ -324,23 +324,85 @@ pub fn collect_strings_from_script(script: &rvn_parser::Script) -> Vec<String> {
 /// le tableau principal de façon linéaire — pas besoin de récursion.
 /// C'est la version à utiliser sur engine.0.script.
 pub fn collect_strings_from_flat_script(script: &rvn_parser::Script) -> Vec<String> {
-    let mut strings = Vec::new();
-    for stmt in script {
-        match stmt {
-            rvn_parser::Statement::Dialogue { text, .. } => {
-                strings.push(text_to_locale_key(text));
-            }
-            rvn_parser::Statement::Choice { options } => {
-                for opt in options {
-                    strings.push(text_to_locale_key(&opt.label));
+    // Function and screen declarations retain their nested expressions even
+    // after narrative flattening. Their translation keys must not disappear.
+    collect_strings_from_script(script)
+}
+
+fn collect_expression_keys(value: &rvn_parser::Expr, out: &mut Vec<String>) {
+    use rvn_parser::Expr;
+    fn dictionary_keys(value: &Expr, names: &[&str], out: &mut Vec<String>) {
+        if let Expr::Call { name, args } = value {
+            if name == "dict" {
+                for pair in args.chunks_exact(2) {
+                    if matches!(&pair[0],Expr::Str(key) if names.contains(&key.as_str())) {
+                        match &pair[1] {
+                            Expr::Str(text) => out.push(text.clone()),
+                            Expr::ListLit(items) => {
+                                for item in items {
+                                    if let Expr::Str(text) = item {
+                                        out.push(text.clone());
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                 }
             }
-            _ => {}
         }
     }
-    let mut seen = std::collections::HashSet::new();
-    strings.retain(|s| seen.insert(s.clone()));
-    strings
+    match value {
+        Expr::Call { name, args } => {
+            if name == "component" {
+                if let Some(properties) = args.get(2) {
+                    dictionary_keys(
+                        properties,
+                        &[
+                            "text_key",
+                            "placeholder_key",
+                            "accessible_label_key",
+                            "option_keys",
+                        ],
+                        out,
+                    );
+                }
+            }
+            if name == "video_clip" {
+                if let Some(Expr::Call { name, args }) = args.get(1) {
+                    if name == "dict" {
+                        for pair in args.chunks_exact(2) {
+                            if matches!(&pair[0],Expr::Str(key) if key=="subtitles") {
+                                if let Expr::ListLit(cues) = &pair[1] {
+                                    for cue in cues {
+                                        dictionary_keys(cue, &["text"], out);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            for arg in args {
+                collect_expression_keys(arg, out);
+            }
+        }
+        Expr::BinOp { left, right, .. } | Expr::And(left, right) | Expr::Or(left, right) => {
+            collect_expression_keys(left, out);
+            collect_expression_keys(right, out);
+        }
+        Expr::Index { target, index } => {
+            collect_expression_keys(target, out);
+            collect_expression_keys(index, out);
+        }
+        Expr::Neg(value) | Expr::Not(value) => collect_expression_keys(value, out),
+        Expr::ListLit(values) => {
+            for value in values {
+                collect_expression_keys(value, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn collect_recursive(stmts: &[rvn_parser::Statement], out: &mut Vec<String>) {
@@ -357,7 +419,18 @@ fn collect_recursive(stmts: &[rvn_parser::Statement], out: &mut Vec<String>) {
                 }
             }
             Statement::Use { .. } => {}
-            Statement::Init { body } => collect_recursive(body, out),
+            Statement::Init { body }
+            | Statement::While { body, .. }
+            | Statement::ForEach { body, .. }
+            | Statement::Function { body, .. }
+            | Statement::Screen { body, .. }
+            | Statement::Handler { body, .. } => collect_recursive(body, out),
+            Statement::FunctionReturn { value }
+            | Statement::SetVar { value, .. }
+            | Statement::LocalVar { value, .. } => collect_expression_keys(value, out),
+            Statement::VideoPlay { definition, .. } => collect_expression_keys(definition, out),
+            Statement::UiOpen { arguments, .. } => collect_expression_keys(arguments, out),
+            Statement::UiSetState { state, .. } => collect_expression_keys(state, out),
             Statement::If {
                 then_branch,
                 else_branch,
@@ -621,6 +694,13 @@ mod tests {
         assert_eq!(toml_quote("Hello!"), "\"Hello!\"");
         assert_eq!(toml_quote("Say \"hi\""), "\"Say \\\"hi\\\"\"");
         assert_eq!(toml_quote("line\nnew"), "\"line\\nnew\"");
+    }
+
+    #[test]
+    fn screen_and_video_keys_survive_narrative_flattening() {
+        let script=rvn_parser::parse("screen info(){return component(\"root\",\"text\",{\"text_key\":\"ui.info\",\"accessible_label_key\":\"ui.label\"},[])}\nfunction clip(){return video_clip(\"clip.webm\",{\"subtitles\":[{\"start\":0,\"end\":1,\"text\":\"video.cue\"}]})}\nlabel start\nvideo.play(\"intro\",clip())\n\"After\"\n").unwrap();
+        let keys = collect_strings_from_flat_script(&script);
+        assert_eq!(keys, vec!["ui.info", "ui.label", "video.cue", "After"]);
     }
 
     #[test]

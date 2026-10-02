@@ -1,0 +1,16 @@
+[project]
+title = "Character composition laboratory"
+main_script = "main.rvn"
+start_label = "start"
+[window]
+width = 1280
+height = 720
+resizable = true
+[paths]
+assets = "assets"
+locales = "locales"
+saves = "saves"
+[locale]
+default = "en"
+current = "en"
+available = ["en", "fr"]

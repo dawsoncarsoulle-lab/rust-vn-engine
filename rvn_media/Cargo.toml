@@ -1,0 +1,15 @@
+[package]
+name = "rvn_media"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Bounded shared video decoding for rust-VN runtime and authoring previews"
+
+[features]
+video = ["dep:ffmpeg-next"]
+
+[dependencies]
+rvn_ui = { path = "../rvn_ui" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ffmpeg-next = { version = "9.0", default-features = false, features = ["codec", "format", "software-scaling", "software-resampling"], optional = true }

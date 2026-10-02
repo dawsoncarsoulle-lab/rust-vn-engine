@@ -19,7 +19,11 @@ use crate::lexer::Token;
 pub struct Parser<'a> {
     source: &'a str,
     tokens: Vec<(Token<'a>, SourceLocation)>,
+    token_ranges: Vec<std::ops::Range<usize>>,
     pos: usize,
+    function_depth: usize,
+    handler_depth: usize,
+    block_depth: usize,
     eof_location: SourceLocation,
 }
 
@@ -29,13 +33,25 @@ pub struct RecoveredScript {
     pub errors: Vec<ParseError>,
 }
 
+/// Byte range excludes surrounding whitespace and comments. Offsets always
+/// refer to the original UTF-8 source, never normalized or generated code.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpannedStatement {
+    pub statement: Statement,
+    pub range: std::ops::Range<usize>,
+}
+
 impl<'a> Parser<'a> {
     pub fn new(source: &'a str) -> ParseResult<Self> {
         let mut tokens = Vec::new();
+        let mut token_ranges = Vec::new();
         for (result, span) in Token::lexer(source).spanned() {
             let loc = byte_offset_to_location(source, span.start, span.len());
             match result {
-                Ok(tok) => tokens.push((tok, loc)),
+                Ok(tok) => {
+                    tokens.push((tok, loc));
+                    token_ranges.push(span);
+                }
                 Err(_) => {
                     return Err(ParseError::build(
                         ParseErrorKind::LexError {
@@ -51,7 +67,11 @@ impl<'a> Parser<'a> {
         Ok(Self {
             source,
             tokens,
+            token_ranges,
             pos: 0,
+            function_depth: 0,
+            handler_depth: 0,
+            block_depth: 0,
             eof_location,
         })
     }
@@ -345,7 +365,7 @@ impl<'a> Parser<'a> {
             Some(Token::Float(f)) => Ok(Expr::Float(f)),
             Some(Token::True) => Ok(Expr::Bool(true)),
             Some(Token::False) => Ok(Expr::Bool(false)),
-            Some(Token::String(s)) => Ok(Expr::Str(s[1..s.len() - 1].to_string())),
+            Some(Token::String(s)) => Ok(Expr::Str(Self::decode_string(&s[1..s.len() - 1]))),
             Some(Token::Ident(s)) => {
                 let mut name = s.to_string();
                 while matches!(self.peek(), Some(Token::Dot)) {
@@ -383,6 +403,39 @@ impl<'a> Parser<'a> {
                     Some(tok) => Err(self.err_token(loc2, &tok, "`)` pour fermer l'expression")),
                     None => Err(self.err_eof(loc2, "`)`")),
                 }
+            }
+            Some(Token::BraceOpen) => {
+                // Dictionary syntax is represented by the same call IR as its
+                // Blueprint node, avoiding a second execution implementation.
+                let mut args = Vec::new();
+                let mut keys = std::collections::BTreeSet::new();
+                while !matches!(self.peek(), Some(Token::BraceClose)) {
+                    let loc = self.current_location();
+                    let Some(Token::String(raw)) = self.advance().cloned() else {
+                        return Err(self.err_msg(
+                            loc,
+                            "clé invalide".into(),
+                            "clé texte entre guillemets",
+                        ));
+                    };
+                    let key = Self::decode_string(&raw[1..raw.len() - 1]);
+                    if !keys.insert(key.clone()) {
+                        return Err(self.err_msg(loc, key, "clé de dictionnaire unique"));
+                    }
+                    self.expect(":")?;
+                    args.push(Expr::Str(key));
+                    args.push(self.parse_expr()?);
+                    if matches!(self.peek(), Some(Token::Comma)) {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect("}")?;
+                Ok(Expr::Call {
+                    name: "dict".into(),
+                    args,
+                })
             }
             Some(Token::BracketOpen) => {
                 // List literal: [a, b, c]
@@ -424,10 +477,37 @@ impl<'a> Parser<'a> {
     // Les crochets [ ] délimitent une sous-expression.
     // Pour inclure un crochet littéral, doubler : [[ → [, ]] → ]
 
+    fn decode_string(raw: &str) -> String {
+        let mut decoded = String::new();
+        let mut chars = raw.chars();
+        while let Some(c) = chars.next() {
+            if c != '\\' {
+                decoded.push(c);
+                continue;
+            }
+            match chars.next() {
+                Some('n') => decoded.push('\n'),
+                Some('r') => decoded.push('\r'),
+                Some('t') => decoded.push('\t'),
+                Some('"') => decoded.push('"'),
+                Some('\\') => decoded.push('\\'),
+                Some(other) => {
+                    decoded.push('\\');
+                    decoded.push(other);
+                }
+                None => decoded.push('\\'),
+            }
+        }
+        decoded
+    }
+
     pub fn parse_interpolated_str(raw: &str) -> ParseResult<InterpolatedText> {
         let mut segments = Vec::new();
         let mut lit = String::new();
-        let mut chars = raw.char_indices().peekable();
+        // Remove the outer dialogue-string escaping once. Quoted dictionary
+        // keys inside an interpolation remain ordinary expression strings.
+        let decoded = Self::decode_string(raw);
+        let mut chars = decoded.char_indices().peekable();
 
         while let Some((_i, c)) = chars.next() {
             match c {
@@ -445,8 +525,25 @@ impl<'a> Parser<'a> {
                     // Collecte tout jusqu'au ] correspondant
                     let mut expr_src = String::new();
                     let mut depth = 1usize;
+                    let mut quoted = false;
+                    let mut escaped = false;
                     for (_, ec) in chars.by_ref() {
+                        if quoted {
+                            expr_src.push(ec);
+                            if escaped {
+                                escaped = false;
+                            } else if ec == '\\' {
+                                escaped = true;
+                            } else if ec == '"' {
+                                quoted = false;
+                            }
+                            continue;
+                        }
                         match ec {
+                            '"' => {
+                                quoted = true;
+                                expr_src.push(ec);
+                            }
                             '[' => {
                                 depth += 1;
                                 expr_src.push(ec);
@@ -481,6 +578,13 @@ impl<'a> Parser<'a> {
                     // Parse l'expression interne
                     let mut sub_parser = Parser::new(&expr_src)?;
                     let expr = sub_parser.parse_expr()?;
+                    if let Some(token) = sub_parser.peek() {
+                        return Err(sub_parser.err_token(
+                            sub_parser.current_location(),
+                            token,
+                            "fin de l'expression interpolée",
+                        ));
+                    }
                     segments.push(TextSegment::Interp(expr));
                 }
                 ']' => {
@@ -490,20 +594,6 @@ impl<'a> Parser<'a> {
                         lit.push(']');
                     } else {
                         lit.push(']');
-                    }
-                }
-                '\\' => {
-                    // Escape sequences: \n → newline, \t → tab, \" → quote, \\ → backslash
-                    match chars.next().map(|(_, c)| c) {
-                        Some('n') => lit.push('\n'),
-                        Some('t') => lit.push('\t'),
-                        Some('"') => lit.push('"'),
-                        Some('\\') => lit.push('\\'),
-                        Some(other) => {
-                            lit.push('\\');
-                            lit.push(other);
-                        }
-                        None => lit.push('\\'),
                     }
                 }
                 _ => lit.push(c),
@@ -525,6 +615,24 @@ impl<'a> Parser<'a> {
             stmts.push(self.parse_statement()?);
         }
         Ok(stmts)
+    }
+
+    pub fn parse_script_spanned(&mut self) -> ParseResult<Vec<SpannedStatement>> {
+        let mut statements = Vec::new();
+        while self.peek().is_some() {
+            self.skip_newlines();
+            let start = self.token_ranges[self.pos].start;
+            let statement = self.parse_statement()?;
+            let last = (0..self.pos)
+                .rev()
+                .find(|&index| !matches!(self.tokens[index].0, Token::Newline))
+                .expect("a parsed statement consumes at least one token");
+            statements.push(SpannedStatement {
+                statement,
+                range: start..self.token_ranges[last].end,
+            });
+        }
+        Ok(statements)
     }
 
     pub fn parse_script_recovering(&mut self) -> RecoveredScript {
@@ -559,7 +667,51 @@ impl<'a> Parser<'a> {
 
     fn parse_statement(&mut self) -> ParseResult<Statement> {
         let loc = self.current_location();
+        if self.function_depth > 0
+            && !matches!(
+                self.peek(),
+                Some(
+                    Token::Set
+                        | Token::Define
+                        | Token::Default
+                        | Token::Local
+                        | Token::If
+                        | Token::While
+                        | Token::For
+                        | Token::Return
+                )
+            )
+            && !(self.handler_depth > 0
+                && (matches!(
+                    self.peek(),
+                    Some(Token::Ident("ui" | "motion" | "video" | "accessibility"))
+                ) || (matches!(self.peek(), Some(Token::Ident("character")))
+                    && matches!(
+                        self.tokens.get(self.pos + 2).map(|token| &token.0),
+                        Some(Token::Ident("compose" | "attributes"))
+                    ))))
+        {
+            return Err(self.err_msg(loc, format!("{:?}", self.peek()),
+                "fonction de calcul : set, if, while, for ou return <valeur> (sans opération narrative)"));
+        }
         match self.peek().cloned() {
+            Some(Token::Function) => self.parse_function(),
+            Some(Token::Screen | Token::Handler) => self.parse_function(),
+            Some(Token::Local) => {
+                if self.function_depth == 0 {
+                    return Err(self.err_msg(
+                        loc,
+                        "local".into(),
+                        "local dans une fonction, un écran ou un gestionnaire",
+                    ));
+                }
+                let Statement::SetVar { name, value } = self.parse_set()? else {
+                    unreachable!()
+                };
+                Ok(Statement::LocalVar { name, value })
+            }
+            Some(Token::While) => self.parse_while(),
+            Some(Token::For) => self.parse_for(),
             Some(Token::Use) => self.parse_use(),
             Some(Token::Init) => self.parse_init(),
             Some(Token::Choice) => self.parse_choice(),
@@ -572,7 +724,13 @@ impl<'a> Parser<'a> {
             Some(Token::Call) => self.parse_call(),
             Some(Token::Return) => {
                 self.advance();
-                Ok(Statement::Return)
+                if self.function_depth > 0 {
+                    Ok(Statement::FunctionReturn {
+                        value: self.parse_expr()?,
+                    })
+                } else {
+                    Ok(Statement::Return)
+                }
             }
             Some(Token::Scene) => self.parse_scene(),
             Some(Token::Cinematic) => self.parse_cinematic(),
@@ -584,6 +742,106 @@ impl<'a> Parser<'a> {
             Some(tok) => Err(self.err_token(loc, &tok, "début d'une instruction")),
             None => Err(self.err_eof(loc, "début d'une instruction")),
         }
+    }
+
+    fn parse_function(&mut self) -> ParseResult<Statement> {
+        let declaration = self.peek().cloned();
+        if self.block_depth > 0 {
+            return Err(self.err_msg(
+                self.current_location(),
+                "function".into(),
+                "déclaration de fonction hors des blocs",
+            ));
+        }
+        self.advance();
+        let name = self.parse_binding_name()?;
+        self.expect("(")?;
+        let mut parameters = Vec::new();
+        while !matches!(self.peek(), Some(Token::ParenClose)) {
+            let loc = self.current_location();
+            let parameter = self.parse_binding_name()?;
+            if parameters.contains(&parameter) || parameters.len() >= 128 {
+                return Err(self.err_msg(loc, parameter, "paramètre unique (128 maximum)"));
+            }
+            parameters.push(parameter);
+            if matches!(self.peek(), Some(Token::Comma)) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        self.expect(")")?;
+        self.expect("{")?;
+        self.function_depth += 1;
+        if matches!(declaration, Some(Token::Handler)) {
+            self.handler_depth += 1;
+        }
+        let parsed = self.parse_block();
+        if matches!(declaration, Some(Token::Handler)) {
+            self.handler_depth -= 1;
+        }
+        self.function_depth -= 1;
+        let body = parsed?;
+        Ok(match declaration {
+            Some(Token::Screen) => Statement::Screen {
+                name,
+                parameters,
+                body,
+            },
+            Some(Token::Handler) => Statement::Handler {
+                name,
+                parameters,
+                body,
+            },
+            _ => Statement::Function {
+                name,
+                parameters,
+                body,
+            },
+        })
+    }
+
+    fn parse_binding_name(&mut self) -> ParseResult<String> {
+        let loc = self.current_location();
+        match self.advance().cloned() {
+            Some(Token::Ident(name)) if !name.starts_with("__rvn_") => Ok(name.to_owned()),
+            Some(Token::Ident(name)) => {
+                Err(self.err_msg(loc, name.into(), "nom sans le préfixe réservé __rvn_"))
+            }
+            Some(token) => Err(self.err_token(loc, &token, "nom de variable ou fonction")),
+            None => Err(self.err_eof(loc, "nom de variable ou fonction")),
+        }
+    }
+
+    fn parse_while(&mut self) -> ParseResult<Statement> {
+        self.advance();
+        let condition = self.parse_expr()?;
+        self.expect("{")?;
+        Ok(Statement::While {
+            condition,
+            body: self.parse_block()?,
+        })
+    }
+
+    fn parse_for(&mut self) -> ParseResult<Statement> {
+        self.advance();
+        let name = self.parse_binding_name()?;
+        let loc = self.current_location();
+        if !matches!(self.peek(), Some(Token::In)) {
+            return Err(self.err_msg(
+                loc,
+                format!("{:?}", self.peek()),
+                "in après la variable de boucle",
+            ));
+        }
+        self.advance();
+        let collection = self.parse_expr()?;
+        self.expect("{")?;
+        Ok(Statement::ForEach {
+            name,
+            collection,
+            body: self.parse_block()?,
+        })
     }
 
     // ── `use "file.rvn"` / `use { "a.rvn", "b.rvn" }` ─────────────────────
@@ -899,6 +1157,9 @@ impl<'a> Parser<'a> {
             Some(Token::Colon) => {
                 self.advance();
                 let tok = self.expect("valeur de config")?.clone();
+                if !matches!(tok, Token::String(_)) {
+                    return Err(self.err_token(loc,&tok,"une valeur de configuration entre guillemets (utilisez set pour une variable)"));
+                }
                 Ok(Statement::Config {
                     key: ident,
                     value: Parser::unwrap_string(&tok).to_string(),
@@ -928,6 +1189,82 @@ impl<'a> Parser<'a> {
         self.advance();
         let method = self.expect_ident("nom de méthode")?;
         self.expect("(")?;
+
+        if target == "ui"
+            || target == "motion"
+            || target == "video"
+            || target == "accessibility"
+            || (target == "character" && matches!(method.as_str(), "compose" | "attributes"))
+        {
+            let mut args = Vec::new();
+            if !matches!(self.peek(), Some(Token::ParenClose)) {
+                loop {
+                    args.push(self.parse_expr()?);
+                    if !matches!(self.peek(), Some(Token::Comma)) {
+                        break;
+                    }
+                    self.advance();
+                }
+            }
+            self.expect(")")?;
+            if target == "accessibility" {
+                return match (method.as_str(),args.as_slice()) {
+                    ("configure",[settings])=>Ok(Statement::AccessibilityConfigure{settings:settings.clone()}),
+                    ("speak",[text])=>Ok(Statement::AccessibilitySpeak{text:text.clone()}),
+                    ("stop",[])=>Ok(Statement::AccessibilityStop),
+                    _=>Err(self.err_msg(self.current_location(),format!("accessibility.{method}"),"accessibility.configure(propriétés), accessibility.speak(texte) ou accessibility.stop()")),
+                };
+            }
+            if target == "video" {
+                return match (method.as_str(),args.as_slice()) {
+                    ("play",[name,definition])=>Ok(Statement::VideoPlay{name:name.clone(),definition:definition.clone()}),
+                    ("pause",[name])=>Ok(Statement::VideoPause{name:name.clone()}),
+                    ("resume",[name])=>Ok(Statement::VideoResume{name:name.clone()}),
+                    ("stop",[name])=>Ok(Statement::VideoStop{name:name.clone()}),
+                    ("skip",[name])=>Ok(Statement::VideoSkip{name:name.clone()}),
+                    ("wait",[name])=>Ok(Statement::VideoWait{name:name.clone()}),
+                    ("seek",[name,seconds])=>Ok(Statement::VideoSeek{name:name.clone(),seconds:seconds.clone()}),
+                    ("volume",[name,volume])=>Ok(Statement::VideoVolume{name:name.clone(),volume:volume.clone()}),
+                    _=>Err(self.err_msg(self.current_location(),format!("video.{method}"),"video.play(nom, clip), pause/resume/stop/skip/wait(nom), seek(nom, secondes) ou volume(nom, volume)")),
+                };
+            }
+            if target == "character" {
+                return match (method.as_str(), args.as_slice()) {
+                    ("compose",[character,definition]) => Ok(Statement::CharacterCompose {character:character.clone(),definition:definition.clone()}),
+                    ("attributes",[character,attributes]) => Ok(Statement::CharacterAttributes {character:character.clone(),attributes:attributes.clone()}),
+                    _ => Err(self.err_msg(self.current_location(),format!("character.{method}"),"character.compose(personnage, composition) ou character.attributes(personnage, attributs)")),
+                };
+            }
+            if target == "motion" {
+                return match (method.as_str(), args.as_slice()) {
+                    ("play", [target, definition]) => Ok(Statement::MotionPlay {
+                        target: target.clone(),
+                        definition: definition.clone(),
+                    }),
+                    ("stop", [target]) => Ok(Statement::MotionStop {
+                        target: target.clone(),
+                    }),
+                    ("wait", [target]) => Ok(Statement::MotionWait {
+                        target: target.clone(),
+                    }),
+                    _ => Err(self.err_msg(
+                        self.current_location(),
+                        format!("motion.{method}"),
+                        "motion.play(cible, animation), motion.stop(cible) ou motion.wait(cible)",
+                    )),
+                };
+            }
+            return match (method.as_str(), args.as_slice()) {
+                ("open", [name, arguments, modal, layer]) => Ok(Statement::UiOpen {
+                    name: name.clone(), arguments: arguments.clone(), modal: modal.clone(), layer: layer.clone(),
+                }),
+                ("close", [name]) => Ok(Statement::UiClose { name: name.clone() }),
+                ("focus", [name, element]) => Ok(Statement::UiFocus { name: name.clone(), element: element.clone() }),
+                ("set_state", [name, element, state]) => Ok(Statement::UiSetState { name:name.clone(),element:element.clone(),state:state.clone() }),
+                _ => Err(self.err_msg(self.current_location(), format!("ui.{method}"),
+                    "ui.open(nom, liste d’arguments, modal, couche), ui.close(nom), ui.focus(nom, élément) ou ui.set_state(nom, élément, état)")),
+            };
+        }
 
         if method == "effect" {
             return self.parse_effect_call(target);
@@ -1329,7 +1666,7 @@ impl<'a> Parser<'a> {
 
     fn parse_set(&mut self) -> ParseResult<Statement> {
         self.advance();
-        let mut name = self.expect_ident("nom de variable")?;
+        let mut name = self.parse_binding_name()?;
         // Allow dotted names like `persistent.flag` for persistent variables.
         while matches!(self.peek(), Some(Token::Dot)) {
             self.advance();
@@ -1429,6 +1766,13 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_block(&mut self) -> ParseResult<Vec<Statement>> {
+        self.block_depth += 1;
+        let result = self.parse_block_contents();
+        self.block_depth -= 1;
+        result
+    }
+
+    fn parse_block_contents(&mut self) -> ParseResult<Vec<Statement>> {
         let mut stmts = Vec::new();
         loop {
             let loc = self.current_location();
@@ -1510,6 +1854,11 @@ impl<'a> Parser<'a> {
 
 pub fn parse(source: &str) -> ParseResult<Script> {
     Parser::new(source)?.parse_script()
+}
+
+/// Parse with editable source ranges without changing the legacy parse API.
+pub fn parse_spanned(source: &str) -> ParseResult<Vec<SpannedStatement>> {
+    Parser::new(source)?.parse_script_spanned()
 }
 
 pub fn parse_recovering(source: &str) -> ParseResult<RecoveredScript> {

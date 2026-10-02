@@ -15,6 +15,7 @@ use rvn_core::error::ScriptError;
 use rvn_core::persistent::LastResumeTarget;
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct InputSaveContext<'w> {
+    accessibility: Res<'w, crate::accessibility::Accessibility>,
     paths: Res<'w, ProjectPaths>,
     confirmation: ResMut<'w, crate::systems::save_menu::SaveConfirmation>,
     thumbnails: ResMut<'w, crate::save_thumbnails::SaveThumbnails>,
@@ -42,7 +43,12 @@ pub fn input_system(
     ui_scrollbars: Query<&Interaction, With<crate::menu_documents::Scrollbar>>,
     ui_lists: Query<(&Node, &GlobalTransform, &crate::menu_documents::MenuScroll)>,
     custom_menus: Res<crate::menu_documents::Menus>,
+    programmable: Res<crate::programmable_ui::Screens>,
 ) {
+    if programmable.pointer_consumed || programmable.keyboard_consumed {
+        scroll_events.clear();
+        return;
+    }
     // A UI activation must not also advance dialogue or select an imagemap zone.
     if ui_buttons
         .iter()
@@ -65,6 +71,11 @@ pub fn input_system(
 
     if keys.just_pressed(KeyCode::F6) {
         player_events.send(PlayerInput::QuickLoad);
+        return;
+    }
+    // A modal interface owns story activation; save/menu shortcuts remain usable.
+    if programmable.modal() {
+        scroll_events.clear();
         return;
     }
 
@@ -222,8 +233,20 @@ pub fn player_input_system(
     mut dialogue_text_query: Query<&mut Text, With<DialogueText>>,
 ) {
     let project_paths = &saves.paths;
+    if saves.accessibility.blocked {
+        events.clear();
+        return;
+    }
     for input in events.read() {
         if saves.confirmation.active() {
+            continue;
+        }
+        if engine.0.interface_is_modal()
+            && matches!(
+                input,
+                PlayerInput::Advance | PlayerInput::Choose(_) | PlayerInput::SkipTypewriter
+            )
+        {
             continue;
         }
         match input {
@@ -373,7 +396,11 @@ pub fn player_input_system(
                 ) {
                     Ok(mgr) => match mgr.load_quicksave() {
                         Ok(data) => {
-                            engine.0.load_data(data);
+                            match engine.0.load_data(data) {
+                                Ok(rvn_core::engine::LoadCompatibility::LegacyUnchecked) => warn!("Ancienne sauvegarde : compatibilité après modification de l’histoire non vérifiable"),
+                                Ok(_) => {},
+                                Err(error) => { error!("Chargement refusé : {error}"); return; }
+                            }
                             apply_loaded_game(
                                 &mut engine,
                                 &mut render_state,

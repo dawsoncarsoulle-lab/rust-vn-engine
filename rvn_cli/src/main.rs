@@ -20,6 +20,8 @@ use serde::Deserialize;
 
 mod blueprint;
 mod check;
+#[cfg(any(test, feature = "video"))]
+mod video_distribution;
 use blueprint::transpile_blueprint;
 use check::{check_project, CheckOptions};
 
@@ -85,6 +87,14 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum BlueprintCommands {
+    /// Explicitly link authored RVN to loss-checked, source-first Blueprints.
+    Link {
+        #[arg(value_name = "PROJECT")]
+        project: PathBuf,
+        /// Project-relative source (defaults to the manifest's main_script).
+        #[arg(long, value_name = "SCRIPT.rvn")]
+        source: Option<PathBuf>,
+    },
     /// Validate and transpile a .rvngraph document into native .rvn source.
     Transpile {
         /// Path to the versioned Blueprint graph document.
@@ -166,6 +176,10 @@ fn main() -> Result<()> {
             }
         }
         Commands::Blueprint { command } => match command {
+            BlueprintCommands::Link { project, source } => {
+                let path = blueprint::link_project(&project, source.as_deref())?;
+                println!("Linked '{}' to source-first Blueprints. Authored RVN and legacy graph files were preserved.",path.display());
+            }
             BlueprintCommands::Transpile {
                 graph,
                 output,
@@ -485,6 +499,8 @@ fn build_desktop_project(project_dir: &Path, cfg: &ProjectConfig, game_name: &st
 
     let executable_name = desktop_executable_name(game_name, std::env::consts::OS);
     let output_binary = dist_dir.join(&executable_name);
+    #[cfg(feature = "video")]
+    video_distribution::copy_for_runtime(&runtime_binary, &dist_dir)?;
     fs::copy(&runtime_binary, &output_binary).with_context(|| {
         format!(
             "unable to copy runtime binary '{}' to '{}'",
@@ -582,8 +598,12 @@ fn build_runtime() -> Result<PathBuf> {
         .parent()
         .context("unable to resolve RVN workspace root")?;
     let manifest_path = workspace_root.join("Cargo.toml");
-    let status = Command::new("cargo")
-        .args(["build", "--release", "-p", "rvn_bevy", "--manifest-path"])
+    let mut build = Command::new("cargo");
+    build.args(["build", "--release", "-p", "rvn_bevy"]);
+    #[cfg(feature = "video")]
+    build.args(["--features", "video"]);
+    let status = build
+        .arg("--manifest-path")
         .arg(&manifest_path)
         .status()
         .context("unable to invoke cargo build for rvn_bevy runtime")?;

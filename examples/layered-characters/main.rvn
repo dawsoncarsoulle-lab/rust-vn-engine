@@ -1,0 +1,61 @@
+// Change outfit and expression independently. Every piece is a separate PNG.
+function portrait() {
+    return layered_image([600,1000], {"outfit":"shirt","face":"neutral","accessory":"none"}, [
+        image_layer("body","layers/body.png",{}),
+        image_layer("shirt","layers/shirt.png",{"group":"outfit","attribute":"shirt"}),
+        image_layer("coat","layers/coat.png",{"group":"outfit","attribute":"coat"}),
+        image_layer("neutral","layers/neutral.png",{"group":"face","attribute":"neutral"}),
+        image_layer("happy","layers/happy.png",{"group":"face","attribute":"happy"}),
+        image_layer("badge","layers/badge.png",{"when":{"outfit":"coat","accessory":"badge"},"unless":{"accessory":"none"}})
+    ])
+}
+// Advanced declarations use exactly the same runtime and Blueprint designer.
+// Double underscores separate prefix, group, attribute and optional variant.
+function select_accessories(attributes) {
+    if attributes["outfit"] == "coat" {return {"accessory":"badge"}}
+    return {"accessory":""}
+}
+function discovered_portrait() {
+    return layered_image([600,1000],{"outfit":"shirt","face":"neutral","accessory":"","variant":""},image_layers("iris",[
+        "layers/iris__body.png",
+        "layers/iris__outfit__shirt.png", "layers/iris__outfit__coat.png",
+        "layers/iris__face__neutral.png", "layers/iris__face__happy.png",
+        "layers/iris__evening__face__happy.png",
+        "layers/iris__accessory__badge.png"
+    ]),{
+        "variants":{"evening":{"outfit":"coat"}},
+        "rules":{"evening_expression":{"when":{"variant":"evening"},"set":{"face":"happy"}}},
+        "selector":"select_accessories"
+    })
+}
+init {character.create("iris","Iris")}
+label start
+typewriter.speed(0)
+scene "backgrounds/stage.png"
+character.compose("iris",portrait())
+iris.show() at center
+iris "layers.default"
+character.attributes("iris",{"outfit":"coat"})
+iris "layers.coat"
+character.attributes("iris",{"face":"happy","accessory":"badge"})
+motion.play("layer:iris/badge",motion_repeat(2,motion_tween(0.6,{"pivot_x":0.61,"pivot_y":0.462}, {"rotation":20},"ease_in_out")))
+motion.play("sprite:iris",motion_tween(1,{}, {"x":120,"opacity":0.8},"ease_out"))
+iris "layers.happy"
+motion.wait("layer:iris/badge")
+iris "layers.finished"
+motion.stop("layer:iris/badge")
+motion.stop("sprite:iris")
+character.attributes("iris",{"outfit":"shirt"})
+iris "layers.shirt"
+iris.hide()
+"layers.hidden"
+character.compose("iris",discovered_portrait())
+iris.show() at center
+iris "layers.discovered"
+character.attributes("iris",{"variant":"evening"})
+iris "layers.variant"
+character.attributes("iris",{"outfit":"shirt"})
+iris "layers.selector"
+iris.hide()
+jump finish
+label finish

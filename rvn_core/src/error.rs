@@ -47,6 +47,11 @@ pub enum EvalErrorKind {
         right: String,
     },
     DivisionByZero,
+    InvalidFunction(String),
+    ExecutionLimit {
+        limit: &'static str,
+    },
+    NumericOverflow,
 }
 
 impl std::fmt::Display for EvalErrorKind {
@@ -60,6 +65,9 @@ impl std::fmt::Display for EvalErrorKind {
                 write!(f, "types incompatibles pour `{op}` : {left} et {right}")
             }
             Self::DivisionByZero => write!(f, "division par zéro"),
+            Self::InvalidFunction(message) => write!(f, "fonction RVN invalide : {message}"),
+            Self::ExecutionLimit { limit } => write!(f, "limite d’exécution dépassée : {limit} ; vérifier les boucles et les appels récursifs"),
+            Self::NumericOverflow => write!(f, "résultat hors de la plage des entiers"),
         }
     }
 }

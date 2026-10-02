@@ -1,0 +1,14 @@
+[project]
+title = "rust-VN — programmable 2D components"
+main_script = "main.rvn"
+start_label = "start"
+
+[window]
+width = 1280
+height = 720
+resizable = true
+
+[paths]
+assets = "assets"
+locales = "locales"
+saves = "saves"

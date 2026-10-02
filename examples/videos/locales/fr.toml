@@ -1,0 +1,9 @@
+[strings]
+"video.first" = "Ce sous-titre provient du fichier de traduction."
+"video.second" = "La vidéo et le son partagent la même horloge."
+"video.playing" = "La vidéo joue. Sauvegardez ou revenez en arrière pour la restaurer."
+"video.paused" = "La lecture est en pause : ni l’image ni le son ne doivent avancer."
+"video.seeked" = "Position à 0,8 seconde, toujours en pause, volume à 30 %."
+"video.finished" = "La vidéo est terminée ; l’événement de fin s’est déclenché une seule fois."
+"video.closed" = "Le lecteur et son audio ont été supprimés."
+"video.cinematic" = "La cinématique s’est terminée avant l’affichage de ce dialogue."

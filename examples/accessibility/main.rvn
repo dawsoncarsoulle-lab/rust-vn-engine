@@ -1,0 +1,22 @@
+// Use F8 to open the player's keyboard-accessible preferences at any time.
+// F8 ouvre les préférences accessibles au clavier à tout moment.
+init {set enabled = false set selected = ""}
+handler choose_item(event) {set selected = event["element"] ui.close("items")}
+screen items() {
+    return component("items_root", "column", {"width":620,"padding":24,"spacing":12,"background":[0.025,0.05,0.075,1]}, [
+        component("title", "text", {"text":"a11y.title","text_key":"a11y.title","font_size":32}, []),
+        component("option", "toggle", {"text":"a11y.hints","text_key":"a11y.hints","binding":"enabled"}, []),
+        component("letter", "button", {"text":"a11y.letter","text_key":"a11y.letter","accessible_label_key":"a11y.letter","events":{"click":"choose_item"}}, []),
+        component("key", "button", {"text":"a11y.key","text_key":"a11y.key","accessible_label_key":"a11y.key","events":{"click":"choose_item"}}, [])
+    ])
+}
+label start
+accessibility.configure({"text_scale":1,"high_contrast":false,"reduced_motion":false,"self_voicing":false})
+typewriter.speed(0)
+"a11y.welcome"
+ui.open("items",[],true,1)
+ui.focus("items","option")
+"a11y.controls"
+"a11y.done [selected]"
+jump end
+label end

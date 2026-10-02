@@ -22,6 +22,9 @@ pub fn background_system(
         let has_anim = transition != Transition::None;
 
         for entity in bg_query.iter() {
+            commands
+                .entity(entity)
+                .remove::<crate::components::CurrentMotionBackground>();
             if has_anim {
                 if let Some(anim) = make_fade_out(&transition) {
                     commands.entity(entity).insert(anim);
@@ -42,6 +45,7 @@ pub fn background_system(
 
         let mut ec = commands.spawn((
             VnBackground,
+            crate::components::CurrentMotionBackground,
             SpriteBundle {
                 sprite: Sprite {
                     color: Color::srgba(1.0, 1.0, 1.0, initial_alpha),

@@ -361,6 +361,7 @@ pub struct LocaleConfig {
 // ─── Thème ────────────────────────────────────────────────────────────────────
 
 #[derive(Resource, Deserialize, Serialize, Clone, Debug)]
+#[serde(default)]
 pub struct Theme {
     pub textbox: TextboxTheme,
     pub text: TextThemeConfig,
@@ -370,6 +371,7 @@ pub struct Theme {
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+#[serde(default)]
 pub struct TextboxTheme {
     pub background_color: String,
     pub height: f32,
@@ -379,12 +381,14 @@ pub struct TextboxTheme {
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+#[serde(default)]
 pub struct TextThemeConfig {
     pub name: TextTheme,
     pub dialogue: TextTheme,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+#[serde(default)]
 pub struct TextTheme {
     pub font_size: f32,
     pub color: String,
@@ -393,6 +397,7 @@ pub struct TextTheme {
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+#[serde(default)]
 pub struct ChoiceTheme {
     pub background_color: String,
     pub text_color: String,
@@ -830,6 +835,44 @@ impl Default for Theme {
             },
             title_screen: TitleScreenTheme::default(),
         }
+    }
+}
+
+impl Default for TextboxTheme {
+    fn default() -> Self {
+        Theme::default().textbox
+    }
+}
+impl Default for TextThemeConfig {
+    fn default() -> Self {
+        Theme::default().text
+    }
+}
+impl Default for TextTheme {
+    fn default() -> Self {
+        Theme::default().text.dialogue
+    }
+}
+impl Default for ChoiceTheme {
+    fn default() -> Self {
+        Theme::default().choice
+    }
+}
+
+#[cfg(test)]
+mod theme_defaults_tests {
+    use super::*;
+    #[test]
+    fn partial_themes_keep_their_authored_values_instead_of_silently_becoming_defaults() {
+        let theme:Theme=toml::from_str("[textbox]\nheight=174.0\n[text.dialogue]\nfont_size=24.0\ncolor=\"#F0F4FA\"\n[title_screen]\nenabled=true\n").unwrap();
+        assert_eq!(theme.textbox.height, 174.0);
+        assert_eq!(theme.text.dialogue.font_size, 24.0);
+        assert_eq!(theme.text.dialogue.color, "#F0F4FA");
+        assert_eq!(
+            theme.text.name.font_size,
+            Theme::default().text.name.font_size
+        );
+        assert_eq!(theme.choice.font_size, Theme::default().choice.font_size);
     }
 }
 

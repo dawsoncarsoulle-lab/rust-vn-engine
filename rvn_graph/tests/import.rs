@@ -59,7 +59,7 @@ fn import_preserves_implicit_label_flow_explicitly_and_refuses_lossy_input() {
     .unwrap();
     assert!(transpile(&graphs[1]).unwrap().source.contains("jump a"));
     assert!(
-        import_script(&rvn_parser::parse("label a\n music.volume(\"0.5\")\n").unwrap()).is_err()
+        import_script(&rvn_parser::parse("label a\n music.volume(\"0.5\")\n").unwrap()).is_ok()
     );
     assert!(import_script(
         &rvn_parser::parse("label a\n jump a\n narrator \"unreachable\"\n").unwrap()
@@ -94,6 +94,59 @@ fn project_end_cannot_fall_into_the_next_sorted_graph() {
     }
     assert!(engine.step_until_interaction().unwrap().is_none());
     assert!(engine.is_finished());
+}
+
+#[test]
+fn music_volume_import_uses_float_pin_and_reparses_historical_quoted_syntax() {
+    let source = "init {music.volume(\"0.22\")}\nlabel start\nmusic.volume(\"0.32\")\nmusic.volume(\"1\")\n\"Music\"\nreturn\n";
+    let ast = rvn_parser::parse(source).unwrap();
+    let graphs = import_script(&ast).unwrap();
+    let levels = graphs
+        .iter()
+        .flat_map(|graph| {
+            graph
+                .nodes
+                .values()
+                .filter(|node| node.kind == NodeKind::MusicVolume)
+                .map(|node| {
+                    let pin = graph.pin_by_key(node.id, "level").unwrap();
+                    assert_eq!(pin.value_type, ValueType::Float);
+                    let edge = graph
+                        .edges
+                        .values()
+                        .find(|edge| edge.input == pin.id)
+                        .expect("The imported numeric value must be visible as a literal node");
+                    let literal = &graph.nodes[&graph.pins[&edge.output].node];
+                    assert_eq!(literal.kind, NodeKind::Literal);
+                    let Some(PropertyValue::Float(value)) = literal.properties.get("value") else {
+                        panic!("Volume must use a real floating literal")
+                    };
+                    *value as f32
+                })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(levels, vec![0.22, 0.32, 1.0]);
+    let output = transpile_project(&graphs).unwrap();
+    assert_eq!(
+        output.source.matches("music.volume(\"").count(),
+        3,
+        "The historical parser requires quoted method arguments"
+    );
+    assert!(output
+        .ast
+        .iter()
+        .any(|statement| matches!(statement,Statement::MusicVolume{level} if *level==0.32)));
+    assert!(output.ast.iter().any(|statement|matches!(statement,Statement::Init{body} if body.iter().any(|statement|matches!(statement,Statement::MusicVolume{level} if *level==0.22)))));
+    assert_eq!(rvn_parser::parse(&output.source).unwrap(), output.ast);
+    assert_eq!(
+        import_script(&output.ast)
+            .unwrap()
+            .iter()
+            .flat_map(|graph| graph.nodes.values())
+            .filter(|node| node.kind == NodeKind::MusicVolume)
+            .count(),
+        3
+    );
 }
 
 #[test]

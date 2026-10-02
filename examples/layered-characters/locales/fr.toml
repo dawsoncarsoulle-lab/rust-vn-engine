@@ -1,0 +1,10 @@
+[strings]
+"layers.default" = "Une chemise et un visage neutre. Le corps reste sous ces deux calques."
+"layers.coat" = "Seule la tenue a changé. Mon expression est toujours neutre."
+"layers.happy" = "Une nouvelle expression et un badge. Le badge et le personnage entier s’animent séparément."
+"layers.finished" = "L’animation du badge est terminée. Vous pouvez sauvegarder et restaurer la composition exacte."
+"layers.shirt" = "La chemise est revenue, mais je suis toujours heureuse. Le badge conditionnel est masqué."
+"layers.hidden" = "Masquer le personnage annule ses animations. Le retour en arrière restaure les attributs choisis."
+"layers.discovered" = "Ces calques viennent des noms de fichiers, sans déclaration individuelle. Ouvrez discovered_portrait dans le concepteur de composition."
+"layers.variant" = "La variante du soir a choisi mon manteau. Une règle a choisi mon expression et une fonction RVN mon accessoire. Sauvegardez et revenez en arrière ici."
+"layers.selector" = "Changer uniquement ma tenue a conservé la variante et l’expression. La fonction de sélection a retiré mon badge."

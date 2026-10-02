@@ -1,0 +1,11 @@
+[textbox]
+background_color = "#101827EE"
+height = 130.0
+padding = 28.0
+
+[text.dialogue]
+font_size = 24.0
+color = "#F0F4FA"
+
+[title_screen]
+enabled = false

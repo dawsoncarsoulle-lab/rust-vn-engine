@@ -1,0 +1,23 @@
+// Owned exported-game integration fixture; never opens a user project.
+function theme() {
+    return {"font":"fonts/DejaVuSerif.ttf", "font_size":28, "background":[0.08,0.11,0.15,1], "border_width":2, "border_color":[0.4,0.7,0.9,1], "radius":18, "hover_background":[0.16,0.36,0.52,1], "pressed_background":[0.25,0.48,0.64,1], "focus_color":[1,0.75,0.2,1]}
+}
+function card(id,caption) {
+    return component(id,"button",{"text":caption,"style":theme(),"width":180,"height":60},[])
+}
+screen qa() {
+    return component("root","panel",{"style":theme(),"rect":[0,0,1920,1080]},[
+        component("title","text",{"text":"Exported styles and inherited font","rect":[80,40,1600,80]},[]),
+        component("pick","button",{"text":"Pick Ruby","style":theme(),"rect":[80,160,400,70],"event_data":{"id":"ruby","price":8},"events":{"click":"pick"}},[]),
+        component("name","input",{"binding":"player_name","placeholder":"Your name","accessible_label":"Your name","rect":[80,260,500,80],"text_align":"center","padding":12},[]),
+        component("result","input",{"binding":"selected","accessible_label":"Selected item","rect":[80,370,500,80]},[]),
+        component("small","input",{"binding":"player_name","accessible_label":"Small typography","font_size":6,"rect":[80,500,500,40]},[]),
+        component("tiny_caption","text",{"text":"Small typography","font_size":6,"rect":[80,570,600,20]},[]),
+        component("flow","row",{"rect":[700,160,700,180],"padding":12,"spacing":10,"justify":"space_between","align":"center","wrap":true,"auto_background":false},[card("one","One"),card("two","Two"),card("three","Three"),card("four","Four")])
+    ])
+}
+handler pick(event) {set selected=event["data"]["id"]}
+init {set selected="none" set player_name="Camille"}
+label start
+ui.open("qa",[],true,0)
+"Integration remains modal."

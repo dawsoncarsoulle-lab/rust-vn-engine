@@ -2,7 +2,7 @@ use rvn_parser::{Hotspot, Position, Script, Statement, Transition, Value};
 use std::collections::HashMap;
 
 use crate::error::RuntimeError;
-use crate::eval::{eval_bool, eval_expr, eval_interpolated, EvalError};
+use crate::eval::{EvalError, FunctionLibrary};
 use crate::locale::LocaleManager;
 use crate::renderer::Renderer;
 use crate::rollback::{HistoryDisplay, RollbackHistory};
@@ -15,7 +15,7 @@ use crate::types::{CinematicState, GameState, MusicState, SpriteState, Typewrite
 /// utilisateur via `advance_dialogue`, `submit_choice` ou `submit_hotspot`.
 /// Cela garde la logique narrative dans `rvn_core` et évite que les renderers
 /// réimplémentent chacun une partie du comportement des choix/imagemaps.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Interaction {
     Dialogue {
         character: Option<String>,
@@ -43,9 +43,82 @@ fn flatten_with_returns(
     counter: &mut usize,
     returns: &mut Vec<usize>,
 ) {
+    // Iteration state uses reserved engine variables, so existing save/rollback
+    // snapshots capture it together with the story instead of losing a cursor.
+    let mut index = 0;
+    while index < script.len() {
+        if let Statement::ForEach {
+            name,
+            collection,
+            body,
+        } = script[index].clone()
+        {
+            *counter += 1;
+            let items = format!("__rvn_for_{}_items", counter);
+            let cursor = format!("__rvn_for_{}_index", counter);
+            let mut iteration = vec![
+                Statement::SetVar {
+                    name,
+                    value: rvn_parser::Expr::Index {
+                        target: Box::new(rvn_parser::Expr::Var(items.clone())),
+                        index: Box::new(rvn_parser::Expr::Var(cursor.clone())),
+                    },
+                },
+                Statement::SetVar {
+                    name: cursor.clone(),
+                    value: rvn_parser::Expr::BinOp {
+                        op: rvn_parser::BinOpKind::Add,
+                        left: Box::new(rvn_parser::Expr::Var(cursor.clone())),
+                        right: Box::new(rvn_parser::Expr::Int(1)),
+                    },
+                },
+            ];
+            iteration.extend(body);
+            let replacement = vec![
+                Statement::SetVar {
+                    name: items.clone(),
+                    value: rvn_parser::Expr::Call {
+                        name: "__rvn_iterable".into(),
+                        args: vec![collection],
+                    },
+                },
+                Statement::SetVar {
+                    name: cursor.clone(),
+                    value: rvn_parser::Expr::Int(0),
+                },
+                Statement::While {
+                    condition: rvn_parser::Expr::BinOp {
+                        op: rvn_parser::BinOpKind::Lt,
+                        left: Box::new(rvn_parser::Expr::Var(cursor)),
+                        right: Box::new(rvn_parser::Expr::Call {
+                            name: "len".into(),
+                            args: vec![rvn_parser::Expr::Var(items)],
+                        }),
+                    },
+                    body: iteration,
+                },
+            ];
+            script.splice(index..=index, replacement);
+            index += 2;
+        }
+        index += 1;
+    }
     for stmt in script.iter_mut() {
         match stmt {
             Statement::Use { .. } | Statement::Init { .. } => {}
+            Statement::While { body, .. } => {
+                flatten_with_returns(body, extra, counter, returns);
+                *counter += 1;
+                let target = format!("__internal_loop_{}", counter);
+                let mut block = std::mem::take(body);
+                block.push(Statement::Return);
+                extra.push(Statement::Label {
+                    name: target.clone(),
+                });
+                extra.extend(block);
+                returns.push(extra.len() - 1);
+                *body = vec![Statement::Call { target }];
+            }
             Statement::If {
                 then_branch,
                 else_branch,
@@ -190,6 +263,8 @@ pub struct InputState {
 
 pub struct Engine<R: Renderer> {
     pub script: Script,
+    functions: FunctionLibrary,
+    ui_library: crate::ui::UiLibrary,
     label_table: HashMap<String, usize>,
     // Lowering adds calls for branches. Their synthetic returns pop one frame;
     // an authored return must unwind those frames and return to the real caller.
@@ -206,6 +281,30 @@ pub struct Engine<R: Renderer> {
     pub input_state: InputState,
     /// Active timer (duration_secs, action_string, elapsed_secs).
     pub active_timer: Option<(f32, String, f32)>,
+    /// Never restored from a save: late decoder callbacks from an old playback
+    /// must not mutate a restored or replaced video with the same name.
+    video_epoch: u64,
+    /// Transient input generation; saved/restored component IDs do not revive
+    /// a pointer capture from the previous state.
+    interface_epoch: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoadCompatibility {
+    Verified,
+    /// Older saves have no story identity. Bounds are checked, but authors
+    /// must not describe compatibility after a story edit as guaranteed.
+    LegacyUnchecked,
+}
+
+fn story_identity(script: &Script) -> String {
+    // Fixed, portable FNV-1a over the canonical AST encoding. This detects
+    // ordinary story changes; it is deliberately not an authenticity check.
+    let bytes = serde_json::to_vec(script).expect("RVN AST serialization is infallible");
+    let hash = bytes.iter().fold(0xcbf29ce484222325_u64, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+    });
+    format!("rvn-prepared-2:{hash:016x}:{}", bytes.len())
 }
 
 impl<R: Renderer> Engine<R> {
@@ -235,12 +334,14 @@ impl<R: Renderer> Engine<R> {
     /// `self.script` back through `new` would lower choice calls twice and reuse
     /// internal labels, creating recursive calls instead of the original branch.
     pub fn fresh(&self, renderer: R, rollback_depth: usize) -> Result<Self, RuntimeError> {
-        Self::from_prepared_script(
+        let mut engine = Self::from_prepared_script(
             self.script.clone(),
             renderer,
             rollback_depth,
             self.branch_returns.clone(),
-        )
+        )?;
+        engine.interface_epoch = self.interface_epoch.wrapping_add(1);
+        Ok(engine)
     }
 
     fn from_prepared_script(
@@ -261,11 +362,30 @@ impl<R: Renderer> Engine<R> {
             })
             .collect();
 
+        let functions = FunctionLibrary::from_script(&script).map_err(|error| {
+            RuntimeError::no_stmt(crate::error::RuntimeErrorKind::EvalError(error), 0)
+        })?;
+        let identity = story_identity(&script);
+        let ui_library = crate::ui::UiLibrary::from_script(&script).map_err(|error| {
+            RuntimeError::no_stmt(crate::error::RuntimeErrorKind::EvalError(error), 0)
+        })?;
         let mut engine = Self {
             script,
+            functions,
+            ui_library,
             label_table,
             branch_returns,
             state: GameState {
+                accessibility: Default::default(),
+                speech_requests: Vec::new(),
+                videos: Default::default(),
+                layered: Default::default(),
+                motions: Default::default(),
+                ui: Default::default(),
+                story_identity: Some(identity),
+                random: crate::random::RandomState::fresh(),
+                display_random: Default::default(),
+                display_random_pc: None,
                 last_dialogue: None,
                 pc: 0,
                 current_interactive_pc: 0,
@@ -284,6 +404,8 @@ impl<R: Renderer> Engine<R> {
             persistent_vars: HashMap::new(),
             input_state: InputState::default(),
             active_timer: None,
+            video_epoch: 0,
+            interface_epoch: 0,
         };
 
         engine.run_init_blocks()?;
@@ -297,7 +419,13 @@ impl<R: Renderer> Engine<R> {
         for (i, stmt) in self.script.iter().enumerate() {
             if let Statement::Init { body } = stmt {
                 init_blocks.push((i, body.clone()));
-            } else if !matches!(stmt, Statement::Label { .. }) {
+            } else if !matches!(
+                stmt,
+                Statement::Label { .. }
+                    | Statement::Function { .. }
+                    | Statement::Screen { .. }
+                    | Statement::Handler { .. }
+            ) {
                 break;
             }
         }
@@ -343,7 +471,7 @@ impl<R: Renderer> Engine<R> {
         emotion: Option<String>,
         position: Option<Position>,
         transition: Transition,
-    ) {
+    ) -> Result<(), RuntimeError> {
         let resolved = position.unwrap_or_else(|| {
             self.state
                 .sprites
@@ -352,7 +480,13 @@ impl<R: Renderer> Engine<R> {
                 .unwrap_or(Position::Center)
         });
         let from = self.state.sprites.get(id).cloned();
-        self.state.last_transition = transition.clone();
+        let mut next = self.state.clone();
+        next.last_transition = transition.clone();
+        next.sprites.insert(
+            id.to_string(),
+            SpriteState::new(emotion.clone(), resolved.clone()),
+        );
+        self.commit_ui_state(next)?;
         self.renderer.show_sprite(
             id,
             emotion.as_deref(),
@@ -360,20 +494,21 @@ impl<R: Renderer> Engine<R> {
             &transition,
             from.as_ref(),
         );
-        self.state
-            .sprites
-            .insert(id.to_string(), SpriteState::new(emotion, resolved));
+        Ok(())
     }
 
     fn exec_hide(&mut self, id: &str, transition: Transition) -> Result<(), RuntimeError> {
         let from = self.state.sprites.get(id).filter(|s| s.visible).cloned();
         // Explicit removal is idempotent, including before the first appearance.
         let Some(from) = from else { return Ok(()) };
-        self.state.last_transition = transition.clone();
-        self.renderer.hide_sprite(id, &transition, &from);
-        if let Some(s) = self.state.sprites.get_mut(id) {
+        let mut next = self.state.clone();
+        next.last_transition = transition.clone();
+        next.motions.tracks.retain(|_,track|!matches!(&track.target,crate::motion::MotionTarget::Sprite{id:target}|crate::motion::MotionTarget::Layer{id:target,..} if target==id));
+        if let Some(s) = next.sprites.get_mut(id) {
             s.visible = false;
         }
+        self.commit_ui_state(next)?;
+        self.renderer.hide_sprite(id, &transition, &from);
         Ok(())
     }
 
@@ -395,21 +530,26 @@ impl<R: Renderer> Engine<R> {
                     self.state.pc,
                 )
             })?;
-        self.state.last_transition = transition.clone();
-        self.renderer.move_sprite(id, &position, &transition, &from);
-        if let Some(s) = self.state.sprites.get_mut(id) {
-            s.position = position;
+        let mut next = self.state.clone();
+        next.last_transition = transition.clone();
+        if let Some(s) = next.sprites.get_mut(id) {
+            s.position = position.clone();
         }
+        self.commit_ui_state(next)?;
+        self.renderer.move_sprite(id, &position, &transition, &from);
         Ok(())
     }
 
     // ── step() ───────────────────────────────────────────────────────────────
 
     pub fn step(&mut self) -> Result<(), RuntimeError> {
+        if self.state.motions.waiting.is_some() || self.state.videos.waiting.is_some() {
+            return Ok(());
+        }
         if self.is_finished() {
             return Ok(());
         }
-        loop {
+        for _ in 0..crate::eval::MAX_COMPUTATION_STEPS {
             if self.is_finished() {
                 return Ok(());
             }
@@ -419,16 +559,88 @@ impl<R: Renderer> Engine<R> {
                 return self.exec_interactive(stmt);
             } else {
                 self.exec_silent(stmt)?;
+                if self.state.motions.waiting.is_some() || self.state.videos.waiting.is_some() {
+                    return Ok(());
+                }
             }
         }
+        Err(self.eval_err(
+            EvalError::ExecutionLimit {
+                limit: "100 000 instructions sans interaction",
+            },
+            "step",
+        ))
     }
 
     pub fn rollback(&mut self) -> bool {
         let Some(entry) = self.history.pop() else {
             return false;
         };
-        self.state = entry.state;
+        let Ok(views) = self.describe_interfaces(&entry.state) else {
+            self.history.push(entry.state, entry.display);
+            return false;
+        };
+        let Ok(motions) = self.describe_motions(&entry.state) else {
+            self.history.push(entry.state, entry.display);
+            return false;
+        };
+        let Ok(layered) = self.describe_layered_characters(&entry.state) else {
+            self.history.push(entry.state, entry.display);
+            return false;
+        };
+        let Ok(epoch) = self.next_video_epoch() else {
+            self.history.push(entry.state, entry.display);
+            return false;
+        };
+        let Ok(videos) = self.describe_videos(&entry.state, epoch) else {
+            self.history.push(entry.state, entry.display);
+            return false;
+        };
+        if entry.state.accessibility.validate().is_err() {
+            self.history.push(entry.state, entry.display);
+            return false;
+        }
+        if (!views.is_empty() && !self.renderer.supports_programmable_ui())
+            || self.validate_canvas_renderer(&views).is_err()
+        {
+            self.history.push(entry.state, entry.display);
+            return false;
+        }
+        let previous = self.state.clone();
+        self.state = entry.state.clone();
+        self.video_epoch = epoch;
         self.renderer.restore_screen(&self.state);
+        if self.renderer.update_interfaces(&views).is_err()
+            || self.renderer.update_layered_characters(&layered).is_err()
+            || self.renderer.update_motions(&motions).is_err()
+            || self.renderer.update_videos(&videos).is_err()
+            || self
+                .renderer
+                .update_accessibility(&self.state.accessibility)
+                .is_err()
+        {
+            self.history.push(entry.state, entry.display);
+            self.state = previous;
+            self.renderer.restore_screen(&self.state);
+            if let Ok(views) = self.interface_views() {
+                let _ = self.renderer.update_interfaces(&views);
+            }
+            let _ = self.refresh_motions();
+            let _ = self.refresh_layered_characters();
+            if let Ok(views) = self.video_views() {
+                let _ = self.renderer.update_videos(&views);
+            }
+            let _ = self
+                .renderer
+                .update_accessibility(&self.state.accessibility);
+            return false;
+        }
+        self.interface_epoch = self.interface_epoch.wrapping_add(1);
+        if self.renderer.supports_accessibility() {
+            let _ = self
+                .renderer
+                .accessibility_speech(&rvn_ui::accessibility::SpeechRequest::Stop);
+        }
         // Re-resolve the restored interaction in the currently selected language.
         // The cached display is only a fallback for an unresolvable legacy entry.
         if let Ok(Some(interaction)) = self.current_interaction() {
@@ -491,6 +703,17 @@ impl<R: Renderer> Engine<R> {
         )
     }
 
+    fn interpolate_display(
+        &self,
+        text: &rvn_parser::InterpolatedText,
+    ) -> crate::eval::EvalResult<String> {
+        self.functions.interpolate_with_random(
+            text,
+            &self.vars_for_eval(),
+            &mut self.state.display_random.clone(),
+        )
+    }
+
     /// Crée un HistoryDisplay avec les textes déjà évalués (interpolation résolue).
     fn make_display_resolved(
         &self,
@@ -498,7 +721,8 @@ impl<R: Renderer> Engine<R> {
     ) -> Result<Option<HistoryDisplay>, RuntimeError> {
         Ok(match stmt {
             Statement::Dialogue { character_id, text } => {
-                let resolved = eval_interpolated(text, &self.vars_for_eval())
+                let resolved = self
+                    .interpolate_display(text)
                     .map_err(|e| self.eval_err(e, "Dialogue (interpolation)"))?;
                 Some(HistoryDisplay::Dialogue {
                     character: character_id.clone(),
@@ -509,7 +733,7 @@ impl<R: Renderer> Engine<R> {
                 let mut resolved = Vec::new();
                 for opt in options {
                     resolved.push(
-                        eval_interpolated(&opt.label, &self.vars_for_eval())
+                        self.interpolate_display(&opt.label)
                             .map_err(|e| self.eval_err(e, "Choice (label interpolation)"))?,
                     );
                 }
@@ -535,11 +759,12 @@ impl<R: Renderer> Engine<R> {
         let template_key = text_to_locale_key(text);
         let translated_tmpl = self.translate(&template_key).to_string();
         if translated_tmpl == template_key {
-            eval_interpolated(text, &self.vars_for_eval())
+            self.interpolate_display(text)
                 .map_err(|e| self.eval_err(e, "Dialogue (interpolation)"))
         } else {
             match rvn_parser::parse_interpolated_str(&translated_tmpl) {
-                Ok(t) => eval_interpolated(&t, &self.vars_for_eval())
+                Ok(t) => self
+                    .interpolate_display(&t)
                     .map_err(|e| self.eval_err(e, "Dialogue (traduction + interpolation)")),
                 Err(_) => Ok(translated_tmpl),
             }
@@ -555,11 +780,12 @@ impl<R: Renderer> Engine<R> {
             let template_key = text_to_locale_key(&opt.label);
             let translated = self.translate(&template_key).to_string();
             let final_label = if translated == template_key {
-                eval_interpolated(&opt.label, &self.vars_for_eval())
+                self.interpolate_display(&opt.label)
                     .map_err(|e| self.eval_err(e, "Choice (label interpolation)"))?
             } else {
                 match rvn_parser::parse_interpolated_str(&translated) {
-                    Ok(t) => eval_interpolated(&t, &self.vars_for_eval())
+                    Ok(t) => self
+                        .interpolate_display(&t)
                         .map_err(|e| self.eval_err(e, "Choice (label traduction)"))?,
                     Err(_) => translated,
                 }
@@ -570,10 +796,16 @@ impl<R: Renderer> Engine<R> {
     }
 
     fn record_interaction_snapshot(&mut self, stmt: &Statement) -> Result<(), RuntimeError> {
+        if self.state.display_random_pc != Some(self.state.pc) {
+            self.state.display_random =
+                crate::random::RandomState::seeded(self.state.random.next_u64());
+            self.state.display_random_pc = Some(self.state.pc);
+        }
         if matches!(stmt, Statement::Dialogue { .. }) {
             self.state.last_dialogue = Some(crate::types::DialogueSnapshot {
                 pc: self.state.pc,
                 vars: self.vars_for_eval(),
+                random: self.state.display_random,
             });
         }
         self.state.current_interactive_pc = self.state.pc;
@@ -588,11 +820,11 @@ impl<R: Renderer> Engine<R> {
                 let template_key = text_to_locale_key(&text);
                 let translated_tmpl = self.translate(&template_key).to_string();
                 let final_text = if translated_tmpl == template_key {
-                    eval_interpolated(&text, &self.vars_for_eval())
+                    self.interpolate_display(&text)
                         .map_err(|e| self.eval_err(e, "Dialogue (interpolation)"))?
                 } else {
                     match rvn_parser::parse_interpolated_str(&translated_tmpl) {
-                        Ok(t) => eval_interpolated(&t, &self.vars_for_eval()).map_err(|e| {
+                        Ok(t) => self.interpolate_display(&t).map_err(|e| {
                             self.eval_err(e, "Dialogue (traduction + interpolation)")
                         })?,
                         Err(_) => translated_tmpl,
@@ -605,13 +837,23 @@ impl<R: Renderer> Engine<R> {
             Statement::Choice { options } => {
                 // Filter out options whose condition evaluates to false.
                 let vars = self.vars_for_eval();
-                let active: Vec<&rvn_parser::ChoiceOption> = options
-                    .iter()
-                    .filter(|opt| match &opt.condition {
-                        Some(cond) => eval_bool(cond, &vars).unwrap_or(false),
+                let mut active = Vec::new();
+                for option in &options {
+                    let visible = match &option.condition {
+                        Some(condition) => self
+                            .functions
+                            .eval_bool_with_random(
+                                condition,
+                                &vars,
+                                &mut self.state.display_random.clone(),
+                            )
+                            .map_err(|error| self.eval_err(error, "Choice (condition)"))?,
                         None => true,
-                    })
-                    .collect();
+                    };
+                    if visible {
+                        active.push(option);
+                    }
+                }
                 drop(vars);
                 // If no options are active, skip the choice entirely.
                 if active.is_empty() {
@@ -626,11 +868,12 @@ impl<R: Renderer> Engine<R> {
                     let template_key = text_to_locale_key(&opt.label);
                     let translated = self.translate(&template_key).to_string();
                     let final_label = if translated == template_key {
-                        eval_interpolated(&opt.label, &self.vars_for_eval())
+                        self.interpolate_display(&opt.label)
                             .map_err(|e| self.eval_err(e, "Choice (label interpolation)"))?
                     } else {
                         match rvn_parser::parse_interpolated_str(&translated) {
-                            Ok(t) => eval_interpolated(&t, &self.vars_for_eval())
+                            Ok(t) => self
+                                .interpolate_display(&t)
                                 .map_err(|e| self.eval_err(e, "Choice (label traduction)"))?,
                             Err(_) => translated,
                         }
@@ -676,29 +919,194 @@ impl<R: Renderer> Engine<R> {
 
     fn exec_silent(&mut self, stmt: Statement) -> Result<(), RuntimeError> {
         match stmt {
-            Statement::Use { .. } | Statement::Init { .. } | Statement::Label { .. } => {
+            Statement::Use { .. }
+            | Statement::Init { .. }
+            | Statement::Label { .. }
+            | Statement::Function { .. }
+            | Statement::Screen { .. }
+            | Statement::Handler { .. } => {
+                self.state.pc += 1;
+            }
+            Statement::FunctionReturn { .. } => {
+                return Err(self.eval_err(
+                    EvalError::InvalidFunction("return <valeur> hors d’une fonction".into()),
+                    "FunctionReturn",
+                ))
+            }
+            Statement::LocalVar { .. } => {
+                return Err(self.eval_err(
+                    EvalError::InvalidFunction("local hors d’une fonction ou gestionnaire".into()),
+                    "LocalVar",
+                ))
+            }
+            statement @ (Statement::UiOpen { .. }
+            | Statement::UiClose { .. }
+            | Statement::UiFocus { .. }
+            | Statement::UiSetState { .. }
+            | Statement::MotionPlay { .. }
+            | Statement::MotionStop { .. }
+            | Statement::CharacterCompose { .. }
+            | Statement::CharacterAttributes { .. }
+            | Statement::VideoPlay { .. }
+            | Statement::VideoPause { .. }
+            | Statement::VideoResume { .. }
+            | Statement::VideoStop { .. }
+            | Statement::VideoSkip { .. }
+            | Statement::VideoSeek { .. }
+            | Statement::VideoVolume { .. }
+            | Statement::AccessibilityConfigure { .. }
+            | Statement::AccessibilitySpeak { .. }
+            | Statement::AccessibilityStop) => {
+                let mut next = self.state.clone();
+                let command = crate::eval::UiCommand::evaluate(
+                    &self.functions,
+                    &statement,
+                    &next.vars,
+                    &mut next.random,
+                )
+                .map_err(|error| self.eval_err(error, "Interface"))?;
+                self.apply_ui_commands(&mut next, vec![command])?;
+                self.commit_ui_state(next)?;
+                self.state.pc += 1;
+            }
+            Statement::VideoWait { name } => {
+                let mut next = self.state.clone();
+                let Value::Str(name) = self
+                    .functions
+                    .eval_with_random(&name, &self.vars_for_eval(), &mut next.random)
+                    .map_err(|error| self.eval_err(error, "Video wait"))?
+                else {
+                    return Err(self.eval_err(
+                        EvalError::InvalidFunction("Video wait requires a player name".into()),
+                        "Video wait",
+                    ));
+                };
+                next.videos.wait(&name).map_err(|message| {
+                    self.eval_err(EvalError::InvalidFunction(message), "Video wait")
+                })?;
+                next.pc += 1;
+                self.commit_ui_state(next)?;
+            }
+            Statement::MotionWait { target } => {
+                let mut random = self.state.random;
+                let value = self
+                    .functions
+                    .eval_with_random(&target, &self.vars_for_eval(), &mut random)
+                    .map_err(|error| self.eval_err(error, "Motion wait"))?;
+                let Value::Str(key) = value else {
+                    return Err(self.eval_err(
+                        EvalError::InvalidFunction("Animation target must be a string".into()),
+                        "Motion wait",
+                    ));
+                };
+                crate::motion::MotionTarget::parse(&key).map_err(|message| {
+                    self.eval_err(EvalError::InvalidFunction(message), "Motion wait")
+                })?;
+                if let Some(track) = self
+                    .state
+                    .motions
+                    .tracks
+                    .get(&key)
+                    .filter(|track| track.running)
+                {
+                    if track
+                        .definition
+                        .validate()
+                        .map_err(|message| {
+                            self.eval_err(EvalError::InvalidFunction(message), "Motion wait")
+                        })?
+                        .seconds
+                        .is_none()
+                    {
+                        return Err(self.eval_err(
+                            EvalError::InvalidFunction(
+                                "Cannot wait for an endless animation; use a finite repeat count"
+                                    .into(),
+                            ),
+                            "Motion wait",
+                        ));
+                    }
+                    self.state.motions.waiting = Some(key);
+                    self.state.current_interactive_pc = self.state.pc;
+                } else {
+                    self.state.pc += 1;
+                }
+                self.state.random = random;
+            }
+            Statement::While { condition, body } if self.state.pc < self.script.len() => {
+                if self
+                    .functions
+                    .eval_bool_with_random(
+                        &condition,
+                        &self.vars_for_eval(),
+                        &mut self.state.random,
+                    )
+                    .map_err(|error| self.eval_err(error, "While"))?
+                {
+                    let [Statement::Call { target }] = body.as_slice() else {
+                        return Err(self.eval_err(
+                            EvalError::InvalidFunction("boucle narrative non préparée".into()),
+                            "While",
+                        ));
+                    };
+                    if self.state.call_stack.len() >= 128 {
+                        return Err(self.eval_err(
+                            EvalError::ExecutionLimit {
+                                limit: "128 appels narratifs imbriqués",
+                            },
+                            "While",
+                        ));
+                    }
+                    self.state.call_stack.push(self.state.pc);
+                    self.state.pc = self.resolve(target)?;
+                } else {
+                    self.state.pc += 1;
+                }
+            }
+            statement @ (Statement::While { .. } | Statement::ForEach { .. }) => {
+                let original = self.vars_for_eval();
+                let computed = self
+                    .functions
+                    .execute_with_random(&[statement], &original, &mut self.state.random)
+                    .map_err(|error| self.eval_err(error, "Loop"))?;
+                for (name, value) in computed {
+                    if original.get(&name) != Some(&value) {
+                        self.state.vars.insert(name, value);
+                    }
+                }
                 self.state.pc += 1;
             }
             Statement::Jump { target } => {
                 self.state.pc = self.resolve(&target)?;
             }
             Statement::Call { target } => {
+                if self.state.call_stack.len() >= 128 {
+                    return Err(self.eval_err(
+                        EvalError::ExecutionLimit {
+                            limit: "128 appels narratifs imbriqués",
+                        },
+                        "Call",
+                    ));
+                }
+                let destination = self.resolve(&target)?;
                 self.state.call_stack.push(self.state.pc + 1);
-                self.state.pc = self.resolve(&target)?;
+                self.state.pc = destination;
             }
             Statement::Return => {
                 if !self.branch_returns.contains(&self.state.pc) {
                     while self.state.call_stack.last().is_some_and(|pc| {
-                        pc.checked_sub(1)
-                            .and_then(|caller| self.script.get(caller))
-                            .is_some_and(|s| {
-                                matches!(
-                                    s,
-                                    Statement::If { .. }
-                                        | Statement::Choice { .. }
-                                        | Statement::Imagemap { .. }
-                                )
-                            })
+                        matches!(self.script.get(*pc), Some(Statement::While { .. }))
+                            || pc
+                                .checked_sub(1)
+                                .and_then(|caller| self.script.get(caller))
+                                .is_some_and(|s| {
+                                    matches!(
+                                        s,
+                                        Statement::If { .. }
+                                            | Statement::Choice { .. }
+                                            | Statement::Imagemap { .. }
+                                    )
+                                })
                     }) {
                         self.state.call_stack.pop();
                     }
@@ -718,6 +1126,7 @@ impl<R: Renderer> Engine<R> {
                 background,
                 transition,
             } => {
+                self.state.motions.tracks.remove("background");
                 self.state.background_image = background.clone();
                 self.state.last_transition = transition.clone();
                 self.renderer.set_background(&background, &transition);
@@ -745,7 +1154,7 @@ impl<R: Renderer> Engine<R> {
                 position,
                 transition,
             } => {
-                self.exec_show(&character_id, emotion, position, transition);
+                self.exec_show(&character_id, emotion, position, transition)?;
                 self.state.pc += 1;
             }
             Statement::HideSprite {
@@ -796,7 +1205,12 @@ impl<R: Renderer> Engine<R> {
                                 "SpriteEffect",
                             )
                         })?;
-                        eval_interpolated(&parsed, &self.vars_for_eval())
+                        self.functions
+                            .interpolate_with_random(
+                                &parsed,
+                                &self.vars_for_eval(),
+                                &mut self.state.random,
+                            )
                             .map_err(|e| self.eval_err(e, "SpriteEffect"))
                     })
                     .transpose()?;
@@ -828,13 +1242,24 @@ impl<R: Renderer> Engine<R> {
                 self.state.pc += 1;
             }
             Statement::SetVar { name, value } => {
-                let val = eval_expr(&value, &self.vars_for_eval())
+                let mut random = self.state.random;
+                let val = self
+                    .functions
+                    .eval_with_random(&value, &self.vars_for_eval(), &mut random)
                     .map_err(|e| self.eval_err(e, &format!("SetVar {{ name: {:?} }}", name)))?;
                 if Self::is_persistent(name.as_str()) {
                     self.persistent_vars.insert(name, val);
                 } else {
-                    self.state.vars.insert(name, val);
+                    if self.state.ui.screens.is_empty() {
+                        self.state.vars.insert(name, val);
+                    } else {
+                        let mut next = self.state.clone();
+                        next.vars.insert(name, val);
+                        next.random = random;
+                        self.commit_ui_state(next)?;
+                    }
                 }
+                self.state.random = random;
                 self.state.pc += 1;
             }
             Statement::If {
@@ -842,7 +1267,13 @@ impl<R: Renderer> Engine<R> {
                 then_branch,
                 else_branch,
             } => {
-                let branch = if eval_bool(&condition, &self.vars_for_eval())
+                let branch = if self
+                    .functions
+                    .eval_bool_with_random(
+                        &condition,
+                        &self.vars_for_eval(),
+                        &mut self.state.random,
+                    )
                     .map_err(|e| self.eval_err(e, "If (condition)"))?
                 {
                     then_branch
@@ -960,8 +1391,12 @@ impl<R: Renderer> Engine<R> {
     /// courante, déjà résolue côté moteur. C'est l'API adaptée aux renderers
     /// événementiels comme Bevy.
     pub fn step_until_interaction(&mut self) -> Result<Option<Interaction>, RuntimeError> {
+        let mut remaining = crate::eval::MAX_COMPUTATION_STEPS;
         loop {
-            self.step_silent()?;
+            self.step_silent_bounded(&mut remaining)?;
+            if self.state.videos.waiting.is_some() {
+                return Ok(None);
+            }
             if self.is_finished() {
                 return Ok(None);
             }
@@ -971,10 +1406,12 @@ impl<R: Renderer> Engine<R> {
                 // Ces cas devraient être signalés par `rvn check`, mais le moteur
                 // reste robuste et ne bloque pas l'UI si le script les contient.
                 Statement::Choice { options } if options.is_empty() => {
+                    self.consume_step(&mut remaining)?;
                     self.state.pc += 1;
                     continue;
                 }
                 Statement::Imagemap { hotspots, .. } if hotspots.is_empty() => {
+                    self.consume_step(&mut remaining)?;
                     self.state.pc += 1;
                     continue;
                 }
@@ -989,6 +1426,9 @@ impl<R: Renderer> Engine<R> {
 
     /// Retourne l'interaction actuellement pointée par le PC, sans modifier l'état.
     pub fn current_interaction(&self) -> Result<Option<Interaction>, RuntimeError> {
+        if self.state.videos.waiting.is_some() {
+            return Ok(None);
+        }
         let Some(stmt) = self.script.get(self.state.pc) else {
             return Ok(None);
         };
@@ -1032,6 +1472,7 @@ impl<R: Renderer> Engine<R> {
                 Some(
                     self.resolve_recorded_dialogue(&crate::types::DialogueSnapshot {
                         pc: entry.state.pc,
+                        random: entry.state.display_random,
                         vars: entry
                             .state
                             .last_dialogue
@@ -1072,15 +1513,20 @@ impl<R: Renderer> Engine<R> {
                 Err(_) => return Ok((character_id.clone(), translated.to_owned())),
             }
         };
-        eval_interpolated(&template, &snapshot.vars)
+        self.functions
+            .interpolate_with_random(&template, &snapshot.vars, &mut snapshot.random.clone())
             .map(|text| (character_id.clone(), text))
             .map_err(|e| self.eval_err(e, "History translation"))
     }
 
     /// Valide un dialogue affiché et avance au statement suivant.
     pub fn advance_dialogue(&mut self) -> Result<(), RuntimeError> {
+        if self.state.videos.waiting.is_some() {
+            return Ok(());
+        }
         match self.script.get(self.state.pc) {
             Some(Statement::Dialogue { .. }) => {
+                self.state.display_random_pc = None;
                 self.state.pc += 1;
                 Ok(())
             }
@@ -1090,12 +1536,16 @@ impl<R: Renderer> Engine<R> {
 
     /// Soumet un choix utilisateur au moteur.
     pub fn submit_choice(&mut self, selected: usize) -> Result<(), RuntimeError> {
+        if self.state.videos.waiting.is_some() {
+            return Ok(());
+        }
         let Some(stmt) = self.script.get(self.state.pc).cloned() else {
             return Ok(());
         };
         let Statement::Choice { options } = stmt else {
             return Ok(());
         };
+        self.state.display_random_pc = None;
 
         if options.is_empty() {
             self.state.pc += 1;
@@ -1114,12 +1564,16 @@ impl<R: Renderer> Engine<R> {
 
     /// Soumet un hotspot d'imagemap au moteur.
     pub fn submit_hotspot(&mut self, selected: usize) -> Result<(), RuntimeError> {
+        if self.state.videos.waiting.is_some() {
+            return Ok(());
+        }
         let Some(stmt) = self.script.get(self.state.pc).cloned() else {
             return Ok(());
         };
         let Statement::Imagemap { hotspots, .. } = stmt else {
             return Ok(());
         };
+        self.state.display_random_pc = None;
 
         if hotspots.is_empty() {
             self.state.pc += 1;
@@ -1158,14 +1612,167 @@ impl<R: Renderer> Engine<R> {
 
     pub fn load(&mut self, manager: &SaveManager, slot: u32) -> Result<(), crate::save::SaveError> {
         let data = manager.load(slot)?;
-        self.load_data(data);
+        self.load_data(data)?;
         Ok(())
     }
 
-    pub fn load_data(&mut self, data: SaveData) {
-        self.state = data.into_game_state();
-        self.history.clear();
+    pub fn load_data(
+        &mut self,
+        data: SaveData,
+    ) -> Result<LoadCompatibility, crate::save::SaveError> {
+        use crate::save::SaveError;
+        if !(1..=crate::save::SAVE_FORMAT_VERSION).contains(&data.format_version) {
+            return Err(SaveError::Incompatible(
+                "version du format non prise en charge".into(),
+            ));
+        }
+        let identity = story_identity(&self.script);
+        let compatibility = match &data.story_identity {
+            Some(saved) if saved == &identity => LoadCompatibility::Verified,
+            Some(_) => return Err(SaveError::Incompatible("l’histoire a changé depuis cette sauvegarde ; aucune donnée de la partie actuelle n’a été remplacée".into())),
+            None => LoadCompatibility::LegacyUnchecked,
+        };
+        if data.pc > self.script.len()
+            || data.call_stack.len() > 128
+            || data.call_stack.iter().any(|pc| *pc > self.script.len())
+            || data
+                .display_random_pc
+                .is_some_and(|pc| pc >= self.script.len())
+            || data.last_dialogue.as_ref().is_some_and(|snapshot| {
+                !matches!(
+                    self.script.get(snapshot.pc),
+                    Some(Statement::Dialogue { .. })
+                )
+            })
+        {
+            return Err(SaveError::Incompatible(
+                "position narrative ou pile d’appels invalide".into(),
+            ));
+        }
+        let mut next = data.into_game_state();
+        next.accessibility
+            .validate()
+            .map_err(SaveError::Incompatible)?;
+        let mut saved_work = 0usize;
+        if next.vars.len() > 4096 {
+            return Err(SaveError::Incompatible(
+                "plus de 4 096 variables sauvegardées".into(),
+            ));
+        }
+        for value in next.vars.values() {
+            saved_work = saved_work
+                .checked_add(
+                    crate::value_limits::value_work(value)
+                        .map_err(|error| SaveError::Incompatible(error.to_string()))?,
+                )
+                .ok_or_else(|| {
+                    SaveError::Incompatible("données de sauvegarde trop grandes".into())
+                })?;
+            if saved_work > 1_000_000 {
+                return Err(SaveError::Incompatible(
+                    "données de sauvegarde trop grandes".into(),
+                ));
+            }
+        }
+        next.story_identity = Some(identity);
+        self.ui_library
+            .reconcile_canvas_states(&mut next.ui, &self.functions, &next.vars)
+            .map_err(|error| SaveError::Incompatible(error.to_string()))?;
+        let views = self
+            .describe_interfaces(&next)
+            .map_err(|error| SaveError::Incompatible(error.to_string()))?;
+        self.validate_canvas_renderer(&views)
+            .map_err(|error| SaveError::Incompatible(error.to_string()))?;
+        let motions = self
+            .describe_motions(&next)
+            .map_err(|error| SaveError::Incompatible(error.to_string()))?;
+        let layered = self
+            .describe_layered_characters(&next)
+            .map_err(|error| SaveError::Incompatible(error.to_string()))?;
+        let epoch = self
+            .next_video_epoch()
+            .map_err(|error| SaveError::Incompatible(error.to_string()))?;
+        let videos = self
+            .describe_videos(&next, epoch)
+            .map_err(|error| SaveError::Incompatible(error.to_string()))?;
+        if let Some(waiting) = &next.videos.waiting {
+            if !next.videos.tracks[waiting].clip.cinematic
+                && !next
+                    .pc
+                    .checked_sub(1)
+                    .and_then(|pc| self.script.get(pc))
+                    .is_some_and(|statement| matches!(statement, Statement::VideoWait { .. }))
+            {
+                return Err(SaveError::Incompatible(
+                    "Video wait does not match the saved narrative position".into(),
+                ));
+            }
+        }
+        if next.motions.waiting.is_some()
+            && !matches!(self.script.get(next.pc), Some(Statement::MotionWait { .. }))
+        {
+            return Err(SaveError::Incompatible(
+                "Animation wait does not match the saved narrative position".into(),
+            ));
+        }
+        for track in next.motions.tracks.values() {
+            if !self
+                .motion_target_exists(&track.target, &next)
+                .map_err(|error| SaveError::Incompatible(error.to_string()))?
+            {
+                return Err(SaveError::Incompatible(
+                    "Saved animation target no longer exists".into(),
+                ));
+            }
+        }
+        if !views.is_empty() && !self.renderer.supports_programmable_ui() {
+            return Err(SaveError::Incompatible(
+                "le moteur de rendu ne prend pas en charge les interfaces de cette sauvegarde"
+                    .into(),
+            ));
+        }
+        let previous = std::mem::replace(&mut self.state, next);
+        let interaction = match self.current_interaction() {
+            Ok(interaction) => interaction,
+            Err(error) => {
+                self.state = previous;
+                return Err(SaveError::Incompatible(error.to_string()));
+            }
+        };
         self.renderer.restore_screen(&self.state);
+        self.video_epoch = epoch;
+        if let Err(error) = self
+            .renderer
+            .update_interfaces(&views)
+            .and_then(|_| self.renderer.update_layered_characters(&layered))
+            .and_then(|_| self.renderer.update_motions(&motions))
+            .and_then(|_| self.renderer.update_videos(&videos))
+            .and_then(|_| {
+                self.renderer
+                    .update_accessibility(&self.state.accessibility)
+            })
+        {
+            self.state = previous;
+            self.renderer.restore_screen(&self.state);
+            if let Ok(previous_views) = self.interface_views() {
+                let _ = self.renderer.update_interfaces(&previous_views);
+            }
+            let _ = self.refresh_motions();
+            let _ = self.refresh_layered_characters();
+            if let Ok(views) = self.video_views() {
+                let _ = self.renderer.update_videos(&views);
+            }
+            let _ = self
+                .renderer
+                .update_accessibility(&self.state.accessibility);
+            return Err(SaveError::Incompatible(error));
+        }
+        if self.renderer.supports_accessibility() {
+            let _ = self
+                .renderer
+                .accessibility_speech(&rvn_ui::accessibility::SpeechRequest::Stop);
+        }
+        self.history.clear();
         if matches!(
             self.current_interaction(),
             Ok(Some(Interaction::Choice { .. }))
@@ -1174,16 +1781,1071 @@ impl<R: Renderer> Engine<R> {
                 self.render_interaction(dialogue);
             }
         }
-        if let Ok(Some(interaction)) = self.current_interaction() {
+        if let Some(interaction) = interaction {
             self.render_interaction(interaction);
         }
+        self.renderer.loaded_compatibility(compatibility);
+        self.interface_epoch = self.interface_epoch.wrapping_add(1);
+        Ok(compatibility)
     }
 
     pub fn is_finished(&self) -> bool {
-        self.state.pc >= self.script.len()
+        self.state.pc >= self.script.len() && self.state.videos.waiting.is_none()
     }
     pub fn get_var(&self, name: &str) -> Option<&Value> {
         self.state.vars.get(name)
+    }
+
+    fn describe_layered_characters(
+        &self,
+        state: &GameState,
+    ) -> Result<Vec<crate::composition::LayeredView>, RuntimeError> {
+        if !state.layered.characters.is_empty() && !self.renderer.supports_layered_characters() {
+            return Err(self.eval_err(
+                EvalError::InvalidFunction(
+                    "This renderer does not support layered characters".into(),
+                ),
+                "Renderer capability: compositions",
+            ));
+        }
+        state.layered.views(&state.sprites).map_err(|message| {
+            self.eval_err(EvalError::InvalidFunction(message), "Character composition")
+        })
+    }
+    pub fn layered_character_views(
+        &self,
+    ) -> Result<Vec<crate::composition::LayeredView>, RuntimeError> {
+        self.describe_layered_characters(&self.state)
+    }
+    pub fn refresh_layered_characters(&mut self) -> Result<(), RuntimeError> {
+        let views = self.describe_layered_characters(&self.state)?;
+        self.renderer
+            .update_layered_characters(&views)
+            .map_err(|message| {
+                self.eval_err(
+                    EvalError::InvalidFunction(message),
+                    "Renderer capability: compositions",
+                )
+            })
+    }
+    fn motion_target_exists(
+        &self,
+        target: &crate::motion::MotionTarget,
+        state: &GameState,
+    ) -> Result<bool, RuntimeError> {
+        use crate::motion::MotionTarget;
+        Ok(match target {
+            MotionTarget::Background => !state.background_image.is_empty(),
+            MotionTarget::Sprite { id } => {
+                state.sprites.get(id).is_some_and(|sprite| sprite.visible)
+            }
+            MotionTarget::Layer { id, layer } => {
+                state.sprites.get(id).is_some_and(|sprite| sprite.visible)
+                    && state.layered.layer_visible(id, layer)
+            }
+            MotionTarget::Interface { screen, element } => self
+                .describe_interfaces(state)?
+                .iter()
+                .find(|view| view.name == *screen)
+                .is_some_and(|view| view.root.find(element).is_some()),
+        })
+    }
+    fn cancel_absent_motions(
+        &self,
+        state: &GameState,
+        motions: &mut crate::motion::MotionState,
+    ) -> Result<(), RuntimeError> {
+        let mut absent = Vec::new();
+        for (key, track) in &motions.tracks {
+            if !self.motion_target_exists(&track.target, state)? {
+                absent.push(key.clone());
+            }
+        }
+        for key in absent {
+            motions.tracks.remove(&key);
+        }
+        Ok(())
+    }
+    fn describe_motions(
+        &self,
+        state: &GameState,
+    ) -> Result<Vec<crate::motion::MotionView>, RuntimeError> {
+        let views = state
+            .motions
+            .views()
+            .map_err(|message| self.eval_err(EvalError::InvalidFunction(message), "Animations"))?;
+        if !views.is_empty() && !self.renderer.supports_composable_motion() {
+            return Err(self.eval_err(
+                EvalError::InvalidFunction(
+                    "This renderer does not support composable animations".into(),
+                ),
+                "Renderer capability: animations",
+            ));
+        }
+        Ok(views)
+    }
+    pub fn refresh_motions(&mut self) -> Result<(), RuntimeError> {
+        let views = self.describe_motions(&self.state)?;
+        self.renderer.update_motions(&views).map_err(|message| {
+            self.eval_err(
+                EvalError::InvalidFunction(message),
+                "Renderer capability: animations",
+            )
+        })
+    }
+    /// Advance clocks without advancing dialogue or adding rollback frames.
+    /// Menu pause is owned by the host: it simply does not tick game time.
+    pub fn tick_motions(&mut self, seconds: f64) -> Result<(), RuntimeError> {
+        if !seconds.is_finite() || !(0.0..=3600.0).contains(&seconds) {
+            return Err(self.eval_err(
+                EvalError::InvalidFunction(
+                    "Animation delta must be finite and between 0 and 3600 seconds".into(),
+                ),
+                "Animation clock",
+            ));
+        }
+        if self.state.motions.tracks.is_empty() && self.state.motions.waiting.is_none() {
+            return Ok(());
+        }
+        let mut candidate = self.state.motions.clone();
+        self.cancel_absent_motions(&self.state, &mut candidate)?;
+        candidate.tick(seconds).map_err(|message| {
+            self.eval_err(EvalError::InvalidFunction(message), "Animation clock")
+        })?;
+        let mut pc = self.state.pc;
+        if candidate
+            .waiting
+            .as_ref()
+            .is_some_and(|key| candidate.tracks.get(key).is_none_or(|track| !track.running))
+        {
+            if !matches!(self.script.get(pc), Some(Statement::MotionWait { .. })) {
+                return Err(self.eval_err(
+                    EvalError::InvalidFunction(
+                        "Animation wait does not match the narrative position".into(),
+                    ),
+                    "Animation clock",
+                ));
+            }
+            candidate.waiting = None;
+            pc += 1;
+        }
+        let views = candidate
+            .views()
+            .map_err(|message| self.eval_err(EvalError::InvalidFunction(message), "Animations"))?;
+        self.renderer.update_motions(&views).map_err(|message| {
+            self.eval_err(
+                EvalError::InvalidFunction(message),
+                "Renderer capability: animations",
+            )
+        })?;
+        self.state.motions = candidate;
+        self.state.pc = pc;
+        Ok(())
+    }
+
+    pub fn interface_views(&self) -> Result<Vec<rvn_ui::programmable::ScreenView>, RuntimeError> {
+        self.describe_interfaces(&self.state)
+    }
+
+    fn describe_interfaces(
+        &self,
+        state: &GameState,
+    ) -> Result<Vec<rvn_ui::programmable::ScreenView>, RuntimeError> {
+        let mut views = self
+            .ui_library
+            .views(&state.ui, &self.functions, &state.vars)
+            .map_err(|error| self.eval_err(error, "Interface"))?;
+        for view in &mut views {
+            let mut random = state
+                .ui
+                .screens
+                .iter()
+                .find(|screen| screen.name == view.name)
+                .unwrap()
+                .random;
+            let mut problem = None;
+            view.root.visit_mut(&mut |component| {
+                let mut translate = |key: &Option<String>, text: &mut String| {
+                    let Some(key) = key else { return };
+                    let translated = self.translate(key);
+                    let source = if translated == key {
+                        text.as_str()
+                    } else {
+                        translated
+                    };
+                    match rvn_parser::parse_interpolated_str(source)
+                        .map_err(|error| EvalError::InvalidFunction(error.to_string()))
+                        .and_then(|template| {
+                            self.functions.interpolate_with_random(
+                                &template,
+                                &state.vars,
+                                &mut random,
+                            )
+                        }) {
+                        Ok(value) if value.len() <= 65_536 => *text = value,
+                        Ok(_) => {
+                            problem = Some(EvalError::InvalidFunction(
+                                "localized interface text is too long".into(),
+                            ))
+                        }
+                        Err(error) => problem = Some(error),
+                    }
+                };
+                translate(&component.text_key, &mut component.text);
+                translate(&component.placeholder_key, &mut component.placeholder);
+                if component.accessible_label_key.is_some() {
+                    translate(
+                        &component.accessible_label_key,
+                        component.accessible_label.get_or_insert_with(String::new),
+                    );
+                }
+                if !component.option_keys.is_empty() {
+                    if component.option_labels.is_empty() {
+                        component.option_labels = component.options.clone();
+                    }
+                    for (key, label) in component
+                        .option_keys
+                        .iter()
+                        .zip(&mut component.option_labels)
+                    {
+                        translate(&Some(key.clone()), label);
+                    }
+                }
+            });
+            if let Some(error) = problem {
+                return Err(self.eval_err(error, "Interface translation"));
+            }
+        }
+        Ok(views)
+    }
+
+    /// Refresh translated screen text without changing gameplay or RNG.
+    pub fn refresh_interfaces(&mut self) -> Result<(), RuntimeError> {
+        let views = self.interface_views()?;
+        self.validate_canvas_renderer(&views)?;
+        self.renderer.update_interfaces(&views).map_err(|error| {
+            self.eval_err(
+                EvalError::InvalidFunction(error),
+                "Renderer capability: interfaces",
+            )
+        })
+    }
+
+    pub fn interface_epoch(&self) -> u64 {
+        self.interface_epoch
+    }
+
+    fn validate_canvas_renderer(
+        &self,
+        views: &[rvn_ui::programmable::ScreenView],
+    ) -> Result<(), RuntimeError> {
+        let mut canvas = false;
+        for view in views {
+            view.root.visit(&mut |component| {
+                canvas |= component.kind == rvn_ui::programmable::ComponentKind::Canvas
+            });
+        }
+        if canvas && !self.renderer.supports_custom_canvas() {
+            return Err(self.eval_err(
+                EvalError::InvalidFunction(
+                    "This renderer does not support programmable canvas drawing".into(),
+                ),
+                "Renderer capability: custom canvas",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn interface_is_modal(&self) -> bool {
+        self.state.ui.screens.iter().any(|screen| screen.modal)
+    }
+
+    fn describe_videos(
+        &self,
+        state: &GameState,
+        epoch: u64,
+    ) -> Result<Vec<crate::video::VideoView>, RuntimeError> {
+        state
+            .videos
+            .validate()
+            .map_err(|message| self.eval_err(EvalError::InvalidFunction(message), "Video state"))?;
+        if !state.videos.tracks.is_empty() && !self.renderer.supports_video() {
+            return Err(self.eval_err(
+                EvalError::InvalidFunction("This renderer does not support video playback".into()),
+                "Renderer capability: video",
+            ));
+        }
+        let interfaces = self.describe_interfaces(state)?;
+        state
+            .videos
+            .tracks
+            .iter()
+            .map(|(id, track)| {
+                for handler in [&track.clip.on_end, &track.clip.on_error]
+                    .into_iter()
+                    .flatten()
+                {
+                    if !self.ui_library.has_handler(handler) {
+                        return Err(self.eval_err(
+                            EvalError::InvalidFunction(format!(
+                                "Unknown video event handler '{handler}'"
+                            )),
+                            "Video event",
+                        ));
+                    }
+                }
+                if let Some(target) = &track.clip.target {
+                    let (screen, element) =
+                        target.strip_prefix("ui:").unwrap().split_once('/').unwrap();
+                    if !interfaces
+                        .iter()
+                        .any(|view| view.name == screen && view.root.find(element).is_some())
+                    {
+                        return Err(self.eval_err(
+                            EvalError::InvalidFunction(format!(
+                                "Video interface target is absent: {target}"
+                            )),
+                            "Video target",
+                        ));
+                    }
+                }
+                let subtitle = track
+                    .clip
+                    .subtitle(track.position)
+                    .map(|cue| self.translate(&cue.text).to_string());
+                Ok(crate::video::VideoView {
+                    id: id.clone(),
+                    epoch,
+                    track: track.clone(),
+                    subtitle,
+                })
+            })
+            .collect()
+    }
+    pub fn video_views(&self) -> Result<Vec<crate::video::VideoView>, RuntimeError> {
+        self.describe_videos(&self.state, self.video_epoch)
+    }
+    /// Host controls use the same transactional path as RVN event handlers.
+    pub fn skip_video(&mut self, id: &str) -> Result<(), RuntimeError> {
+        let mut next = self.state.clone();
+        self.apply_ui_commands(
+            &mut next,
+            vec![crate::eval::UiCommand::VideoSkip { name: id.into() }],
+        )?;
+        self.commit_ui_state(next)
+    }
+    pub fn resume_video(&mut self, id: &str) -> Result<(), RuntimeError> {
+        let mut next = self.state.clone();
+        self.apply_ui_commands(
+            &mut next,
+            vec![crate::eval::UiCommand::VideoResume { name: id.into() }],
+        )?;
+        self.commit_ui_state(next)
+    }
+    fn next_video_epoch(&self) -> Result<u64, RuntimeError> {
+        self.video_epoch
+            .checked_add(1)
+            .ok_or_else(|| self.eval_err(EvalError::NumericOverflow, "Video playback epoch"))
+    }
+    fn video_handler(
+        &self,
+        next: &mut GameState,
+        id: &str,
+        handler: &str,
+    ) -> Result<Vec<crate::eval::UiCommand>, RuntimeError> {
+        let track = &next.videos.tracks[id];
+        let event = Value::Dict(std::collections::BTreeMap::from([
+            ("video".into(), Value::Str(id.into())),
+            (
+                "kind".into(),
+                Value::Str(
+                    if track.playback == crate::video::Playback::Ended {
+                        "end"
+                    } else {
+                        "error"
+                    }
+                    .into(),
+                ),
+            ),
+            ("position".into(), Value::Float(track.position as f32)),
+            (
+                "message".into(),
+                Value::Str(track.message.clone().unwrap_or_default()),
+            ),
+        ]));
+        let (variables, commands) = self
+            .ui_library
+            .media_event(
+                handler,
+                event,
+                &self.functions,
+                &next.vars,
+                &mut next.random,
+            )
+            .map_err(|error| self.eval_err(error, "Video event handler"))?;
+        next.vars = variables;
+        Ok(commands)
+    }
+    /// Position reports don't add history frames or request a new seek. Other
+    /// feedback is transactional and invalidates old callbacks on completion.
+    pub fn video_feedback(
+        &mut self,
+        epoch: u64,
+        id: &str,
+        feedback: crate::video::Feedback,
+    ) -> Result<bool, RuntimeError> {
+        if epoch != self.video_epoch || !self.state.videos.tracks.contains_key(id) {
+            return Ok(false);
+        }
+        let position = matches!(feedback, crate::video::Feedback::Position { .. });
+        let mut next = self.state.clone();
+        let handler = next.videos.feedback(id, feedback).map_err(|message| {
+            self.eval_err(
+                EvalError::InvalidFunction(message),
+                "Video renderer feedback",
+            )
+        })?;
+        if position {
+            self.state.videos = next.videos;
+            return Ok(true);
+        }
+        if let Some(handler) = handler {
+            let commands = self.video_handler(&mut next, id, &handler)?;
+            self.apply_ui_commands(&mut next, commands)?;
+        }
+        self.commit_ui_state(next)?;
+        Ok(true)
+    }
+
+    fn apply_ui_commands(
+        &self,
+        next: &mut GameState,
+        commands: Vec<crate::eval::UiCommand>,
+    ) -> Result<(), RuntimeError> {
+        self.apply_ui_commands_budgeted(next, commands, &mut crate::ui::CanvasBudget::default())
+    }
+
+    fn apply_ui_commands_budgeted(
+        &self,
+        next: &mut GameState,
+        commands: Vec<crate::eval::UiCommand>,
+        budget: &mut crate::ui::CanvasBudget,
+    ) -> Result<(), RuntimeError> {
+        let mut queue: std::collections::VecDeque<_> = commands.into();
+        let mut count = 0;
+        while let Some(command) = queue.pop_front() {
+            count += 1;
+            if count > 128 {
+                return Err(self.eval_err(
+                    EvalError::ExecutionLimit {
+                        limit: "128 commandes d’interface et événements de cycle de vie",
+                    },
+                    "Interface",
+                ));
+            }
+            match &command {
+                crate::eval::UiCommand::AccessibilityConfigure { settings } => {
+                    if !self.renderer.supports_accessibility() {
+                        return Err(self.eval_err(
+                            EvalError::InvalidFunction(
+                                "This renderer does not support accessibility".into(),
+                            ),
+                            "Renderer capability: accessibility",
+                        ));
+                    }
+                    next.accessibility = settings.clone();
+                    continue;
+                }
+                crate::eval::UiCommand::AccessibilitySpeak { text } => {
+                    if !self.renderer.supports_accessibility() {
+                        return Err(self.eval_err(
+                            EvalError::InvalidFunction(
+                                "This renderer does not support speech synthesis".into(),
+                            ),
+                            "Renderer capability: accessibility",
+                        ));
+                    }
+                    let spoken = self.translate(text).to_owned();
+                    rvn_ui::accessibility::validate_speech(&spoken).map_err(|message| {
+                        self.eval_err(EvalError::InvalidFunction(message), "Speech synthesis")
+                    })?;
+                    next.speech_requests
+                        .push(rvn_ui::accessibility::SpeechRequest::Speak(spoken));
+                    continue;
+                }
+                crate::eval::UiCommand::AccessibilityStop => {
+                    if !self.renderer.supports_accessibility() {
+                        return Err(self.eval_err(
+                            EvalError::InvalidFunction(
+                                "This renderer does not support speech synthesis".into(),
+                            ),
+                            "Renderer capability: accessibility",
+                        ));
+                    }
+                    next.speech_requests
+                        .push(rvn_ui::accessibility::SpeechRequest::Stop);
+                    continue;
+                }
+                crate::eval::UiCommand::VideoPlay { name, definition } => {
+                    if !self.renderer.supports_video() {
+                        return Err(self.eval_err(
+                            EvalError::InvalidFunction(
+                                "This renderer does not support video playback".into(),
+                            ),
+                            "Renderer capability: video",
+                        ));
+                    }
+                    next.videos
+                        .play(name.clone(), definition.clone())
+                        .map_err(|message| {
+                            self.eval_err(EvalError::InvalidFunction(message), "Video play")
+                        })?;
+                    if let Some(target) = &definition.target {
+                        let (screen, element) =
+                            target.strip_prefix("ui:").unwrap().split_once('/').unwrap();
+                        if !self
+                            .describe_interfaces(next)?
+                            .iter()
+                            .any(|view| view.name == screen && view.root.find(element).is_some())
+                        {
+                            return Err(self.eval_err(
+                                EvalError::InvalidFunction(format!(
+                                    "Video interface target is absent: {target}"
+                                )),
+                                "Video play",
+                            ));
+                        }
+                    }
+                    if definition.cinematic {
+                        next.videos.wait(name).map_err(|message| {
+                            self.eval_err(EvalError::InvalidFunction(message), "Video cinematic")
+                        })?;
+                    }
+                    continue;
+                }
+                crate::eval::UiCommand::VideoPause { name } => {
+                    next.videos.pause(name).map_err(|message| {
+                        self.eval_err(EvalError::InvalidFunction(message), "Video pause")
+                    })?;
+                    continue;
+                }
+                crate::eval::UiCommand::VideoResume { name } => {
+                    next.videos.resume(name).map_err(|message| {
+                        self.eval_err(EvalError::InvalidFunction(message), "Video resume")
+                    })?;
+                    continue;
+                }
+                crate::eval::UiCommand::VideoStop { name } => {
+                    next.videos.stop(name);
+                    continue;
+                }
+                crate::eval::UiCommand::VideoSeek { name, seconds } => {
+                    next.videos.seek(name, *seconds).map_err(|message| {
+                        self.eval_err(EvalError::InvalidFunction(message), "Video seek")
+                    })?;
+                    continue;
+                }
+                crate::eval::UiCommand::VideoVolume { name, volume } => {
+                    next.videos.volume(name, *volume).map_err(|message| {
+                        self.eval_err(EvalError::InvalidFunction(message), "Video volume")
+                    })?;
+                    continue;
+                }
+                crate::eval::UiCommand::VideoSkip { name } => {
+                    if !next
+                        .videos
+                        .tracks
+                        .get(name)
+                        .is_some_and(|track| track.clip.skippable)
+                    {
+                        return Err(self.eval_err(
+                            EvalError::InvalidFunction("Skipping this video is not allowed".into()),
+                            "Video skip",
+                        ));
+                    }
+                    if let Some(handler) = next
+                        .videos
+                        .feedback(name, crate::video::Feedback::End)
+                        .map_err(|message| {
+                        self.eval_err(EvalError::InvalidFunction(message), "Video skip")
+                    })? {
+                        queue.extend(self.video_handler(next, name, &handler)?);
+                    }
+                    continue;
+                }
+                crate::eval::UiCommand::CharacterCompose {
+                    character,
+                    definition,
+                } => {
+                    if !self.renderer.supports_layered_characters() {
+                        return Err(self.eval_err(
+                            EvalError::InvalidFunction(
+                                "This renderer does not support layered characters".into(),
+                            ),
+                            "Renderer capability: compositions",
+                        ));
+                    }
+                    let selected = crate::composition::resolve_attributes(
+                        definition,
+                        &rvn_ui::composition::Attributes::new(),
+                        &definition.defaults,
+                        &self.functions,
+                        &next.vars,
+                        &mut next.random,
+                    )
+                    .map_err(|error| self.eval_err(error, "Character attribute selector"))?;
+                    next.layered
+                        .compose(character.clone(), definition.clone())
+                        .map_err(|message| {
+                            self.eval_err(
+                                EvalError::InvalidFunction(message),
+                                "Character composition",
+                            )
+                        })?;
+                    next.layered
+                        .characters
+                        .get_mut(character)
+                        .unwrap()
+                        .attributes = selected;
+                    // A replaced composition has a new authored baseline.
+                    next.motions.tracks.retain(|_,track|!matches!(&track.target,crate::motion::MotionTarget::Sprite{id}|crate::motion::MotionTarget::Layer{id,..} if id==character));
+                    continue;
+                }
+                crate::eval::UiCommand::CharacterAttributes {
+                    character,
+                    attributes,
+                } => {
+                    let composed = next.layered.characters.get(character).ok_or_else(|| {
+                        self.eval_err(
+                            EvalError::InvalidFunction(format!(
+                                "Character '{character}' has no composition"
+                            )),
+                            "Character attributes",
+                        )
+                    })?;
+                    let selected = crate::composition::resolve_attributes(
+                        &composed.definition,
+                        &composed.attributes,
+                        attributes,
+                        &self.functions,
+                        &next.vars,
+                        &mut next.random,
+                    )
+                    .map_err(|error| self.eval_err(error, "Character attribute selector"))?;
+                    next.layered
+                        .characters
+                        .get_mut(character)
+                        .unwrap()
+                        .attributes = selected;
+                    continue;
+                }
+                crate::eval::UiCommand::MotionPlay { target, definition } => {
+                    if !self.motion_target_exists(target, next)? {
+                        return Err(self.eval_err(
+                            EvalError::InvalidFunction(format!(
+                                "Animation target is absent: {}",
+                                target.key()
+                            )),
+                            "Motion play",
+                        ));
+                    }
+                    if definition
+                        .validate()
+                        .map_err(|message| {
+                            self.eval_err(EvalError::InvalidFunction(message), "Motion play")
+                        })?
+                        .channels
+                        & (1 << 12)
+                        != 0
+                    {
+                        if let crate::motion::MotionTarget::Sprite { id } = target {
+                            if next.layered.characters.contains_key(id) {
+                                return Err(self.eval_err(EvalError::InvalidFunction("Frame animations on a composition must target a named layer, not the entire character".into()),"Motion play"));
+                            }
+                        }
+                        if let crate::motion::MotionTarget::Interface { screen, element } = target {
+                            let image = self
+                                .describe_interfaces(next)?
+                                .iter()
+                                .find(|view| view.name == *screen)
+                                .and_then(|view| view.root.find(element))
+                                .is_some_and(|component| {
+                                    component.kind == rvn_ui::programmable::ComponentKind::Image
+                                });
+                            if !image {
+                                return Err(self.eval_err(
+                                    EvalError::InvalidFunction(
+                                        "Frame animations require an Image interface component"
+                                            .into(),
+                                    ),
+                                    "Motion play",
+                                ));
+                            }
+                        }
+                    }
+                    next.motions
+                        .play(target.clone(), definition.clone())
+                        .map_err(|message| {
+                            self.eval_err(EvalError::InvalidFunction(message), "Motion play")
+                        })?;
+                    continue;
+                }
+                crate::eval::UiCommand::MotionStop { target } => {
+                    next.motions.tracks.remove(&target.key());
+                    continue;
+                }
+                _ => {}
+            }
+            let event = self
+                .ui_library
+                .command(
+                    &mut next.ui,
+                    command,
+                    &self.functions,
+                    &next.vars,
+                    &mut next.random,
+                )
+                .map_err(|error| self.eval_err(error, "Interface"))?;
+            if let Some((event, component)) = event {
+                queue.extend(
+                    self.ui_library
+                        .event_budgeted(
+                            &mut next.ui,
+                            &mut next.vars,
+                            &event,
+                            &component,
+                            &self.functions,
+                            &mut next.random,
+                            budget,
+                        )
+                        .map_err(|error| self.eval_err(error, "Interface event"))?,
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn commit_ui_state(&mut self, mut next: GameState) -> Result<(), RuntimeError> {
+        self.ui_library
+            .reconcile_canvas_states(&mut next.ui, &self.functions, &next.vars)
+            .map_err(|error| self.eval_err(error, "Canvas instance state"))?;
+        let views = self.describe_interfaces(&next)?;
+        self.validate_canvas_renderer(&views)?;
+        if !views.is_empty() && !self.renderer.supports_programmable_ui() {
+            return Err(self.eval_err(
+                EvalError::InvalidFunction(
+                    "ce moteur de rendu ne prend pas en charge les interfaces programmables".into(),
+                ),
+                "Renderer capability: interfaces",
+            ));
+        }
+        for view in &views {
+            if let Some(screen) = next
+                .ui
+                .screens
+                .iter_mut()
+                .find(|screen| screen.name == view.name)
+            {
+                screen.focus = view.focus.clone();
+            }
+        }
+        let mut next_motions = std::mem::take(&mut next.motions);
+        self.cancel_absent_motions(&next, &mut next_motions)?;
+        next.motions = next_motions;
+        let motions = self.describe_motions(&next)?;
+        let layered = self.describe_layered_characters(&next)?;
+        // Closing an interface also closes its embedded players and sound.
+        next.videos
+            .validate()
+            .map_err(|error| self.eval_err(EvalError::InvalidFunction(error), "Video state"))?;
+        next.videos.tracks.retain(|_, track| {
+            track.clip.target.as_ref().is_none_or(|target| {
+                let (screen, element) =
+                    target.strip_prefix("ui:").unwrap().split_once('/').unwrap();
+                views
+                    .iter()
+                    .any(|view| view.name == screen && view.root.find(element).is_some())
+            })
+        });
+        if next
+            .videos
+            .waiting
+            .as_ref()
+            .is_some_and(|id| !next.videos.tracks.contains_key(id))
+        {
+            next.videos.waiting = None;
+        }
+        let epoch = if next.videos != self.state.videos {
+            self.next_video_epoch()?
+        } else {
+            self.video_epoch
+        };
+        let videos = self.describe_videos(&next, epoch)?;
+        let previous_views = self.describe_interfaces(&self.state)?;
+        let previous_motions = self.describe_motions(&self.state)?;
+        let previous_layered = self.describe_layered_characters(&self.state)?;
+        let previous_videos = self.video_views()?;
+        next.accessibility.validate().map_err(|message| {
+            self.eval_err(
+                EvalError::InvalidFunction(message),
+                "Accessibility settings",
+            )
+        })?;
+        for request in &next.speech_requests {
+            self.renderer
+                .validate_accessibility_speech(request)
+                .map_err(|message| {
+                    self.eval_err(EvalError::InvalidFunction(message), "Speech synthesis")
+                })?;
+        }
+        if let Err(problem) = self
+            .renderer
+            .update_interfaces(&views)
+            .and_then(|_| self.renderer.update_layered_characters(&layered))
+            .and_then(|_| self.renderer.update_motions(&motions))
+            .and_then(|_| self.renderer.update_videos(&videos))
+            .and_then(|_| self.renderer.update_accessibility(&next.accessibility))
+        {
+            let _ = self.renderer.update_interfaces(&previous_views);
+            let _ = self.renderer.update_motions(&previous_motions);
+            let _ = self.renderer.update_layered_characters(&previous_layered);
+            let _ = self.renderer.update_videos(&previous_videos);
+            let _ = self
+                .renderer
+                .update_accessibility(&self.state.accessibility);
+            return Err(self.eval_err(
+                EvalError::InvalidFunction(problem),
+                "Renderer capability: interfaces/animations",
+            ));
+        }
+        // Speech is emitted only after all state and renderer validations pass.
+        // No transient request enters a save or a history snapshot.
+        for request in std::mem::take(&mut next.speech_requests) {
+            if let Err(problem) = self.renderer.accessibility_speech(&request) {
+                let _ = self
+                    .renderer
+                    .accessibility_speech(&rvn_ui::accessibility::SpeechRequest::Stop);
+                let _ = self.renderer.update_interfaces(&previous_views);
+                let _ = self.renderer.update_layered_characters(&previous_layered);
+                let _ = self.renderer.update_motions(&previous_motions);
+                let _ = self.renderer.update_videos(&previous_videos);
+                let _ = self
+                    .renderer
+                    .update_accessibility(&self.state.accessibility);
+                return Err(self.eval_err(EvalError::InvalidFunction(problem), "Speech synthesis"));
+            }
+        }
+        self.state = next;
+        self.video_epoch = epoch;
+        Ok(())
+    }
+
+    /// A failed event leaves variables, focus, controls and RNG untouched.
+    pub fn interface_event(&mut self, event: crate::ui::UiInput) -> Result<(), RuntimeError> {
+        use rvn_ui::programmable::ScreenEventKind;
+        if event.screen.len() > 128
+            || event.element.len() > 128
+            || event.key.as_ref().is_some_and(|key| key.len() > 256)
+        {
+            return Err(self.eval_err(
+                EvalError::InvalidFunction("événement d’interface trop volumineux".into()),
+                "Interface event",
+            ));
+        }
+        if let Some(value) = &event.value {
+            crate::value_limits::value_work(value)
+                .map_err(|error| self.eval_err(error, "Interface event"))?;
+        }
+        if matches!(
+            event.kind,
+            ScreenEventKind::Open | ScreenEventKind::Close | ScreenEventKind::Tick
+        ) {
+            return Err(self.eval_err(
+                EvalError::InvalidFunction(
+                    "événement interne de cycle de vie ou simulation".into(),
+                ),
+                "Interface event",
+            ));
+        }
+        let views = self.interface_views()?;
+        let view = views
+            .iter()
+            .find(|view| view.name == event.screen)
+            .ok_or_else(|| {
+                self.eval_err(
+                    EvalError::InvalidFunction(format!("écran fermé : {}", event.screen)),
+                    "Interface event",
+                )
+            })?;
+        if event.kind != ScreenEventKind::PointerCancel
+            && views
+                .iter()
+                .rev()
+                .find(|screen| screen.modal)
+                .is_some_and(|modal| (view.layer, view.order) < (modal.layer, modal.order))
+        {
+            return Err(self.eval_err(
+                EvalError::InvalidFunction("interface masquée par un écran modal".into()),
+                "Interface event",
+            ));
+        }
+        let component = view.root.find(&event.element).ok_or_else(|| {
+            self.eval_err(
+                EvalError::InvalidFunction(format!("élément inconnu : {}", event.element)),
+                "Interface event",
+            )
+        })?;
+        if event.kind != ScreenEventKind::PointerCancel && !view.root.available(&event.element) {
+            return Err(self.eval_err(
+                EvalError::InvalidFunction("élément masqué ou désactivé".into()),
+                "Interface event",
+            ));
+        }
+        let mut next = self.state.clone();
+        let mut budget = crate::ui::CanvasBudget::default();
+        let commands = self
+            .ui_library
+            .event_budgeted(
+                &mut next.ui,
+                &mut next.vars,
+                &event,
+                component,
+                &self.functions,
+                &mut next.random,
+                &mut budget,
+            )
+            .map_err(|error| self.eval_err(error, "Interface event"))?;
+        self.apply_ui_commands_budgeted(&mut next, commands, &mut budget)?;
+        let previous = self.state.clone();
+        self.commit_ui_state(next)?;
+        // Focus and unhandled key/click events do not consume rollback steps.
+        // A focus handler can still change gameplay: preserve that transition.
+        let mut before_ui = previous.ui.clone();
+        let mut after_ui = self.state.ui.clone();
+        for screen in &mut before_ui.screens {
+            screen.focus = None;
+        }
+        for screen in &mut after_ui.screens {
+            screen.focus = None;
+        }
+        if previous.vars != self.state.vars
+            || previous.random != self.state.random
+            || before_ui != after_ui
+        {
+            self.history.push(previous, None);
+        }
+        Ok(())
+    }
+
+    /// The host calls this only during active game simulation, never from a
+    /// wall-clock callback while paused, unfocused or in the save/menu screen.
+    /// One frame is atomic; it adds no rollback entry of its own.
+    pub fn interface_tick(&mut self, seconds: f64) -> Result<(), RuntimeError> {
+        use rvn_ui::programmable::{ComponentKind, ScreenEventKind};
+        if !seconds.is_finite() || !(0.0..=0.25).contains(&seconds) {
+            return Err(self.eval_err(
+                EvalError::InvalidFunction(
+                    "Canvas delta must be finite and between 0 and 0.25 seconds".into(),
+                ),
+                "Canvas clock",
+            ));
+        }
+        if seconds == 0.0 || self.state.ui.screens.is_empty() {
+            return Ok(());
+        }
+        let views = self.interface_views()?;
+        let modal = views
+            .iter()
+            .rev()
+            .find(|view| view.modal)
+            .map(|view| (view.layer, view.order));
+        let mut targets = Vec::new();
+        for view in &views {
+            if modal.is_some_and(|modal| (view.layer, view.order) < modal) {
+                continue;
+            }
+            view.root.visit(&mut |component| {
+                if component.kind == ComponentKind::Canvas && view.root.available(&component.id) {
+                    targets.push((view.name.clone(), component.id.clone()));
+                }
+            });
+        }
+        if targets.is_empty() {
+            return Ok(());
+        }
+        let mut next = self.state.clone();
+        self.ui_library
+            .reconcile_canvas_states(&mut next.ui, &self.functions, &next.vars)
+            .map_err(|error| self.eval_err(error, "Canvas clock"))?;
+        let mut budget = crate::ui::CanvasBudget::default();
+        for (screen, element) in targets {
+            // A previous callback may have removed this component or placed a
+            // modal over it. Do not deliver a stale tick to a replacement.
+            let views = self.describe_interfaces(&next)?;
+            let Some(view) = views.iter().find(|view| view.name == screen) else {
+                continue;
+            };
+            if views
+                .iter()
+                .rev()
+                .find(|view| view.modal)
+                .is_some_and(|modal| (view.layer, view.order) < (modal.layer, modal.order))
+                || !view.root.available(&element)
+            {
+                continue;
+            }
+            let Some(component) = view
+                .root
+                .find(&element)
+                .filter(|component| component.kind == ComponentKind::Canvas)
+            else {
+                continue;
+            };
+            let Some(entry) = next
+                .ui
+                .screens
+                .iter_mut()
+                .find(|instance| instance.name == screen)
+                .and_then(|instance| instance.canvas_states.get_mut(&element))
+            else {
+                continue;
+            };
+            entry.elapsed += seconds;
+            if !entry.elapsed.is_finite() || entry.elapsed > 1.0e12 {
+                return Err(self.eval_err(
+                    EvalError::InvalidFunction("Canvas simulation time overflow".into()),
+                    "Canvas clock",
+                ));
+            }
+            if !component.events.contains_key(&ScreenEventKind::Tick) {
+                continue;
+            }
+            let value = Value::Dict(std::collections::BTreeMap::from([(
+                "dt".into(),
+                Value::Float(seconds as f32),
+            )]));
+            let event = crate::ui::UiInput {
+                screen: screen.clone(),
+                element,
+                kind: ScreenEventKind::Tick,
+                value: Some(value),
+                key: None,
+            };
+            let commands = self
+                .ui_library
+                .event_budgeted(
+                    &mut next.ui,
+                    &mut next.vars,
+                    &event,
+                    component,
+                    &self.functions,
+                    &mut next.random,
+                    &mut budget,
+                )
+                .map_err(|error| self.eval_err(error, "Canvas tick handler"))?;
+            self.apply_ui_commands_budgeted(&mut next, commands, &mut budget)?;
+        }
+        self.commit_ui_state(next)
     }
 
     /// Returns a merged view of regular + persistent variables for evaluation.
@@ -1249,23 +2911,38 @@ impl<R: Renderer> Engine<R> {
 
     /// Parse a timer action string ("jump label" or "call label") and execute it.
     pub fn execute_timer_action(&mut self, action: &str) -> Result<(), RuntimeError> {
-        let parts: Vec<&str> = action.splitn(2, ' ').collect();
-        if parts.len() == 2 {
-            match parts[0] {
+        let parts: Vec<&str> = action.split_whitespace().collect();
+        if let [operation, target] = parts.as_slice() {
+            match *operation {
                 "jump" => {
-                    let target = parts[1].to_string();
-                    self.state.pc = self.resolve(&target)?;
+                    self.state.pc = self.resolve(target)?;
+                    self.state.display_random_pc = None;
+                    return Ok(());
                 }
                 "call" => {
-                    let target = parts[1].to_string();
-                    let idx = self.resolve(&target)?;
+                    if self.state.call_stack.len() >= 128 {
+                        return Err(self.eval_err(
+                            EvalError::ExecutionLimit {
+                                limit: "128 appels narratifs imbriqués",
+                            },
+                            "Timer Call",
+                        ));
+                    }
+                    let idx = self.resolve(target)?;
                     self.state.call_stack.push(self.state.pc + 1);
                     self.state.pc = idx;
+                    self.state.display_random_pc = None;
+                    return Ok(());
                 }
                 _ => {}
             }
         }
-        Ok(())
+        Err(self.eval_err(
+            EvalError::InvalidFunction(format!(
+                "action de minuterie invalide : {action:?} ; utiliser jump <label> ou call <label>"
+            )),
+            "Timer",
+        ))
     }
 
     pub fn update_input_state(
@@ -1285,7 +2962,28 @@ impl<R: Renderer> Engine<R> {
     }
 
     pub fn step_silent(&mut self) -> Result<(), RuntimeError> {
+        let mut remaining = crate::eval::MAX_COMPUTATION_STEPS;
+        self.step_silent_bounded(&mut remaining)
+    }
+
+    fn consume_step(&self, remaining: &mut usize) -> Result<(), RuntimeError> {
+        if *remaining == 0 {
+            return Err(self.eval_err(
+                EvalError::ExecutionLimit {
+                    limit: "100 000 instructions sans interaction",
+                },
+                "step_silent",
+            ));
+        }
+        *remaining -= 1;
+        Ok(())
+    }
+
+    fn step_silent_bounded(&mut self, remaining: &mut usize) -> Result<(), RuntimeError> {
         loop {
+            if self.state.motions.waiting.is_some() || self.state.videos.waiting.is_some() {
+                return Ok(());
+            }
             if self.is_finished() {
                 return Ok(());
             }
@@ -1293,6 +2991,7 @@ impl<R: Renderer> Engine<R> {
             if Self::is_interactive(&stmt) {
                 return Ok(());
             }
+            self.consume_step(remaining)?;
             self.exec_silent(stmt)?;
         }
     }

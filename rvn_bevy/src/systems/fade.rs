@@ -14,12 +14,21 @@ pub fn fade_system(
     mut query: Query<(Entity, &mut FadeAnim, &mut Sprite, &mut Transform)>,
     mut next_state: ResMut<NextState<VnState>>,
     mut render_state: ResMut<VnRenderState>,
+    layered: Query<(), With<crate::layered_characters::LayeredFade>>,
+    accessibility: Res<crate::accessibility::Accessibility>,
 ) {
+    if accessibility.blocked {
+        return;
+    }
     let mut any_running = false;
 
     for (entity, mut anim, mut sprite, mut transform) in query.iter_mut() {
         anim.elapsed_secs += time.delta_seconds();
-        let t = (anim.elapsed_secs / anim.duration_secs).clamp(0.0, 1.0);
+        let t = if accessibility.settings.reduced_motion {
+            1.0
+        } else {
+            (anim.elapsed_secs / anim.duration_secs).clamp(0.0, 1.0)
+        };
         let alpha = anim.from + (anim.to - anim.from) * t;
         sprite.color.set_alpha(alpha);
 
@@ -68,7 +77,7 @@ pub fn fade_system(
         }
     }
 
-    if !any_running {
+    if !any_running && layered.is_empty() {
         let next = render_state
             .state_after_anim
             .take()

@@ -33,6 +33,36 @@ struct MethodDoc {
 
 const RVN_KEYWORDS: &[KeywordDoc] = &[
     KeywordDoc {
+        name:"screen",summary:"Defines a reusable, parameterized screen. Return a component tree; screens cannot change game variables or run narrative operations.",
+        usage:Some("screen name(title) { return component(...) }"),snippet:Some("screen ${1:name}(${2:title}) {\n    return component(\"root\", \"column\", {}, [])\n}"),
+    },
+    KeywordDoc {
+        name:"handler",summary:"Handles one non-blocking screen event. Global assignments update game state; local values stay inside the event handler.",
+        usage:Some("handler name(event) { ... }"),snippet:Some("handler ${1:name}(event) {\n    $0\n}"),
+    },
+    KeywordDoc {
+        name:"local",summary:"Declares a handler-local value. Parameters and iterators are also local; use set for a bound game variable.",
+        usage:Some("local name = expression"),snippet:Some("local ${1:name} = ${2:expression}"),
+    },
+    KeywordDoc {
+        name: "function",
+        summary: "Defines a calculation function with local parameters. Narrative operations are not allowed inside expressions.",
+        usage: Some("function name(parameter) { return expression }"),
+        snippet: Some("function ${1:name}(${2:parameter}) {\n    return ${3:expression}\n}"),
+    },
+    KeywordDoc {
+        name: "while",
+        summary: "Repeats a block while a condition is true. Runtime work is bounded to prevent an infinite loop from freezing the game.",
+        usage: Some("while condition { ... }"),
+        snippet: Some("while ${1:condition} {\n    $0\n}"),
+    },
+    KeywordDoc {
+        name: "for",
+        summary: "Visits each value of a list. Function iterators are local; narrative iterators are saved with the story.",
+        usage: Some("for item in collection { ... }"),
+        snippet: Some("for ${1:item} in ${2:collection} {\n    $0\n}"),
+    },
+    KeywordDoc {
         name: "label",
         summary: "Defines a named location that can be used by `jump` or `call`.",
         usage: Some("label name"),
@@ -64,8 +94,8 @@ const RVN_KEYWORDS: &[KeywordDoc] = &[
     },
     KeywordDoc {
         name: "return",
-        summary: "Returns from the current `call`.",
-        usage: Some("return"),
+        summary: "Returns from the current narrative `call`, or returns a value from a calculation function.",
+        usage: Some("return (narrative) / return expression (function)"),
         snippet: Some("return"),
     },
     KeywordDoc {
@@ -179,6 +209,48 @@ const RVN_KEYWORDS: &[KeywordDoc] = &[
 ];
 
 const BUILTIN_ROOTS: &[BuiltinDoc] = &[
+    BuiltinDoc{name:"canvas_rect",summary:"canvas_rect(rect, color, radius) draws a rounded rectangle. Rect is [x,y,width,height], color is RGBA in [0,1]."},
+    BuiltinDoc{name:"canvas_ellipse",summary:"canvas_ellipse(rect, color) draws an ellipse in reference-pixel coordinates."},
+    BuiltinDoc{name:"canvas_line",summary:"canvas_line(points, color, width) draws a bounded polyline; points are [x,y] pairs."},
+    BuiltinDoc{name:"canvas_polygon",summary:"canvas_polygon(points, color) draws a filled polygon from [x,y] pairs."},
+    BuiltinDoc{name:"canvas_text",summary:"canvas_text(text, position, color, size) draws text in reference pixels, with a local [x,y] position."},
+    BuiltinDoc{name:"canvas_image",summary:"canvas_image(asset, rect) draws a project-relative image, with a diagnostic for missing assets."},
+    BuiltinDoc{name:"canvas_group",summary:"canvas_group(transform, clip, children) applies [x,y,scale_x,scale_y,rotation_degrees,opacity]. Clip is [] or a local rectangle."},
+    BuiltinDoc{name:"canvas_hit",summary:"canvas_hit(id, rect) defines a stable interactive region. Pointer events receive its identity in their local payload."},
+    BuiltinDoc{name:"accessibility",summary:"Portable text size, contrast, reduced motion and speech controls. Player preferences override project defaults."},
+    BuiltinDoc{name:"motion",summary:"Play, stop and wait for composable animations on a background, character, layer or interface component."},
+    BuiltinDoc{name:"video",summary:"Control a named WebM player. Cinematic playback blocks narration; an embedded player may run alongside it."},
+    BuiltinDoc{name:"motion_tween",summary:"motion_tween(seconds, from, to, curve) interpolates specified pose channels."},
+    BuiltinDoc{name:"motion_spline",summary:"motion_spline(seconds, points, curve) follows x/y control points with Catmull–Rom interpolation; coordinates are reference-pixel offsets and segment timing is uniform."},
+    BuiltinDoc{name:"motion_bezier",summary:"motion_bezier(x1, y1, x2, y2) defines a cubic timing curve from (0, 0) to (1, 1); control coordinates must remain in [0, 1]."},
+    BuiltinDoc{name:"motion_curve",summary:"motion_curve(function_name, samples) samples a bounded one-parameter RVN calculation function into a timing curve. Use 2–257 samples, finite progress in [0, 1] with endpoints 0 and 1, and no randomness or narrative operations."},
+    BuiltinDoc{name:"motion_sequence",summary:"motion_sequence(steps) plays a list of animations in order."},
+    BuiltinDoc{name:"motion_parallel",summary:"motion_parallel(branches) plays independent pose channels together; conflicting writes are rejected."},
+    BuiltinDoc{name:"motion_pause",summary:"motion_pause(seconds) holds the current pose."},
+    BuiltinDoc{name:"motion_repeat",summary:"motion_repeat(count, animation) repeats an animation; count 0 means endless and cannot be waited on."},
+    BuiltinDoc{name:"motion_frames",summary:"motion_frames(paths, fps) plays asset-relative images in order."},
+    BuiltinDoc{name:"layered_image",summary:"layered_image(canvas, defaults, layers[, options]) defines ordered, conditional character layers and exclusive attributes. The optional fourth options dictionary accepts named variants, ordered attribute rules and a one-parameter RVN selector function."},
+    BuiltinDoc{name:"image_layer",summary:"image_layer(id, source, properties) describes one composition layer, with optional group, attribute, conditions and variant-specific art."},
+    BuiltinDoc{name:"image_layers",summary:"image_layers(prefix, paths) discovers layers from project-relative image names: prefix__id, prefix__group__attribute, or prefix__variant__group__attribute. The explicit image-list order is drawing order; ambiguous matching names are errors."},
+    BuiltinDoc{name:"video_clip",summary:"video_clip(source, properties) defines a WebM VP8/Vorbis clip, target, captions, mask, controls and events."},
+    BuiltinDoc {name:"ui",summary:"Opens, closes and focuses reusable screens. Available in narrative code and non-blocking handlers, not calculation expressions."},
+    BuiltinDoc { name: "len", summary: "Number of list items, dictionary entries, or Unicode characters in text." },
+    BuiltinDoc { name: "contains", summary: "Tests for a list value, dictionary key, or text substring." },
+    BuiltinDoc { name: "list_append", summary: "list_append(list, value) returns a new list; the input is unchanged." },
+    BuiltinDoc { name: "list_insert", summary: "list_insert(list, index, value) returns a new list." },
+    BuiltinDoc { name: "list_remove", summary: "list_remove(list, index) returns a new list." },
+    BuiltinDoc { name: "list_set", summary: "list_set(list, index, value) returns a new list." },
+    BuiltinDoc { name: "list_concat", summary: "list_concat(first, second) joins two lists without changing either." },
+    BuiltinDoc { name: "list_slice", summary: "list_slice(list, start, end) returns a range, excluding end." },
+    BuiltinDoc { name: "dict", summary: "dict(key, value, ...) creates a dictionary with unique text keys; also written {\"key\": value}." },
+    BuiltinDoc { name: "component", summary: "component(id, kind, properties, children) creates a reusable screen component with explicit identity and child components." },
+    BuiltinDoc { name: "dict_get", summary: "dict_get(dictionary, key, fallback) returns a value or the fallback." },
+    BuiltinDoc { name: "dict_at", summary: "dict_at(dictionary, key) returns a value; a missing key is an error." },
+    BuiltinDoc { name: "dict_set", summary: "dict_set(dictionary, key, value) returns a modified copy." },
+    BuiltinDoc { name: "dict_remove", summary: "dict_remove(dictionary, key) returns a copy without the key." },
+    BuiltinDoc { name: "dict_keys", summary: "dict_keys(dictionary) returns keys in stable sorted order." },
+    BuiltinDoc { name: "dict_values", summary: "dict_values(dictionary) returns values in the same order as dict_keys." },
+    BuiltinDoc { name: "random", summary: "random(min, max) returns an inclusive random integer. The stream is restored by loading and rollback." },
     BuiltinDoc {
         name: "music",
         summary: "Controls background music playback.",
@@ -204,12 +276,24 @@ pub struct Analysis {
 
 #[derive(Debug, Clone, Default)]
 pub struct ProjectIndex {
+    pub functions: HashMap<String, FunctionSymbol>,
     pub labels: HashMap<String, LabelSymbol>,
     pub characters: HashMap<String, CharacterSymbol>,
     pub diagnostics: HashMap<Url, Vec<Diagnostic>>,
     pub document_symbols: HashMap<Url, Vec<RvnSymbol>>,
     pub label_refs: Vec<LabelRef>,
     pub character_uses: Vec<CharacterUse>,
+    pub callable_refs: Vec<(Url, crate::callables::Site)>,
+    unsafe_callable_renames: HashSet<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionSymbol {
+    pub name: String,
+    pub parameters: Vec<String>,
+    pub uri: Url,
+    pub range: Range,
+    pub declaration: &'static str,
 }
 
 #[derive(Debug, Clone)]
@@ -270,6 +354,7 @@ pub struct CharacterUse {
 pub enum RvnSymbolKind {
     Label,
     Character,
+    Callable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -280,6 +365,7 @@ pub struct ResolvedSymbol {
 
 #[derive(Debug, Default)]
 struct SemanticIndex {
+    functions: HashMap<String, FunctionSymbol>,
     labels: HashMap<String, LabelSymbol>,
     label_refs: Vec<LabelRef>,
     characters: HashMap<String, CharacterSymbol>,
@@ -303,6 +389,7 @@ fn analyze_files(mut files: Vec<(Url, String)>) -> Analysis {
 
     let mut index = ProjectIndex::default();
     let mut semantic = SemanticIndex::default();
+    let mut sources = Vec::new();
 
     for (uri, text) in files {
         let mut diagnostics = Vec::new();
@@ -323,23 +410,209 @@ fn analyze_files(mut files: Vec<(Url, String)>) -> Analysis {
             text,
             script: recovered.script,
         };
+        index.callable_refs.extend(
+            crate::callables::scan(&source.text)
+                .into_iter()
+                .filter(|site| !site.role.ends_with("-declaration"))
+                .map(|site| (uri.clone(), site)),
+        );
         let mut ranges = SourceRanges::scan(&source.text);
         collect_file_symbols(&source, &mut ranges, &mut semantic, &mut diagnostics);
         index
             .document_symbols
             .insert(uri.clone(), document_symbols(&source));
         index.diagnostics.insert(uri, diagnostics);
+        sources.push(source);
     }
 
     index.labels.clone_from(&semantic.labels);
+    index.functions.clone_from(&semantic.functions);
     index.characters.clone_from(&semantic.characters);
     index.label_refs.clone_from(&semantic.label_refs);
     index.character_uses.clone_from(&semantic.character_uses);
     validate_semantics(&semantic, &mut index);
+    let script: Vec<_> = sources
+        .iter()
+        .flat_map(|source| source.script.iter().cloned())
+        .collect();
+    for problem in rvn_parser::validate_logic(&script, false) {
+        if problem.code == "duplicate-function" {
+            continue;
+        } // Already has related declaration locations.
+        let role = if problem.code.contains("screen") {
+            "screen"
+        } else {
+            "function"
+        };
+        let mut locations: Vec<_> = index
+            .callable_refs
+            .iter()
+            .filter(|(_, site)| {
+                if site.name != problem.name || site.role != role {
+                    return false;
+                }
+                if problem.code == "function-arity"
+                    || problem.code == "screen-arity"
+                    || problem.code == "canvas-draw-arity"
+                {
+                    let expected = index
+                        .functions
+                        .get(&site.name)
+                        .map(|function| function.parameters.len()..=function.parameters.len())
+                        .or_else(|| rvn_parser::builtin_arity(&site.name));
+                    return site
+                        .arity
+                        .zip(expected)
+                        .is_some_and(|(count, expected)| !expected.contains(&count));
+                }
+                true
+            })
+            .map(|(uri, site)| (uri.clone(), site.range))
+            .collect();
+        if locations.is_empty() {
+            if let Some(function) = index.functions.get(&problem.name) {
+                locations.push((function.uri.clone(), function.range));
+            }
+        }
+        for (uri, range) in locations {
+            let diagnostics = index.diagnostics.entry(uri).or_default();
+            if !diagnostics
+                .iter()
+                .any(|existing| existing.range == range && existing.message == problem.english)
+            {
+                diagnostics.push(simple_diagnostic(
+                    range,
+                    DiagnosticSeverity::ERROR,
+                    problem.code,
+                    problem.english.clone(),
+                ));
+            }
+        }
+    }
+    // Do not offer an incomplete rename when a reference is dynamic or lies
+    // inside escaped dialogue interpolation. It must never silently break code.
+    fn protect(block: &[Statement], unsafe_names: &mut HashSet<String>, screens: &[String]) {
+        fn expr(value: &Expr, names: &mut HashSet<String>) {
+            match value {
+                Expr::Call { name, args } => {
+                    names.insert(name.clone());
+                    for value in args {
+                        expr(value, names);
+                    }
+                }
+                Expr::BinOp { left, right, .. }
+                | Expr::And(left, right)
+                | Expr::Or(left, right) => {
+                    expr(left, names);
+                    expr(right, names);
+                }
+                Expr::Index { target, index } => {
+                    expr(target, names);
+                    expr(index, names);
+                }
+                Expr::Neg(value) | Expr::Not(value) => expr(value, names),
+                Expr::ListLit(values) => {
+                    for value in values {
+                        expr(value, names);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for statement in block {
+            match statement {
+                Statement::Dialogue { text, .. } => {
+                    for segment in &text.0 {
+                        if let TextSegment::Interp(value) = segment {
+                            expr(value, unsafe_names);
+                        }
+                    }
+                }
+                Statement::Choice { options } => {
+                    for option in options {
+                        for segment in &option.label.0 {
+                            if let TextSegment::Interp(value) = segment {
+                                expr(value, unsafe_names);
+                            }
+                        }
+                        protect(&option.body, unsafe_names, screens);
+                    }
+                }
+                Statement::UiOpen { name, .. }
+                | Statement::UiClose { name }
+                | Statement::UiFocus { name, .. }
+                | Statement::UiSetState { name, .. }
+                    if !matches!(name,Expr::Str(name) if rvn_parser::is_binding_name(name)) =>
+                {
+                    unsafe_names.extend(screens.iter().cloned())
+                }
+                Statement::Init { body }
+                | Statement::Function { body, .. }
+                | Statement::Screen { body, .. }
+                | Statement::Handler { body, .. }
+                | Statement::While { body, .. }
+                | Statement::ForEach { body, .. } => protect(body, unsafe_names, screens),
+                Statement::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    protect(then_branch, unsafe_names, screens);
+                    protect(else_branch, unsafe_names, screens);
+                }
+                Statement::Imagemap { hotspots, .. } => {
+                    for hotspot in hotspots {
+                        protect(&hotspot.body, unsafe_names, screens);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let screens = index
+        .functions
+        .values()
+        .filter(|function| function.declaration == "screen")
+        .map(|function| function.name.clone())
+        .collect::<Vec<_>>();
+    protect(&script, &mut index.unsafe_callable_renames, &screens);
+    if index
+        .callable_refs
+        .iter()
+        .any(|(_, site)| site.role == "dynamic-draw")
+    {
+        index.unsafe_callable_renames.extend(
+            index
+                .functions
+                .values()
+                .filter(|function| function.declaration == "function")
+                .map(|function| function.name.clone()),
+        );
+    }
     Analysis { index }
 }
 
 impl ProjectIndex {
+    pub fn definition_for(&self, symbol: &ResolvedSymbol) -> Option<Location> {
+        let (uri, range) = match symbol.kind {
+            RvnSymbolKind::Label => {
+                let value = self.labels.get(&symbol.name)?;
+                (&value.uri, value.range)
+            }
+            RvnSymbolKind::Character => {
+                let value = self.characters.get(&symbol.name)?;
+                (&value.uri, value.range)
+            }
+            RvnSymbolKind::Callable => {
+                let value = self.functions.get(&symbol.name)?;
+                (&value.uri, value.range)
+            }
+        };
+        Some(Location {
+            uri: uri.clone(),
+            range,
+        })
+    }
     pub fn diagnostics_for(&self, uri: &Url) -> Vec<Diagnostic> {
         self.diagnostics.get(uri).cloned().unwrap_or_default()
     }
@@ -349,6 +622,22 @@ impl ProjectIndex {
     }
 
     pub fn symbol_at(&self, uri: &Url, position: Position) -> Option<ResolvedSymbol> {
+        for function in self.functions.values() {
+            if function.uri == *uri && range_contains(function.range, position) {
+                return Some(ResolvedSymbol {
+                    kind: RvnSymbolKind::Callable,
+                    name: function.name.clone(),
+                });
+            }
+        }
+        for (file, site) in &self.callable_refs {
+            if file == uri && range_contains(site.range, position) {
+                return Some(ResolvedSymbol {
+                    kind: RvnSymbolKind::Callable,
+                    name: site.name.clone(),
+                });
+            }
+        }
         for label in self.labels.values() {
             if label.uri == *uri && range_contains(label.range, position) {
                 return Some(ResolvedSymbol {
@@ -391,6 +680,21 @@ impl ProjectIndex {
     pub fn references_for(&self, symbol: &ResolvedSymbol) -> Vec<Location> {
         let mut locations = Vec::new();
         match symbol.kind {
+            RvnSymbolKind::Callable => {
+                let Some(definition) = self.definition_for(symbol) else {
+                    return Vec::new();
+                };
+                locations.push(definition);
+                locations.extend(
+                    self.callable_refs
+                        .iter()
+                        .filter(|(_, site)| site.name == symbol.name)
+                        .map(|(uri, site)| Location {
+                            uri: uri.clone(),
+                            range: site.range,
+                        }),
+                );
+            }
             RvnSymbolKind::Label => {
                 let Some(label) = self.labels.get(&symbol.name) else {
                     return Vec::new();
@@ -440,13 +744,32 @@ impl ProjectIndex {
     }
 
     pub fn rename_edit(&self, symbol: &ResolvedSymbol, new_name: &str) -> Option<WorkspaceEdit> {
-        if !is_valid_ident(new_name) {
+        if !rvn_parser::is_binding_name(new_name) {
             return None;
         }
         match symbol.kind {
             RvnSymbolKind::Label if !self.labels.contains_key(&symbol.name) => return None,
             RvnSymbolKind::Character if !self.characters.contains_key(&symbol.name) => return None,
+            RvnSymbolKind::Callable => {
+                let declaration = self.functions.get(&symbol.name)?;
+                if declaration.declaration == "handler"
+                    || self.unsafe_callable_renames.contains(&symbol.name)
+                    || rvn_parser::builtin_arity(new_name).is_some()
+                    || (new_name != symbol.name && self.functions.contains_key(new_name))
+                {
+                    return None;
+                }
+            }
             _ => {}
+        }
+        if new_name != symbol.name
+            && match symbol.kind {
+                RvnSymbolKind::Label => self.labels.contains_key(new_name),
+                RvnSymbolKind::Character => self.characters.contains_key(new_name),
+                RvnSymbolKind::Callable => false,
+            }
+        {
+            return None;
         }
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
         for location in self.references_for(symbol) {
@@ -483,13 +806,19 @@ impl ProjectIndex {
             CompletionContext::LineStart { allow_characters } => {
                 let mut items = keyword_completions();
                 items.extend(builtin_root_completions());
+                items.extend(function_completions(self));
                 if allow_characters {
                     items.extend(character_completions(self));
                 }
                 items
             }
             CompletionContext::AfterDot(target) => method_completions(&target, self),
-            CompletionContext::General => keyword_completions(),
+            CompletionContext::General => {
+                let mut items = keyword_completions();
+                items.extend(builtin_root_completions());
+                items.extend(function_completions(self));
+                items
+            }
         }
     }
 
@@ -497,6 +826,15 @@ impl ProjectIndex {
         let word = word_at(text, position)?;
         if let Some(keyword) = keyword_doc(&word) {
             return Some(hover_markdown(keyword));
+        }
+        if let Some(function) = self.functions.get(&word) {
+            return Some(hover_markdown(format!(
+                "**{}** `{}({})`\n\nDefined in `{}`.",
+                function.declaration,
+                function.name,
+                function.parameters.join(", "),
+                display_uri(&function.uri)
+            )));
         }
 
         if let Some(reference) = label_reference_at(text, position) {
@@ -788,6 +1126,72 @@ fn collect_block(
     for statement in statements {
         match statement {
             Statement::Init { body } => collect_block(source, ranges, body, semantic, diagnostics),
+            Statement::Function {
+                name,
+                parameters,
+                body,
+            }
+            | Statement::Screen {
+                name,
+                parameters,
+                body,
+            }
+            | Statement::Handler {
+                name,
+                parameters,
+                body,
+            } => {
+                let keyword = match statement {
+                    Statement::Screen { .. } => "screen",
+                    Statement::Handler { .. } => "handler",
+                    _ => "function",
+                };
+                let range = find_command_target_range(&source.text, keyword, name);
+                if let Some(existing) = semantic.functions.get(name) {
+                    diagnostics.push(diagnostic_with_related(
+                        range,
+                        DiagnosticSeverity::ERROR,
+                        "duplicate-function",
+                        format!("duplicate function `{name}`"),
+                        vec![DiagnosticRelatedInformation {
+                            location: Location {
+                                uri: existing.uri.clone(),
+                                range: existing.range,
+                            },
+                            message: "first declaration is here".into(),
+                        }],
+                    ));
+                } else if rvn_parser::builtin_arity(name).is_some() {
+                    diagnostics.push(simple_diagnostic(
+                        range,
+                        DiagnosticSeverity::ERROR,
+                        "duplicate-function",
+                        format!("cannot replace built-in function `{name}`"),
+                    ));
+                } else {
+                    semantic.functions.insert(
+                        name.clone(),
+                        FunctionSymbol {
+                            name: name.clone(),
+                            parameters: parameters.clone(),
+                            uri: source.uri.clone(),
+                            range,
+                            declaration: keyword,
+                        },
+                    );
+                }
+                collect_block(source, ranges, body, semantic, diagnostics);
+            }
+            Statement::While { condition, body } => {
+                collect_expr(condition, source, semantic);
+                collect_block(source, ranges, body, semantic, diagnostics);
+            }
+            Statement::ForEach {
+                collection, body, ..
+            } => {
+                collect_expr(collection, source, semantic);
+                collect_block(source, ranges, body, semantic, diagnostics);
+            }
             Statement::CharacterCreate { id, display_name } => {
                 semantic.characters.entry(id.clone()).or_insert_with(|| {
                     let range = ranges
@@ -895,7 +1299,33 @@ fn collect_block(
                         .unwrap_or_else(|| find_character_usage_range(&source.text, target)),
                 });
             }
-            Statement::SetVar { value, .. } => collect_expr(value, source, semantic),
+            Statement::SetVar { value, .. }
+            | Statement::LocalVar { value, .. }
+            | Statement::FunctionReturn { value } => collect_expr(value, source, semantic),
+            Statement::UiOpen {
+                name,
+                arguments,
+                modal,
+                layer,
+            } => {
+                for value in [name, arguments, modal, layer] {
+                    collect_expr(value, source, semantic);
+                }
+            }
+            Statement::UiClose { name } => collect_expr(name, source, semantic),
+            Statement::UiFocus { name, element } => {
+                collect_expr(name, source, semantic);
+                collect_expr(element, source, semantic);
+            }
+            Statement::UiSetState {
+                name,
+                element,
+                state,
+            } => {
+                for value in [name, element, state] {
+                    collect_expr(value, source, semantic);
+                }
+            }
             Statement::Imagemap { hotspots, .. } => {
                 for hotspot in hotspots {
                     collect_block(source, ranges, &hotspot.body, semantic, diagnostics);
@@ -963,6 +1393,36 @@ fn document_symbols(source: &SourceFile) -> Vec<RvnSymbol> {
     let mut symbols = Vec::new();
     for statement in &source.script {
         match statement {
+            Statement::Function {
+                name, parameters, ..
+            }
+            | Statement::Screen {
+                name, parameters, ..
+            }
+            | Statement::Handler {
+                name, parameters, ..
+            } => {
+                let keyword = match statement {
+                    Statement::Screen { .. } => "screen",
+                    Statement::Handler { .. } => "handler",
+                    _ => "function",
+                };
+                let selection_range = find_command_target_range(&source.text, keyword, name);
+                symbols.push(RvnSymbol {
+                    name: name.clone(),
+                    detail: Some(format!("{keyword}({})", parameters.join(", "))),
+                    kind: SymbolKind::FUNCTION,
+                    range: find_line_range(&source.text, |line| {
+                        line.trim_start()
+                            .strip_prefix(&format!("{keyword} "))
+                            .is_some_and(|rest| {
+                                rest.strip_prefix(name)
+                                    .is_some_and(|rest| rest.starts_with('('))
+                            })
+                    }),
+                    selection_range,
+                });
+            }
             Statement::Label { name } => {
                 let range = find_label_statement_range(&source.text, name);
                 let selection_range = find_label_name_range(&source.text, name);
@@ -1086,7 +1546,7 @@ fn completion_context(text: &str, position: Position) -> CompletionContext {
     let Some(line) = text.lines().nth(position.line as usize) else {
         return CompletionContext::General;
     };
-    let character = (position.character as usize).min(line.len());
+    let character = crate::callables::byte_column(line, position.character);
     let prefix = &line[..character];
     let trimmed = prefix.trim_start();
 
@@ -1163,6 +1623,40 @@ fn builtin_root_completions() -> Vec<CompletionItem> {
                     value: format!("**built-in** `{}`\n\n{}", builtin.name, builtin.summary),
                 },
             )),
+            ..CompletionItem::default()
+        })
+        .collect()
+}
+
+fn function_completions(index: &ProjectIndex) -> Vec<CompletionItem> {
+    let mut functions: Vec<_> = index
+        .functions
+        .values()
+        .filter(|function| function.declaration == "function")
+        .collect();
+    functions.sort_by(|a, b| a.name.cmp(&b.name));
+    functions
+        .into_iter()
+        .map(|function| CompletionItem {
+            label: function.name.clone(),
+            kind: Some(CompletionItemKind::FUNCTION),
+            detail: Some(format!(
+                "{}({})",
+                function.name,
+                function.parameters.join(", ")
+            )),
+            insert_text: Some(format!(
+                "{}({})",
+                function.name,
+                function
+                    .parameters
+                    .iter()
+                    .enumerate()
+                    .map(|(index, parameter)| format!("${{{}:{}}}", index + 1, parameter))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+            insert_text_format: Some(tower_lsp::lsp_types::InsertTextFormat::SNIPPET),
             ..CompletionItem::default()
         })
         .collect()
@@ -1252,6 +1746,31 @@ fn builtin_doc(word: &str) -> Option<String> {
 
 fn method_docs(target: &str, index: &ProjectIndex) -> Option<&'static [MethodDoc]> {
     match target {
+        "accessibility"=>Some(&[
+            MethodDoc{name:"configure",summary:"Sets validated project defaults; omitted properties reset to defaults. Player preferences take precedence.",snippet:"configure({\"text_scale\": ${1:1.25}, \"reduced_motion\": ${2:true}})"},
+            MethodDoc{name:"speak",summary:"Speaks literal or localized text using an available system/browser voice. Transient speech is not replayed from saves.",snippet:"speak(\"${1:text}\")"},
+            MethodDoc{name:"stop",summary:"Stops only this game's queued speech.",snippet:"stop()"},
+        ]),
+        "motion"=>Some(&[
+            MethodDoc{name:"play",summary:"Starts or replaces a composable animation on an existing target.",snippet:"play(\"${1:sprite:iris}\", ${2:animation})"},
+            MethodDoc{name:"stop",summary:"Removes the animation contribution and restores the target's ordinary appearance.",snippet:"stop(\"${1:sprite:iris}\")"},
+            MethodDoc{name:"wait",summary:"Waits for a finite animation. Not permitted in a non-blocking handler.",snippet:"wait(\"${1:sprite:iris}\")"},
+        ]),
+        "video"=>Some(&[
+            MethodDoc{name:"play",summary:"Starts a named video player with a validated clip definition.",snippet:"play(\"${1:intro}\", ${2:clip})"},
+            MethodDoc{name:"pause",summary:"Pauses playback without losing its position.",snippet:"pause(\"${1:intro}\")"},
+            MethodDoc{name:"resume",summary:"Resumes paused playback; browser autoplay restrictions may require a gesture.",snippet:"resume(\"${1:intro}\")"},
+            MethodDoc{name:"stop",summary:"Closes the player and its audio.",snippet:"stop(\"${1:intro}\")"},
+            MethodDoc{name:"skip",summary:"Skips only a clip that explicitly allows it.",snippet:"skip(\"${1:intro}\")"},
+            MethodDoc{name:"wait",summary:"Waits for a finite player's end. Not permitted in event handlers.",snippet:"wait(\"${1:intro}\")"},
+            MethodDoc{name:"seek",summary:"Seeks to a finite position while retaining the paused/playing state.",snippet:"seek(\"${1:intro}\", ${2:0.8})"},
+            MethodDoc{name:"volume",summary:"Sets this clip's volume between 0 and 1.",snippet:"volume(\"${1:intro}\", ${2:0.5})"},
+        ]),
+        "ui"=>Some(&[
+            MethodDoc{name:"open",summary:"Opens or replaces a named screen with parameters, modality and display layer.",snippet:"open(\"${1:screen}\", [${2:arguments}], ${3:true}, ${4:1})"},
+            MethodDoc{name:"close",summary:"Closes a screen and invokes its close handler once.",snippet:"close(\"${1:screen}\")"},
+            MethodDoc{name:"focus",summary:"Focuses an available input or button. The game reveals it in scrolling containers.",snippet:"focus(\"${1:screen}\", \"${2:component}\")"},
+        ]),
         "music" => Some(&[
             MethodDoc {
                 name: "play",
@@ -1286,7 +1805,7 @@ fn method_docs(target: &str, index: &ProjectIndex) -> Option<&'static [MethodDoc
             summary: "Sets the typewriter speed in characters per second.",
             snippet: "speed(${1:42})",
         }]),
-        "character" => Some(&[MethodDoc {
+        "character" => Some(&[MethodDoc{name:"compose",summary:"Assigns a layered image definition to an existing character.",snippet:"compose(\"${1:iris}\", ${2:composition})"},MethodDoc{name:"attributes",summary:"Changes only the specified composition attributes; unrelated groups are preserved.",snippet:"attributes(\"${1:iris}\", {\"${2:expression}\": \"${3:happy}\"})"},MethodDoc {
             name: "create",
             summary: "Declares a character id and display name.",
             snippet: "create(\"${1:id}\", \"${2:Display Name}\")",
@@ -1324,7 +1843,7 @@ fn method_docs(target: &str, index: &ProjectIndex) -> Option<&'static [MethodDoc
 
 fn method_hover(text: &str, position: Position, index: &ProjectIndex) -> Option<String> {
     let line = text.lines().nth(position.line as usize)?;
-    let character = (position.character as usize).min(line.len());
+    let character = crate::callables::byte_column(line, position.character);
     let word = word_at(text, position)?;
     let word_start = character.saturating_sub(
         line[..character]
@@ -1371,7 +1890,7 @@ fn display_uri(uri: &Url) -> String {
 
 pub fn label_reference_at(text: &str, position: Position) -> Option<String> {
     let line = text.lines().nth(position.line as usize)?;
-    let character = position.character as usize;
+    let character = crate::callables::byte_column(line, position.character);
     let bytes = line.as_bytes();
     let mut start = character.min(bytes.len());
     while start > 0 && is_ident_byte(bytes[start - 1]) {
@@ -1401,12 +1920,6 @@ fn is_ident_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '_'
 }
 
-fn is_valid_ident(name: &str) -> bool {
-    let mut chars = name.chars();
-    matches!(chars.next(), Some(ch) if ch.is_ascii_alphabetic() || ch == '_')
-        && chars.all(is_ident_char)
-}
-
 fn range_contains(range: Range, position: Position) -> bool {
     (position.line > range.start.line
         || (position.line == range.start.line && position.character >= range.start.character))
@@ -1416,7 +1929,7 @@ fn range_contains(range: Range, position: Position) -> bool {
 
 fn word_at(text: &str, position: Position) -> Option<String> {
     let line = text.lines().nth(position.line as usize)?;
-    let character = (position.character as usize).min(line.len());
+    let character = crate::callables::byte_column(line, position.character);
     let bytes = line.as_bytes();
     let mut start = character;
     while start > 0 && is_ident_byte(bytes[start - 1]) {
@@ -1630,6 +2143,99 @@ mod tests {
     }
 
     #[test]
+    fn callable_definitions_references_and_safe_renames_work_across_files() {
+        let main = uri("call-main");
+        let helpers = uri("call-helpers");
+        let documents=HashMap::from([(main.clone(),"use \"call-helpers.rvn\"\nlabel start\nset score=reward(2)\nui.open(\"inventory\",[],true,1)\n".into()),(helpers.clone(),"function reward(n) { return n+1 }\nscreen inventory() { return component(\"root\",\"text\",{},[]) }".into())]);
+        let index = analyze_workspace(&[], &documents).index;
+        let symbol = index.symbol_at(&main, Position::new(2, 12)).unwrap();
+        assert_eq!(symbol.name, "reward");
+        assert_eq!(index.definition_for(&symbol).unwrap().uri, helpers);
+        assert_eq!(index.references_for(&symbol).len(), 2);
+        let edits = index
+            .rename_edit(&symbol, "points")
+            .unwrap()
+            .changes
+            .unwrap();
+        assert_eq!(edits.values().map(Vec::len).sum::<usize>(), 2);
+        assert!(index.rename_edit(&symbol, "inventory").is_none());
+        let screen = index.symbol_at(&main, Position::new(3, 12)).unwrap();
+        assert_eq!(index.references_for(&screen).len(), 2);
+    }
+
+    #[test]
+    fn live_logic_diagnostics_point_only_at_the_invalid_call() {
+        let file = uri("call-errors");
+        let documents=HashMap::from([(file.clone(),"function reward(n) { return n }\nscreen inventory() { return component(\"root\",\"text\",{},[]) }\nlabel start\nset a=reward(1)\nset b=reward(1,2)\nset c=missing()\nui.open(\"inventory\",[1],true,1)\nui.close(\"unknown\")".into())]);
+        let index = analyze_workspace(&[], &documents).index;
+        let errors = index.diagnostics_for(&file);
+        let arity: Vec<_> = errors
+            .iter()
+            .filter(|problem| diagnostic_code(problem) == Some("function-arity"))
+            .collect();
+        assert_eq!(arity.len(), 1);
+        assert_eq!(arity[0].range.start.line, 4);
+        assert!(errors.iter().any(
+            |problem| diagnostic_code(problem) == Some("unknown-function")
+                && problem.range.start.line == 5
+        ));
+        assert!(errors
+            .iter()
+            .any(|problem| diagnostic_code(problem) == Some("screen-arity")
+                && problem.range.start.line == 6));
+        assert!(errors
+            .iter()
+            .any(|problem| diagnostic_code(problem) == Some("unknown-screen")
+                && problem.range.start.line == 7));
+    }
+
+    #[test]
+    fn escaped_interpolation_and_dynamic_screen_names_never_receive_partial_renames() {
+        let file = uri("unsafe-renames");
+        let documents=HashMap::from([(file,"function reward(n) { return n }\nscreen inventory() { return component(\"root\",\"text\",{},[]) }\nlabel start\n\"Reward [reward(1)]\"\nui.open(screen_name,[],true,1)".into())]);
+        let index = analyze_workspace(&[], &documents).index;
+        for name in ["reward", "inventory"] {
+            assert!(index
+                .rename_edit(
+                    &ResolvedSymbol {
+                        kind: RvnSymbolKind::Callable,
+                        name: name.into()
+                    },
+                    "changed"
+                )
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn custom_canvas_callbacks_are_renamed_completely_and_dynamic_callbacks_are_protected() {
+        let file = uri("canvas-callbacks");
+        let source="function paint(s,p,f){return []}\nscreen one(){return component(\"one\",\"canvas\",{\"draw\":\"paint\"},[])}\nscreen two(){return {\"id\":\"two\",\"kind\":\"canvas\",\"draw\":\"paint\"}}\nlabel start\nreturn";
+        let symbol = ResolvedSymbol {
+            kind: RvnSymbolKind::Callable,
+            name: "paint".into(),
+        };
+        let documents = HashMap::from([(file.clone(), source.into())]);
+        let index = analyze_workspace(&[], &documents).index;
+        let edit = index.rename_edit(&symbol, "redraw").unwrap();
+        assert_eq!(edit.changes.unwrap()[&file].len(), 3);
+        let dynamic=format!("{source}\nscreen dynamic(callback){{return component(\"dynamic\",\"canvas\",{{\"draw\":callback}},[])}}");
+        let index = analyze_workspace(&[], &HashMap::from([(file.clone(), dynamic)])).index;
+        assert!(index.rename_edit(&symbol, "redraw").is_none());
+        let wrong = source.replace("paint(s,p,f)", "paint(s)");
+        let index = analyze_workspace(&[], &HashMap::from([(file.clone(), wrong)])).index;
+        let errors = index.diagnostics_for(&file);
+        let errors: Vec<_> = errors
+            .iter()
+            .filter(|diagnostic| diagnostic_code(diagnostic) == Some("canvas-draw-arity"))
+            .collect();
+        assert_eq!(errors.len(), 2);
+        assert!(errors
+            .iter()
+            .all(|diagnostic| matches!(diagnostic.range.start.line, 1 | 2)));
+    }
+
+    #[test]
     fn reports_unknown_label_and_undefined_character() {
         let uri = uri("main");
         let mut documents = HashMap::new();
@@ -1776,6 +2382,144 @@ ei
         );
         assert!(character_items.iter().any(|item| item.label == "show"));
         assert!(character_items.iter().any(|item| item.label == "hide"));
+    }
+
+    #[test]
+    fn computation_functions_collections_and_loops_have_editor_assistance() {
+        let file = uri("computation");
+        let text = "function total(items) {\nset result = 0\nfor item in items { set result = result + item }\nreturn result\n}\nlabel start\nset score = total([1, 2])\n\"[score]\"\n";
+        let analysis = analyze_workspace(&[], &HashMap::from([(file.clone(), text.into())]));
+        assert!(analysis.index.diagnostics_for(&file).is_empty());
+        let items = analysis.index.completion_items(
+            text,
+            Position {
+                line: 6,
+                character: 12,
+            },
+        );
+        for name in [
+            "total",
+            "function",
+            "for",
+            "while",
+            "dict_get",
+            "list_append",
+            "random",
+        ] {
+            assert!(
+                items.iter().any(|item| item.label == name),
+                "missing completion {name}"
+            );
+        }
+        let total = items.iter().find(|item| item.label == "total").unwrap();
+        assert_eq!(total.insert_text.as_deref(), Some("total(${1:items})"));
+        assert!(analysis
+            .index
+            .symbols_for(&file)
+            .iter()
+            .any(|symbol| symbol.name == "total" && symbol.kind == SymbolKind::FUNCTION));
+        assert!(analysis
+            .index
+            .hover(
+                text,
+                &file,
+                Position {
+                    line: 6,
+                    character: 14
+                }
+            )
+            .is_some());
+    }
+
+    #[test]
+    fn screen_declarations_are_not_offered_as_expression_calls() {
+        let file = uri("screens");
+        let text="screen form() { return component(\"root\",\"column\",{},[]) }\nhandler clicked(event) {}\nfunction total(n) {return n}\nlabel start\nui.open(\"form\",[],true,1)\n";
+        let analysis = analyze_workspace(&[], &HashMap::from([(file, text.into())]));
+        let items = analysis.index.completion_items(text, Position::new(4, 0));
+        for keyword in ["screen", "handler", "local", "ui", "total"] {
+            assert!(items.iter().any(|item| item.label == keyword));
+        }
+        for declaration in ["form", "clicked"] {
+            assert!(!items.iter().any(|item| item.label == declaration));
+        }
+        let methods = analysis.index.completion_items("ui.", Position::new(0, 3));
+        for method in ["open", "close", "focus"] {
+            assert!(methods.iter().any(|item| item.label == method));
+        }
+    }
+
+    #[test]
+    fn advanced_authoring_builtins_have_matching_completion_hover_and_parser_registry() {
+        let index = ProjectIndex::default();
+        let file = uri("advanced-authoring-help");
+        let items = index.completion_items("", Position::new(0, 0));
+        for (name, arity, help) in [
+            ("motion_spline", 3..=3, "Catmull–Rom"),
+            ("motion_bezier", 4..=4, "cubic timing"),
+            ("motion_curve", 2..=2, "2–257"),
+            ("image_layers", 2..=2, "drawing order"),
+            ("layered_image", 3..=4, "optional fourth"),
+        ] {
+            assert_eq!(rvn_parser::builtin_arity(name), Some(arity));
+            let matching = items
+                .iter()
+                .filter(|item| item.label == name)
+                .collect::<Vec<_>>();
+            assert_eq!(matching.len(), 1, "missing or duplicate builtin {name}");
+            assert_eq!(matching[0].kind, Some(CompletionItemKind::FUNCTION));
+            let Some(tower_lsp::lsp_types::Documentation::MarkupContent(documentation)) =
+                &matching[0].documentation
+            else {
+                panic!("missing completion help for {name}");
+            };
+            assert!(
+                documentation.value.contains(help),
+                "incorrect completion help for {name}"
+            );
+            let hover = index.hover(name, &file, Position::new(0, 1));
+            assert!(
+                hover_contains(&hover, help),
+                "incorrect hover help for {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn advanced_authoring_expression_calls_and_legacy_layered_image_are_known() {
+        let file = uri("advanced-authoring-builtins");
+        let text = r#"function progress(t) {return t}
+function portrait() {
+    local layers=image_layers("iris",["iris__body.png"])
+    local path=motion_spline(1,[{"x":0,"y":0},{"x":100,"y":0}],motion_curve("progress",65))
+    local timing=motion_bezier(0.25,0.1,0.75,0.9)
+    local legacy=layered_image([600,1000],{},layers)
+    return layered_image([600,1000],{},layers,{"variants":{}})
+}
+"#;
+        let analysis = analyze_workspace(&[], &HashMap::from([(file.clone(), text.into())]));
+        assert!(
+            analysis.index.diagnostics_for(&file).is_empty(),
+            "{:?}",
+            analysis.index.diagnostics_for(&file)
+        );
+    }
+
+    #[test]
+    fn duplicate_calculation_functions_are_diagnosed_across_files() {
+        let first = uri("first-function");
+        let second = uri("second-function");
+        let documents = HashMap::from([
+            (first, "function twice(n) { return n * 2 }".into()),
+            (second.clone(), "function twice(n) { return n + n }".into()),
+        ]);
+        let analysis = analyze_workspace(&[], &documents);
+        assert!(analysis
+            .index
+            .diagnostics_for(&second)
+            .iter()
+            .any(|diagnostic| diagnostic.code
+                == Some(NumberOrString::String("duplicate-function".into()))));
     }
 
     #[test]

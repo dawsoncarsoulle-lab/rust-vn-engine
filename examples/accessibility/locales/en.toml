@@ -1,0 +1,8 @@
+[strings]
+"a11y.title" = "Keyboard inventory"
+"a11y.hints" = "Show hints"
+"a11y.letter" = "Take the letter"
+"a11y.key" = "Take the key"
+"a11y.welcome" = "Press F8 for accessibility settings. Use Tab and the arrow keys to navigate; use Enter to activate a control. V toggles self-voicing when you are not editing a text field."
+"a11y.controls" = "Try the inventory using the keyboard or a screen reader. The focus outline is visible, and information is also presented as text."
+"a11y.done [selected]" = "Selected item: [selected]. Your choice is saved in the game state. Player accessibility preferences persist separately, so loading or rolling back a story does not remove them."

@@ -1,0 +1,29 @@
+# Dialogue sobre, lisible et accordé aux encres de l’Atlas.
+# Le véritable écran d’ouverture est programmé en RVN dans main.rvn.
+[textbox]
+background_color = "#101E26ED"
+height = 184.0
+padding = 28.0
+
+[text.name]
+font_size = 23.0
+color = "#E3BC75"
+
+[text.dialogue]
+font_size = 24.0
+color = "#F3E8CC"
+
+[choice]
+background_color = "#17323BF2"
+text_color = "#F8F1DD"
+number_color = "#E3BC75"
+font_size = 22.0
+
+[title_screen]
+enabled = false
+
+[title_screen.buttons.style]
+background_color = "#17323BF2"
+hover_color = "#29525DF2"
+pressed_color = "#326370FF"
+text_color = "#F8F1DD"

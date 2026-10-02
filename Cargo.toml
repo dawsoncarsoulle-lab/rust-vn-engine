@@ -3,12 +3,17 @@ members = [
     "rvn_parser",
     "rvn_graph",
     "rvn_ui",
+    "rvn_media",
     "rvn_core",
     "rvn_bevy",
     "rvn_cli",
     "rvn_lsp",
 ]
 resolver = "2"
+exclude = ["vendor/ffmpeg-sys-next"]
+
+[patch.crates-io]
+ffmpeg-sys-next = { path = "vendor/ffmpeg-sys-next" }
 
 [profile.dev]
 opt-level = 1

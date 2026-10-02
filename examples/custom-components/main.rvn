@@ -1,0 +1,106 @@
+// Reusable custom controls: all geometry and behavior are ordinary RVN.
+// Contrôles personnalisés réutilisables : dessin et comportement en RVN.
+function slider_draw(state, props, frame) {
+    local width = frame["width"]
+    local knob = 40 + state["value"] * (width - 80)
+    return [
+        canvas_rect([0,0,width,360], [0.025,0.045,0.075,1], 16),
+        canvas_rect([40,100,width-80,16], [0.12,0.18,0.25,1], 8),
+        canvas_rect([40,100,knob-40,16], props["color"], 8),
+        canvas_ellipse([knob-18,90,36,36], props["color"]),
+        canvas_text("" + to_int(state["value"] * 100) + "%", [40,35], [1,1,1,1], 32),
+        canvas_line([[40,150],[width-40,150]], [0.3,0.4,0.5,1], 2),
+        canvas_group([40,185,1,1,10,0.8], [0,0,180,105], [
+            canvas_rect([-30,-20,250,160], [0.08,0.24,0.4,1], 0),
+            canvas_polygon([[10,80],[70,10],[130,80],[70,55]], props["color"]),
+            canvas_image("emblem.png", [135,15,70,70])
+        ]),
+        canvas_hit("track", [20,75,width-40,65]),
+        canvas_hit("knob", [knob-20,85,40,46])
+    ]
+}
+function custom_slider(id, rect, color, value, label_key) {
+    return component(id, "canvas", {
+        "rect":rect, "draw":"slider_draw", "props":{"color":color},
+        "state":{"value":value,"dragging":false,"updates":0},
+        "auto_background":false, "accessible_label":"Custom slider", "accessible_label_key":label_key,
+        "events":{"pointer_down":"slider_pointer","pointer_move":"slider_pointer","pointer_up":"slider_pointer","pointer_cancel":"slider_pointer","wheel":"slider_wheel","key":"slider_key","tick":"slider_tick"}
+    }, [])
+}
+screen custom() {
+    return component("custom_root", "panel", {"rect":[100,100,1720,760],"background":[0.015,0.025,0.04,0.98],"radius":20}, [
+        component("heading", "text", {"rect":[40,24,1640,60],"text":"Two independent custom sliders","text_key":"custom.heading","font_size":40}, []),
+        component("help", "text", {"rect":[40,86,1640,48],"text":"Drag, scroll, or focus a slider and use the arrow keys.","text_key":"custom.help","font_size":24}, []),
+        custom_slider("first", [40,150,760,360], [0.05,0.8,0.75,1], 0.25, "custom.first"),
+        custom_slider("second", [860,150,760,360], [0.95,0.35,0.6,1], 0.75, "custom.second"),
+        component("status", "text", {"rect":[40,535,1640,52],"text":custom_last_event + " / " + custom_event_count + " / " + custom_last_hit + " / " + custom_last_key + " / " + custom_last_wheel,"font_size":24}, []),
+        component("note", "input", {"rect":[520,620,680,64],"binding":"custom_note","placeholder":"Write a note","placeholder_key":"custom.note","accessible_label":"Editable note","accessible_label_key":"custom.note"}, []),
+        component("reset", "button", {"rect":[40,620,360,64],"text":"Reset both sliders","text_key":"custom.reset","events":{"click":"reset_sliders"}}, []),
+        component("close", "button", {"rect":[1260,620,360,64],"text":"Close","text_key":"custom.close","events":{"click":"close_custom"}}, [])
+    ])
+}
+handler slider_pointer(event) {
+    set custom_last_event = event["kind"]
+    set custom_event_count = custom_event_count + 1
+    set custom_last_hit = dict_get(event["value"], "hit", "")
+    local state = event["state"]
+    if event["kind"] == "pointer_down" {
+        if event["value"]["button"] == "left" or event["value"]["button"] == "touch" {
+            set state = dict_set(state,"dragging",true)
+        }
+    }
+    if state["dragging"] and event["kind"] != "pointer_cancel" {
+        local value = max(0,min(1,(event["value"]["x"]-40)/(event["frame"]["width"]-80)))
+        set state = dict_set(state,"value",value)
+    }
+    if event["kind"] == "pointer_up" or event["kind"] == "pointer_cancel" {
+        set state = dict_set(state,"dragging",false)
+    }
+    ui.set_state(event["screen"],event["element"],state)
+}
+handler slider_wheel(event) {
+    set custom_last_event = "wheel"
+    set custom_event_count = custom_event_count + 1
+    set custom_last_wheel = event["value"]["dy"]
+    local value = event["state"]["value"]
+    if custom_last_wheel > 0 { set value = value + 0.05 }
+    if custom_last_wheel < 0 { set value = value - 0.05 }
+    ui.set_state(event["screen"],event["element"],dict_set(event["state"],"value",max(0,min(1,value))))
+}
+handler slider_key(event) {
+    set custom_last_event = "key"
+    set custom_event_count = custom_event_count + 1
+    set custom_last_key = event["value"]["code"]
+    if event["value"]["pressed"] {
+        local value = event["state"]["value"]
+        if custom_last_key == "ArrowLeft" {set value = value - 0.05}
+        if custom_last_key == "ArrowRight" {set value = value + 0.05}
+        if custom_last_key == "Home" {set value = 0}
+        if custom_last_key == "End" {set value = 1}
+        ui.set_state(event["screen"],event["element"],dict_set(event["state"],"value",max(0,min(1,value))))
+    }
+}
+handler slider_tick(event) {
+    ui.set_state(event["screen"],event["element"],dict_set(event["state"],"updates",event["state"]["updates"]+1))
+}
+handler reset_sliders(event) {
+    ui.set_state("custom","first",{"value":0.25,"dragging":false,"updates":0})
+    ui.set_state("custom","second",{"value":0.75,"dragging":false,"updates":0})
+    set custom_last_event = "reset"
+    set custom_event_count = custom_event_count + 1
+}
+handler close_custom(event) {ui.close("custom")}
+init {
+    set custom_last_event = "ready"
+    set custom_event_count = 0
+    set custom_last_hit = ""
+    set custom_last_key = ""
+    set custom_last_wheel = 0.0
+    set custom_note = "Camille"
+}
+label start
+    ui.open("custom",[],true,0)
+    "The custom controls keep independent state. Try saving and loading, then close the interface."
+    "Custom controls closed."
+    jump finished
+label finished

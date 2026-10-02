@@ -24,6 +24,7 @@ pub enum SaveError {
     SlotVide(u32),
     SlotProtege(u32),
     SlotHorsLimites { slot: u32, max: u32 },
+    Incompatible(String),
 }
 
 impl std::fmt::Display for SaveError {
@@ -34,6 +35,7 @@ impl std::fmt::Display for SaveError {
             Self::SlotVide(n) => write!(f, "slot {n} vide"),
             Self::SlotProtege(n) => write!(f, "la sauvegarde {n} est protégée"),
             Self::SlotHorsLimites { slot, max } => write!(f, "slot {slot} invalide (max {max})"),
+            Self::Incompatible(reason) => write!(f, "sauvegarde incompatible : {reason}"),
         }
     }
 }
@@ -58,6 +60,7 @@ pub enum SaveValue {
     Str(String),
     /// Lists are serialized as JSON arrays of SaveValue.
     List(Vec<SaveValue>),
+    Dict(std::collections::BTreeMap<String, SaveValue>),
 }
 
 impl From<&Value> for SaveValue {
@@ -68,6 +71,12 @@ impl From<&Value> for SaveValue {
             Value::Float(f) => SaveValue::Float(*f),
             Value::Str(s) => SaveValue::Str(s.clone()),
             Value::List(items) => SaveValue::List(items.iter().map(SaveValue::from).collect()),
+            Value::Dict(items) => SaveValue::Dict(
+                items
+                    .iter()
+                    .map(|(key, value)| (key.clone(), SaveValue::from(value)))
+                    .collect(),
+            ),
         }
     }
 }
@@ -80,6 +89,12 @@ impl From<SaveValue> for Value {
             SaveValue::Float(f) => Value::Float(f),
             SaveValue::Str(s) => Value::Str(s),
             SaveValue::List(items) => Value::List(items.into_iter().map(Value::from).collect()),
+            SaveValue::Dict(items) => Value::Dict(
+                items
+                    .into_iter()
+                    .map(|(key, value)| (key, Value::from(value)))
+                    .collect(),
+            ),
         }
     }
 }
@@ -199,6 +214,29 @@ impl From<SaveSprite> for SpriteState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveData {
     #[serde(default)]
+    pub accessibility: rvn_ui::accessibility::AccessibilitySettings,
+    #[serde(default)]
+    pub videos: crate::video::VideoState,
+    #[serde(default)]
+    pub layered: crate::composition::LayeredState,
+    #[serde(default)]
+    pub motions: crate::motion::MotionState,
+    #[serde(default)]
+    pub ui: crate::ui::UiState,
+    #[serde(default)]
+    pub story_identity: Option<String>,
+    #[serde(
+        default = "legacy_save_version",
+        deserialize_with = "read_save_version"
+    )]
+    pub format_version: u32,
+    #[serde(default)]
+    pub random: crate::random::RandomState,
+    #[serde(default)]
+    pub display_random: crate::random::RandomState,
+    #[serde(default)]
+    pub display_random_pc: Option<usize>,
+    #[serde(default)]
     pub last_dialogue: Option<crate::types::DialogueSnapshot>,
     pub slot: u32,
     pub label: String,
@@ -218,9 +256,34 @@ pub struct SaveData {
     pub typewriter: TypewriterState,
 }
 
+pub const SAVE_FORMAT_VERSION: u32 = 9;
+fn legacy_save_version() -> u32 {
+    1
+}
+fn read_save_version<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
+    let version = u32::deserialize(deserializer)?;
+    if (1..=SAVE_FORMAT_VERSION).contains(&version) {
+        Ok(version)
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "Unsupported save format {version}; supported versions: 1–{SAVE_FORMAT_VERSION}"
+        )))
+    }
+}
+
 impl SaveData {
     pub fn from_state(state: &GameState, slot: u32, label: String, script_name: String) -> Self {
         Self {
+            accessibility: state.accessibility.clone(),
+            motions: state.motions.clone(),
+            videos: state.videos.clone(),
+            layered: state.layered.clone(),
+            story_identity: state.story_identity.clone(),
+            ui: state.ui.clone(),
+            format_version: SAVE_FORMAT_VERSION,
+            random: state.random,
+            display_random: state.display_random,
+            display_random_pc: state.display_random_pc,
             last_dialogue: state.last_dialogue.clone(),
             slot,
             label,
@@ -231,7 +294,11 @@ impl SaveData {
             } else {
                 Some(state.background_image.clone())
             },
-            pc: state.current_interactive_pc,
+            pc: if state.motions.waiting.is_some() || state.videos.waiting.is_some() {
+                state.pc
+            } else {
+                state.current_interactive_pc
+            },
             background_image: state.background_image.clone(),
             call_stack: state.call_stack.clone(),
             vars: state
@@ -253,6 +320,16 @@ impl SaveData {
 
     pub fn into_game_state(self) -> GameState {
         GameState {
+            accessibility: self.accessibility,
+            speech_requests: Vec::new(),
+            motions: self.motions,
+            videos: self.videos,
+            layered: self.layered,
+            story_identity: self.story_identity,
+            ui: self.ui,
+            random: self.random,
+            display_random: self.display_random,
+            display_random_pc: self.display_random_pc,
             last_dialogue: self.last_dialogue,
             pc: self.pc,
             current_interactive_pc: self.pc,
@@ -804,7 +881,17 @@ mod tests {
         );
 
         GameState {
+            story_identity: None,
+            accessibility: Default::default(),
+            speech_requests: Vec::new(),
+            videos: Default::default(),
+            layered: Default::default(),
+            motions: Default::default(),
+            ui: Default::default(),
             pc: 7,
+            random: Default::default(),
+            display_random: Default::default(),
+            display_random_pc: None,
             last_dialogue: None,
             current_interactive_pc: 7,
             background_image: "plage.png".into(),
@@ -1086,7 +1173,17 @@ mod tests {
         );
 
         let state = GameState {
+            accessibility: Default::default(),
+            speech_requests: Vec::new(),
+            videos: Default::default(),
+            layered: Default::default(),
+            motions: Default::default(),
+            ui: Default::default(),
+            story_identity: None,
             pc: 0,
+            random: Default::default(),
+            display_random: Default::default(),
+            display_random_pc: None,
             last_dialogue: None,
             current_interactive_pc: 0,
             background_image: "".into(),

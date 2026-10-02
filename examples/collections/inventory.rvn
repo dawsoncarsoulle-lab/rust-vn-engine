@@ -1,0 +1,24 @@
+// Minimal collection-logic example. No external media required.
+// Exemple de logique d'inventaire, sans média externe.
+init {
+    character.create("narrator", "")
+    set inventory = ["letter"]
+}
+
+label start
+    narrator "You have a letter. / Tu as une lettre."
+    choice {
+        "Take the key / Prendre la clé" => {
+            set inventory = list_append(inventory, "key")
+        }
+        "Keep only the letter / Garder seulement la lettre" => { }
+    }
+    if contains(inventory, "key") {
+        narrator "The door opens. / La porte s'ouvre."
+    } else {
+        narrator "The door stays locked. / La porte reste fermée."
+    }
+    narrator "Inventory / Inventaire: [inventory]"
+    jump finished
+
+label finished

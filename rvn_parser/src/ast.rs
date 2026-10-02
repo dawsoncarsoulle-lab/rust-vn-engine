@@ -114,6 +114,7 @@ pub enum Value {
     Float(f32),
     Str(String),
     List(Vec<Value>),
+    Dict(std::collections::BTreeMap<String, Value>),
 }
 
 impl std::fmt::Display for Value {
@@ -126,6 +127,13 @@ impl std::fmt::Display for Value {
             Value::List(items) => {
                 let parts: Vec<String> = items.iter().map(|v| v.to_string()).collect();
                 write!(f, "[{}]", parts.join(", "))
+            }
+            Value::Dict(items) => {
+                let parts = items
+                    .iter()
+                    .map(|(key, value)| format!("{key:?}: {value}"))
+                    .collect::<Vec<_>>();
+                write!(f, "{{{}}}", parts.join(", "))
             }
         }
     }
@@ -140,7 +148,7 @@ pub type Condition = Expr;
 
 // ─── IMAGEMAP ────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Rect {
     pub x1: i32,
     pub y1: i32,
@@ -165,7 +173,7 @@ impl Rect {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Hotspot {
     pub name: Option<String>,
     pub area: Rect,
@@ -175,7 +183,7 @@ pub struct Hotspot {
 
 // ─── ANIMATIONS ──────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AnimationValue {
     Bool(bool),
     Int(i64),
@@ -183,7 +191,7 @@ pub enum AnimationValue {
     Str(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnimationParam {
     pub name: String,
     pub value: AnimationValue,
@@ -193,14 +201,14 @@ pub struct AnimationParam {
 
 /// A single option within a `choice` block.
 /// `condition` is optional — when present, the option only appears if it evaluates to true.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChoiceOption {
     pub label: InterpolatedText,
     pub condition: Option<Condition>,
     pub body: Vec<Statement>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Statement {
     /// Charge un ou plusieurs fichiers .rvn avant exécution.
     /// Cette instruction est résolue par le loader de projet avant de créer le moteur.
@@ -208,6 +216,110 @@ pub enum Statement {
         paths: Vec<String>,
     },
     Init {
+        body: Vec<Statement>,
+    },
+    /// Pure computation: assignments are local and narrative operations are forbidden.
+    Function {
+        name: String,
+        parameters: Vec<String>,
+        body: Vec<Statement>,
+    },
+    /// A pure, reusable interface description, evaluated against current game variables.
+    Screen {
+        name: String,
+        parameters: Vec<String>,
+        body: Vec<Statement>,
+    },
+    /// Non-blocking event code. Parameters and `local` bindings are not game variables.
+    Handler {
+        name: String,
+        parameters: Vec<String>,
+        body: Vec<Statement>,
+    },
+    LocalVar {
+        name: String,
+        value: Expr,
+    },
+    UiOpen {
+        name: Expr,
+        arguments: Expr,
+        modal: Expr,
+        layer: Expr,
+    },
+    UiClose {
+        name: Expr,
+    },
+    UiFocus {
+        name: Expr,
+        element: Expr,
+    },
+    UiSetState {
+        name: Expr,
+        element: Expr,
+        state: Expr,
+    },
+    MotionPlay {
+        target: Expr,
+        definition: Expr,
+    },
+    MotionStop {
+        target: Expr,
+    },
+    MotionWait {
+        target: Expr,
+    },
+    CharacterCompose {
+        character: Expr,
+        definition: Expr,
+    },
+    CharacterAttributes {
+        character: Expr,
+        attributes: Expr,
+    },
+    VideoPlay {
+        name: Expr,
+        definition: Expr,
+    },
+    VideoPause {
+        name: Expr,
+    },
+    VideoResume {
+        name: Expr,
+    },
+    VideoStop {
+        name: Expr,
+    },
+    VideoSkip {
+        name: Expr,
+    },
+    VideoSeek {
+        name: Expr,
+        seconds: Expr,
+    },
+    VideoVolume {
+        name: Expr,
+        volume: Expr,
+    },
+    VideoWait {
+        name: Expr,
+    },
+    AccessibilityConfigure {
+        settings: Expr,
+    },
+    AccessibilitySpeak {
+        text: Expr,
+    },
+    AccessibilityStop,
+    FunctionReturn {
+        value: Expr,
+    },
+    While {
+        condition: Expr,
+        body: Vec<Statement>,
+    },
+    ForEach {
+        name: String,
+        collection: Expr,
         body: Vec<Statement>,
     },
     Config {

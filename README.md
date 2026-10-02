@@ -12,10 +12,16 @@ A Rust visual novel runtime, scripting language and command-line toolchain.
 - Characters, backgrounds, music, effects and transitions.
 - Save/load, persistent progress, rollback and localization.
 - Custom menu documents and narrative UI.
+- Reusable programmable interfaces, custom 2D drawing and pointer/keyboard events.
+- Functions, loops, collections, saved random state and component state with rollback.
+- Composable animations, layered characters and accessibility settings.
+- Optional bounded WebM video playback, with dynamically linked FFmpeg on desktop.
 - A CLI for project creation, checks, desktop builds and Web exports.
 - Graph import/transpilation and language-server tooling.
 
 These are implemented capabilities, not a claim that every combination or platform is production-ready.
+
+Explore the [editable feature examples](docs/feature-examples.md), including the original adventure **L’Atlas des Brumes**, and the [programmable component guide](docs/programmable-components.md). Blueprint numeric operators use strict type rules; String concatenation uses a separate Append node. Existing dynamic `.rvn` scripts retain their compatibility behaviour.
 
 ## Build from source
 
@@ -30,6 +36,8 @@ cargo test --release -p rvn_parser -p rvn_core -p rvn_graph -p rvn_ui -p rvn_cli
 Keep the `rvn` CLI and `rvn_bevy` runtime together when packaging. For Web builds, install the `wasm32-unknown-unknown` target and a wasm-bindgen CLI compatible with the version in Cargo.lock. Consult the CLI help for available build options.
 
 The packaged editor includes its runtimes; its users do not need Rust/Cargo.
+
+Video-enabled desktop builds require the audited shared-library prefix produced by [tools/build-ffmpeg-lgpl.sh](tools/build-ffmpeg-lgpl.sh), matching FFmpeg sources/notices, and a 64-bit bindgen target. Video is opt-in with `--features video`; browser playback uses the browser's native media support.
 
 ## Validation status
 

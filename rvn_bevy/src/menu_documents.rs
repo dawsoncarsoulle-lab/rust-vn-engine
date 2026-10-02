@@ -51,6 +51,7 @@ mod text_states;
 pub(crate) use animations::VisualNode;
 pub(crate) use confirmation::ConfirmationButton;
 pub(crate) use dropdown::{Dropdown, LanguageSelect};
+pub(crate) use narrative::{ChoicesRoot, NarrativeRoot};
 pub(crate) use scrollbars::Scrollbar;
 fn report_preview_error(session: &rvn_ui::Session) {
     if std::env::var_os("RVN_UI_PREVIEW_DATA").is_none() {
@@ -198,6 +199,15 @@ pub(crate) struct Menus {
     animation_requests: Vec<(String, String, rvn_ui::AnimationClip)>,
 }
 impl Menus {
+    pub(crate) fn keyboard_focus(&self) -> Option<Entity> {
+        self.focus
+    }
+    pub(crate) fn assistive_focus(&mut self, entity: Entity, key: &MenuFocus) {
+        self.focus = Some(entity);
+        self.focus_key = Some(key.1.clone());
+    }
+}
+impl Menus {
     pub(crate) fn document(&self) -> Option<&Document> {
         self.doc.as_ref()
     }
@@ -223,8 +233,13 @@ fn gamepad_input(
     mut pads: ResMut<ButtonInput<GamepadButton>>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut menus: ResMut<Menus>,
+    accessibility: Res<crate::accessibility::Accessibility>,
 ) {
     menus.gamepad_navigation = false;
+    if accessibility.blocked {
+        pads.clear();
+        return;
+    }
     let pressed: Vec<_> = pads.get_just_pressed().copied().collect();
     for button in pressed {
         let key = match button.button_type {
@@ -353,8 +368,15 @@ fn sliders(
 #[derive(Component)]
 struct MenuRoot;
 #[derive(Resource)]
-struct MenuFont(Handle<Font>);
+pub(crate) struct MenuFont(pub(crate) Handle<Font>);
 fn load_menu_font(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
+    // Bevy's built-in Fira Mono is an ASCII subset. Use the already licensed,
+    // bundled Unicode font for default dialogue/choices as well as menus.
+    fonts.insert(
+        Handle::<Font>::default().id(),
+        Font::try_from_bytes(include_bytes!("../resources/DejaVuSans.ttf").to_vec())
+            .expect("Bundled default font"),
+    );
     commands.insert_resource(MenuFont(
         fonts.add(
             Font::try_from_bytes(include_bytes!("../resources/DejaVuSans.ttf").to_vec())
@@ -374,7 +396,7 @@ pub(crate) struct MenuElement {
     pressed: Color,
 }
 #[derive(Component)]
-struct MenuFocus(i32, String);
+pub(crate) struct MenuFocus(pub(crate) i32, pub(crate) String);
 #[derive(Component)]
 struct FocusAppearance(Color);
 fn focus_visuals(
@@ -2367,7 +2389,11 @@ fn interact(
                         });
                         match result {
                             Ok((data, target)) => {
-                                ctx.engine.0.load_data(data);
+                                match ctx.engine.0.load_data(data) {
+                                    Ok(rvn_core::engine::LoadCompatibility::LegacyUnchecked) => warn!("Ancienne sauvegarde : compatibilité après modification de l’histoire non vérifiable"),
+                                    Ok(_) => {},
+                                    Err(error) => { error!("Reprise refusée : {error}"); continue; }
+                                }
                                 crate::systems::save_menu::apply_loaded_game(
                                     &mut ctx.engine,
                                     &mut ctx.render,

@@ -3,6 +3,10 @@ use bevy::prelude::*;
 #[derive(Component)]
 pub struct VnBackground;
 
+/// The outgoing image may still be fading, but belongs to the previous scene.
+#[derive(Component)]
+pub(crate) struct CurrentMotionBackground;
+
 #[derive(Component)]
 pub struct VnCinematic;
 

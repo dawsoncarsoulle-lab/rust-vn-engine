@@ -1,0 +1,8 @@
+[strings]
+"motion.intro" = "Le fond, le jeton et la carte s’animent ensemble. Sauvegardez pendant le mouvement, puis chargez ou revenez en arrière pour restaurer leurs horloges."
+"motion.after_wait" = "Le récit reprend seulement quand l’animation du jeton est terminée. La pose finale reste affichée jusqu’au remplacement ou à l’arrêt."
+"motion.stopped" = "L’arrêt restaure l’apparence d’origine des cibles. Le mouvement et la teinte ne s’accumulent pas entre les images."
+"motion.end" = "Les cibles ont disparu. Leurs animations sont annulées."
+"motion.caption" = "Animations sauvegardées et repositionnables"
+"motion.spline" = "Le jeton suit une spline passant par quatre points, avec une fonction RVN pure pour son rythme. Sauvegardez et chargez au milieu du vol."
+"motion.curve" = "La spline est terminée. Sa rotation utilisait une courbe Bézier personnalisée. Dans l’éditeur, ouvrez curved_flight et déplacez les points de sa trajectoire."

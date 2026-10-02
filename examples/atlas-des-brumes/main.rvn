@@ -1,0 +1,1138 @@
+// SOURCE CANONIQUE — modifiez ce fichier dans l’éditeur RVN / Blueprint.
+// Les fragments authoring sont seulement l’historique de construction.
+
+// L’Atlas des Brumes — original RVN interface; no borrowed game assets.
+// Main owns init/story. This file owns reusable drawings/screens/handlers.
+
+function atlas_text(text, position, color, size) {
+    if atlas_high_contrast {set color = [1,1,0.91,1]}
+    return canvas_text(text,position,color,size*atlas_text_scale)
+}
+
+function atlas_items() {
+    return [
+        {"id":"boussole","name":"Boussole","detail":"Une aiguille d’obsidienne qui retrouve les chemins perdus.","verb":"Équiper"},
+        {"id":"lanterne","name":"Lanterne","detail":"Une flamme bleue révèle les inscriptions noyées de brume.","verb":"Équiper"},
+        {"id":"grappin","name":"Grappin","detail":"Son câble de cuivre permet d’atteindre les corniches.","verb":"Équiper"},
+        {"id":"carnet","name":"Carnet","detail":"Les observations du voyage sont conservées ici.","verb":"Examiner"},
+        {"id":"sceau","name":"Sceau","detail":"La marque du Havre ouvre les portes des archivistes.","verb":"Examiner"},
+        {"id":"carte","name":"Carte","detail":"Consultez les six destinations sur le volet de droite.","verb":"Déplier"},
+        {"id":"potion","name":"Élixir","detail":"Rend un point de vitalité. Trois doses au départ.","verb":"Boire"},
+        {"id":"cle","name":"Clé ancienne","detail":"Gardez-la : une serrure de la tour porte le même motif.","verb":"Examiner"},
+        {"id":"corde","name":"Corde","detail":"Un solide cordage tressé par les marins du Havre.","verb":"Équiper"},
+        {"id":"monocle","name":"Monocle","detail":"Sa lentille révèle le relief des glyphes les plus fins.","verb":"Équiper"},
+        {"id":"ocarina","name":"Sifflet","detail":"Un instrument de terre cuite, sculpté comme un oiseau.","verb":"Équiper"},
+        {"id":"amulette","name":"Amulette","detail":"Un talisman de bronze à porter pendant la traversée.","verb":"Équiper"},
+        {"id":"relique","name":"Relique","detail":"Un vestige des anciens cartographes. À conserver.","verb":"Examiner"},
+        {"id":"cristal","name":"Cristaux","detail":"Deux fragments de lumière pour les mécanismes anciens.","verb":"Examiner"},
+        {"id":"fiole","name":"Fiole vide","detail":"Une fiole scellable pour recueillir la rosée de brume.","verb":"Équiper"},
+        {"id":"plume","name":"Plume","detail":"Une plume argentée trouvée près de l’observatoire.","verb":"Examiner"},
+        {"id":"coquillage","name":"Conque","detail":"La mer résonne encore à l’intérieur de sa spirale.","verb":"Examiner"},
+        {"id":"fragment","name":"Fragment","detail":"Un morceau de l’Atlas, à rapporter aux Archives.","verb":"Examiner"}
+    ]
+}
+
+function atlas_places() {
+    return [
+        {"id":"havre","name":"Le Havre des Brumes","short":"Havre","x":128,"y":337,"detail":"Le port, ses lanternes et le premier départ.","hint":"Retourner au port"},
+        {"id":"observatoire","name":"L’Observatoire","short":"Observatoire","x":305,"y":99,"detail":"Une coupole pour lire les étoiles au-dessus de la mer.","hint":"Monter vers les étoiles"},
+        {"id":"clairiere","name":"La Clairière d’Azur","short":"Clairière","x":485,"y":238,"detail":"Des arbres bleus protègent un ancien passage.","hint":"Traverser la forêt"},
+        {"id":"archives","name":"Les Archives noyées","short":"Archives","x":670,"y":130,"detail":"Les souvenirs des anciens attendent entre les rayonnages.","hint":"Chercher le fragment"},
+        {"id":"falaises","name":"Les Falaises de Verre","short":"Falaises","x":834,"y":262,"detail":"Des passerelles fragiles dominent la côte orientale.","hint":"Longer les corniches"},
+        {"id":"tour","name":"La Tour du Veilleur","short":"Tour","x":934,"y":415,"detail":"L’ultime phare surveille le passage de la brume.","hint":"Atteindre le phare"}
+    ]
+}
+
+function atlas_location_name(id) {
+    for place in atlas_places() { if place["id"] == id { return place["name"] } }
+    return "Route inconnue"
+}
+
+function atlas_neighbor(page, delta) {
+    local target = page + delta
+    if target < 0 {return 2}
+    if target > 2 {return 0}
+    return target
+}
+
+function atlas_short(text, limit) {
+    if len(text) > limit {return substring(text,0,limit-1)+"…"}
+    return text
+}
+
+function atlas_wrap(text, limit) {
+    local result = ""
+    local line = ""
+    for word in split(text," ") {
+        if len(line)+len(word)+1 > limit and len(line) > 0 {
+            set result = result + line + "\n"
+            set line = word
+        } else {
+            if line == "" {set line = word}
+            else {set line = line + " " + word}
+        }
+    }
+    return result + line
+}
+
+function atlas_equipped_name(id) {
+    for item in atlas_items() {if item["id"] == id {return item["name"]}}
+    return "Aucun"
+}
+
+function atlas_panel(title, subtitle) {
+    // Layered bevels are authored primitives, not an HTML mockup.
+    local drawing = [
+        canvas_rect([8,12,1152,718],[0,0,0,0.58],30),
+        canvas_rect([0,0,1160,730],[0.48,0.36,0.20,1],24),
+        canvas_rect([3,3,1154,724],[0.82,0.69,0.43,1],22),
+        canvas_rect([7,7,1146,716],[0.18,0.16,0.14,1],19),
+        canvas_rect([13,13,1134,704],[0.055,0.075,0.085,0.98],17),
+        canvas_image("ui/frame.png",[0,0,1160,730])
+    ]
+    if atlas_high_contrast {set drawing = list_append(drawing,canvas_rect([20,20,1120,690],[0,0,0,0.87],14))}
+    return list_concat(drawing,[
+        canvas_rect([125,31,910,47],[0.025,0.05,0.065,0.92],8),
+        canvas_rect([132,33,896,2],[1,0.89,0.62,0.30],1),
+        canvas_line([[34,82],[1126,82]],[0.70,0.55,0.31,0.86],2),
+        atlas_text(title,[146,38],[0.98,0.91,0.70,1],31),
+        atlas_text(subtitle,[52,89],[0.70,0.74,0.69,1],19),
+        canvas_line([[34,648],[1126,648]],[0.57,0.45,0.27,0.8],2)
+    ])
+}
+
+function atlas_item_icon(index, selected) {
+    local gold = [0.88,0.73,0.43,1]
+    local ink = [0.05,0.12,0.16,1]
+    local glow = [0.22,0.77,0.79,1]
+    if not selected {set glow = [0.40,0.59,0.60,1]}
+    if index == 0 or index == 1 or index == 2 or index == 4 or index == 7 or index == 13 {
+        return [canvas_image("icons/"+atlas_items()[index]["id"]+".png",[-11,-2,90,74])]
+    }
+    if index == 0 {
+        return [canvas_ellipse([8,4,52,52],gold),canvas_ellipse([13,9,42,42],ink),canvas_polygon([[34,10],[44,41],[34,34],[24,47]],glow),canvas_ellipse([31,28,6,6],gold)]
+    }
+    if index == 1 {
+        return [canvas_rect([18,15,34,39],gold,5),canvas_rect([24,19,22,28],ink,2),canvas_polygon([[34,22],[43,39],[34,47],[29,37]],glow),canvas_line([[25,15],[25,5],[45,5],[45,15]],gold,4)]
+    }
+    if index == 2 {
+        return [canvas_line([[15,55],[49,16]],gold,7),canvas_line([[36,18],[48,4],[58,17]],glow,5),canvas_line([[43,25],[56,13]],gold,5)]
+    }
+    if index == 3 or index == 5 {
+        return [canvas_polygon([[9,8],[30,12],[55,7],[55,54],[30,57],[9,52]],gold),canvas_line([[30,13],[30,53]],ink,3),canvas_line([[15,23],[24,25],[15,38],[24,40]],ink,2),canvas_line([[37,22],[49,20],[37,38],[49,36]],ink,2)]
+    }
+    if index == 4 {
+        return [canvas_ellipse([12,10,46,46],gold),canvas_ellipse([18,16,34,34],ink),canvas_polygon([[34,19],[45,38],[24,38]],glow),canvas_rect([30,2,10,14],gold,2)]
+    }
+    if index == 6 or index == 14 {
+        return [canvas_rect([25,6,20,12],gold,3),canvas_rect([28,14,14,17],glow,3),canvas_ellipse([15,25,42,33],gold),canvas_ellipse([20,30,32,23],glow)]
+    }
+    if index == 7 {
+        return [canvas_ellipse([6,7,30,30],gold),canvas_ellipse([13,14,16,16],ink),canvas_line([[30,32],[55,55],[55,46],[48,46]],gold,7)]
+    }
+    if index == 8 or index == 16 {
+        return [canvas_ellipse([8,8,50,50],gold),canvas_ellipse([15,15,36,36],ink),canvas_ellipse([23,23,20,20],glow),canvas_line([[29,30],[39,41],[55,52]],gold,3)]
+    }
+    if index == 9 {
+        return [canvas_ellipse([8,5,45,45],gold),canvas_ellipse([13,10,35,35],[0.25,0.52,0.63,0.9]),canvas_line([[47,43],[58,55]],gold,7)]
+    }
+    if index == 10 {
+        return [canvas_ellipse([8,18,53,34],glow),canvas_polygon([[35,20],[44,5],[54,21]],gold),canvas_ellipse([21,25,7,7],ink),canvas_ellipse([36,30,7,7],ink)]
+    }
+    if index == 11 {
+        return [canvas_line([[11,6],[34,23],[57,6]],gold,3),canvas_polygon([[34,18],[57,36],[34,59],[11,36]],gold),canvas_polygon([[34,25],[47,36],[34,50],[22,36]],glow)]
+    }
+    if index == 12 or index == 13 or index == 17 {
+        return [canvas_polygon([[34,4],[55,19],[46,49],[30,60],[10,27]],gold),canvas_polygon([[34,10],[48,22],[38,50],[21,29]],glow),canvas_line([[34,10],[29,39],[38,50]],ink,2)]
+    }
+    return [canvas_polygon([[47,4],[54,18],[26,52],[13,55],[18,39]],gold),canvas_line([[17,53],[47,12]],ink,3),canvas_line([[28,33],[38,34],[34,24],[44,25]],glow,2)]
+}
+
+function atlas_identity_panel(props) {
+    return list_concat(atlas_panel("IDENTITÉ", "Un nom, une origine, un chemin à inventer."),[
+        canvas_rect([50,137,350,480],[0.01,0.025,0.035,0.84],16),
+        canvas_rect([54,141,342,4],[0.78,0.64,0.39,0.7],2),
+        canvas_image("portraits/player.png",[56,144,338,418]),
+        atlas_text("CARTOGRAPHE",[106,574],[0.79,0.73,0.57,1],22),
+        atlas_text("Prénom",[450,163],[0.76,0.73,0.63,1],20),
+        atlas_text("Nom",[450,253],[0.76,0.73,0.63,1],20),
+        atlas_text("Origine",[450,343],[0.76,0.73,0.63,1],20),
+        canvas_line([[450,442],[1085,442]],[0.48,0.46,0.34,0.7],1),
+        atlas_text("CONFORT DE LECTURE",[450,461],[0.80,0.80,0.67,1],18),
+        atlas_text("Taille du texte : "+to_int(atlas_text_scale*100)+" %",[775,541],[0.85,0.87,0.77,1],18),
+        atlas_text("Nom, origine et réglages sont sauvegardés.",[450,606],[0.58,0.68,0.69,1],18),
+        atlas_text("Tab : champs · Entrée : atlas · Q / E : volets",[52,680],[0.64,0.69,0.64,1],21)
+    ])
+}
+
+function atlas_inventory_panel(props) {
+    local selected = props["selected"]
+    local items = props["items"]
+    local quantities = props["quantities"]
+    local drawing = atlas_panel("INVENTAIRE", "Dix-huit emplacements • six colonnes • trois rangées")
+    local i = 0
+    while i < 18 {
+        local row = i / 6
+        local column = i - row * 6
+        local x = 48 + column * 177
+        local y = 131 + row * 132
+        local active = i == selected
+        local edge = [0.29,0.34,0.34,1]
+        local fill = [0.065,0.095,0.11,1]
+        if active {set edge = [0.89,0.76,0.44,1] set fill = [0.13,0.24,0.27,1]}
+        local opacity = 1.0
+        if quantities[i] <= 0 {set opacity = 0.28}
+        set drawing = list_append(drawing, canvas_group([x,y,1,1,0,opacity],[],[
+            canvas_rect([0,0,162,120],edge,10),
+            canvas_rect([2,2,158,116],fill,8),
+            canvas_rect([5,4,152,2],[0.69,0.75,0.65,0.22],1),
+            canvas_group([45,10,1,1,0,1],[],atlas_item_icon(i,active)),
+            atlas_text(items[i]["name"],[10,80],[0.84,0.84,0.74,1],19),
+            atlas_text(""+quantities[i],[131,10],[0.63,0.87,0.80,1],19),
+            canvas_hit("item_"+i,[0,0,162,120])
+        ]))
+        set i = i + 1
+    }
+    local detail = items[selected]
+    set drawing = list_concat(drawing,[
+        atlas_text(detail["name"],[54,548],[0.96,0.86,0.59,1],28),
+        atlas_text(detail["detail"],[54,586],[0.71,0.76,0.70,1],20),
+        atlas_text("Équipé : "+atlas_equipped_name(props["equipped"]),[760,550],[0.47,0.75,0.73,1],20),
+        atlas_text("Flèches : sélectionner · Entrée : "+detail["verb"],[52,680],[0.64,0.69,0.64,1],21)
+    ])
+    return drawing
+}
+
+function atlas_can_travel(index, quantities) {
+    if index == 1 {return quantities[1] > 0}
+    if index == 3 {return quantities[4] > 0}
+    if index == 4 {return quantities[2] > 0}
+    if index == 5 {return quantities[7] > 0 and quantities[13] > 0}
+    return true
+}
+
+function atlas_route_requirement(index) {
+    if index == 1 {return "Une lanterne est nécessaire pour cette route."}
+    if index == 3 {return "Le sceau des archivistes est nécessaire."}
+    if index == 4 {return "Un grappin est nécessaire pour les corniches."}
+    if index == 5 {return "Il faut la clé ancienne et un cristal pour la tour."}
+    return "Cette route est ouverte."
+}
+
+function atlas_route_status(index, quantities) {
+    if atlas_can_travel(index,quantities) {return "Route ouverte : Entrée pour voyager."}
+    return atlas_route_requirement(index)
+}
+
+function atlas_map_panel(state, props) {
+    local places = props["places"]
+    local marker = props["marker"]
+    local drawing = list_concat(atlas_panel("CARTE DU MONDE", "Six routes, six rencontres. Choisissez votre destination."),[
+        canvas_rect([54,120,1052,530],[0.55,0.46,0.29,1],6),
+        canvas_image("maps/world.png",[58,124,1044,522]),
+        canvas_line([[189,456],[370,222],[554,358],[744,252],[912,382],[1014,533]],[0.89,0.72,0.39,0.6],3)
+    ])
+    local i = 0
+    while i < 6 {
+        local place = places[i]
+        local x = 58 + place["x"] * (1044.0/1020.0)
+        local y = 124 + place["y"] * (522.0/530.0)
+        local active = i == marker
+        local color = [0.86,0.66,0.36,1]
+        if not atlas_can_travel(i,props["quantities"]) {set color = [0.42,0.43,0.40,1]}
+        if place["id"] == props["location"] {set color = [0.15,0.8,0.78,1]}
+        local radius = 11
+        if active {set radius = 17}
+        set drawing = list_concat(drawing,[
+            canvas_ellipse([x-radius-4,y-radius-4,radius*2+8,radius*2+8],[0.02,0.08,0.11,0.90]),
+            canvas_ellipse([x-radius,y-radius,radius*2,radius*2],color),
+            canvas_ellipse([x-4,y-5,7,7],[1,0.96,0.75,0.85]),
+            canvas_hit("marker_"+i,[x-30,y-30,60,60])
+        ])
+        set i = i + 1
+    }
+    local place = places[marker]
+    set drawing = list_concat(drawing,[
+        canvas_rect([68,582,720,63],[0.025,0.065,0.075,0.94],8),
+        atlas_text(place["name"],[81,590],[0.97,0.89,0.65,1],24),
+        atlas_text(atlas_route_status(marker,props["quantities"]),[81,621],[0.67,0.73,0.67,1],18),
+        atlas_text("Flèches : lieu · Entrée : voyager · Échap : retour",[52,680],[0.64,0.69,0.64,1],21)
+    ])
+    local hover = state["hover"]
+    if hover >= 0 and hover < 6 {
+        local point = places[hover]
+        local x = min(770,58+point["x"]*(1044.0/1020.0)-75)
+        local y = max(131,124+point["y"]*(522.0/530.0)-93)
+        set drawing = list_concat(drawing,[
+            canvas_rect([x+4,y+5,295,58],[0,0,0,0.42],9),
+            canvas_rect([x,y,295,58],[0.08,0.17,0.18,0.98],9),
+            canvas_line([[x+9,y+3],[x+285,y+3]],[0.83,0.70,0.39,1],2),
+            atlas_text(point["short"],[x+15,y+15],[1,0.91,0.68,1],23)
+        ])
+    }
+    return drawing
+}
+
+function atlas_page_transform(page, view) {
+    local distance = page - view
+    if distance > 1.5 {set distance = distance - 3}
+    if distance < -1.5 {set distance = distance + 3}
+    local side = min(1,abs(distance))
+    local scale = 1 - side * 0.73
+    local x = 380 + side * 1200
+    if distance < 0 {set x = 380 - side * 350}
+    local y = 170 + side * 100
+    return [x,y,scale,1-side*0.30,0,1-side*0.28]
+}
+
+function atlas_draw(state, props, frame) {
+    local view = props["view"]
+    local drawing = [
+        canvas_rect([0,0,1920,1080],[0.01,0.025,0.033,0.62],0),
+        canvas_line([[80,110],[1840,110]],[0.61,0.47,0.27,0.5],2),
+        atlas_text("L’ATLAS DES BRUMES",[590,42],[0.95,0.85,0.63,1],44),
+        atlas_text(""+props["gold"]+" éclats",[1640,46],[0.98,0.78,0.39,1],27),
+        atlas_text(atlas_short(props["name"],30)+"  /  "+atlas_location_name(props["location"]),[592,984],[0.61,0.73,0.71,1],19),
+        atlas_text(atlas_short(props["quest"],76),[380,950],[0.62,0.78,0.76,1],20),
+        atlas_text(props["notice"],[380,925],[0.86,0.76,0.52,1],21)
+    ]
+    local heart = 0
+    while heart < props["max_health"] {
+        local color = [0.18,0.27,0.28,1]
+        if heart < props["health"] {set color = [0.23,0.83,0.76,1]}
+        local x = 74 + heart * 44
+        set drawing = list_append(drawing,canvas_polygon([[x+16,78],[x,62],[x,53],[x+7,47],[x+16,54],[x+25,47],[x+32,53],[x+32,62]],color))
+        set heart = heart + 1
+    }
+    // Draw back pages first, then the active page so the front always occludes.
+    local pages = [0,2,1]
+    if props["page"] == 0 {set pages = [2,1,0]}
+    if props["page"] == 2 {set pages = [0,1,2]}
+    for page in pages {
+        local content = []
+        if page == 0 {set content = atlas_identity_panel(props)}
+        if page == 1 {set content = atlas_inventory_panel(props)}
+        if page == 2 {set content = atlas_map_panel(state,props)}
+        if page != props["page"] {set content = list_append(content,canvas_hit("page_"+page,[0,0,1160,730]))}
+        set drawing = list_append(drawing,canvas_group(atlas_page_transform(page,view),[0,0,1160,730],content))
+    }
+    return drawing
+}
+
+function atlas_button(id, text, rect, event_handler, data) {
+    // A transparent presentation container keeps the button and its caption
+    // separate. Only the original button receives hits and keyboard actions.
+    local caption_height = 23 * atlas_text_scale * 1.35
+    local caption_y = max(0,(rect[3]-caption_height)/2)
+    local caption = component(id+"_caption","text",{
+        "rect":[0,caption_y,rect[2],caption_height],"text":text,"text_key":text,
+        "font_size":23,"padding":0,"text_align":"center","focus_order":-1,
+        "foreground":[0.94,0.84,0.61,1],"auto_background":false,
+        "background":[0,0,0,0],"border_width":0
+    },[])
+    local button = component(id,"button",{
+        "rect":[0,0,rect[2],rect[3]],"text":"","accessible_label":text,"accessible_label_key":text,"font_size":23,"padding":12,"radius":9,"text_align":"center","align":"center","justify":"center",
+        "background":[0.075,0.115,0.13,0.95],"foreground":[0.94,0.84,0.61,1],
+        "border_width":2,"border_color":[0.52,0.43,0.28,1],
+        "hover_background":[0.15,0.25,0.27,1],"pressed_background":[0.10,0.18,0.20,1],"focus_color":[0.26,0.84,0.80,1],
+        "event_data":data,"events":{"click":event_handler,"key":"atlas_button_key"}
+    },[])
+    return component(id+"_presentation","panel",{
+        "rect":rect,"auto_background":false,"background":[0,0,0,0],
+        "padding":0,"border_width":0,"focus_order":-1
+    },[button,caption])
+}
+
+screen atlas() {
+    local items = atlas_items()
+    local places = atlas_places()
+    local settled = abs(atlas_page-atlas_view) < 0.04
+    local children = [component("atlas_surface","canvas",{
+        "rect":[0,0,1920,1080],"draw":"atlas_draw","auto_background":false,"border_width":0,
+        "state":{"hover":-1},"accessible_label":"Atlas : identité, inventaire et carte. Q et E changent de volet ; les flèches sélectionnent ; Entrée confirme.",
+        "props":{"page":atlas_page,"view":atlas_view,"selected":atlas_selected,"marker":atlas_marker,"items":items,"places":places,"quantities":atlas_quantities,"equipped":atlas_equipped,"location":atlas_location,"name":first_name+" "+last_name,"notice":atlas_notice,"quest":atlas_quest,"reduced_motion":atlas_reduced_motion,"gold":atlas_gold,"health":atlas_health,"max_health":atlas_max_health},
+        "events":{"pointer_down":"atlas_pointer","pointer_move":"atlas_hover","pointer_cancel":"atlas_hover","tick":"atlas_tick"},"focus_order":0
+    },[])]
+    set children = list_concat(children,[
+        atlas_button("atlas_identity_tab","IDENTITÉ",[405,112,320,44],"atlas_tab",{"page":0}),
+        atlas_button("atlas_inventory_tab","INVENTAIRE",[800,112,320,44],"atlas_tab",{"page":1}),
+        atlas_button("atlas_map_tab","CARTE",[1195,112,320,44],"atlas_tab",{"page":2}),
+        atlas_button("atlas_previous","Q  ‹",[37,766,245,60],"atlas_step",{"delta":-1}),
+        atlas_button("atlas_next","›  E",[1638,766,245,60],"atlas_step",{"delta":1}),
+        atlas_button("atlas_return","Échap · Retour",[1510,986,350,56],"atlas_close",{})
+    ])
+    if atlas_page == 0 and settled {
+        set children = list_concat(children,[
+            component("atlas_first_name","input",{"rect":[830,365,620,55],"binding":"first_name","font_size":26,"accessible_label":"Prénom du cartographe","accessible_label_key":"Prénom du cartographe","placeholder":"Prénom","placeholder_key":"Prénom","background":[0.035,0.075,0.09,1],"foreground":[0.95,0.9,0.74,1],"border_width":1,"border_color":[0.56,0.48,0.32,1],"padding":12,"events":{"key":"atlas_form_key","change":"atlas_name_change"}},[]),
+            component("atlas_last_name","input",{"rect":[830,455,620,55],"binding":"last_name","font_size":26,"accessible_label":"Nom du cartographe","accessible_label_key":"Nom du cartographe","placeholder":"Nom","placeholder_key":"Nom","background":[0.035,0.075,0.09,1],"foreground":[0.95,0.9,0.74,1],"border_width":1,"border_color":[0.56,0.48,0.32,1],"padding":12,"events":{"key":"atlas_form_key","change":"atlas_name_change"}},[]),
+            component("atlas_origin","select",{"rect":[830,545,620,55],"binding":"origin","options":["rivage","hautes_terres","brumes"],"option_labels":["Les enfants du Rivage","Les Hautes Terres","Les voyageurs des Brumes"],"option_keys":["Les enfants du Rivage","Les Hautes Terres","Les voyageurs des Brumes"],"accessible_label":"Origine du cartographe","accessible_label_key":"Origine du cartographe","font_size":23,"background":[0.035,0.075,0.09,1],"foreground":[0.95,0.9,0.74,1],"border_width":1,"border_color":[0.56,0.48,0.32,1],"padding":12,"events":{"key":"atlas_form_key"}},[]),
+            component("atlas_reduce_motion","toggle",{"rect":[830,660,298,42],"text":"Mouvements réduits","text_key":"Mouvements réduits","binding":"atlas_reduced_motion","font_size":19,"events":{"change":"atlas_accessibility","key":"atlas_form_key"}},[]),
+            component("atlas_high_contrast","toggle",{"rect":[1145,660,310,42],"text":"Contraste renforcé","text_key":"Contraste renforcé","binding":"atlas_high_contrast","font_size":19,"events":{"change":"atlas_accessibility","key":"atlas_form_key"}},[]),
+            component("atlas_self_voicing","toggle",{"rect":[830,719,300,42],"text":"Lecture vocale","text_key":"Lecture vocale","binding":"atlas_self_voicing","font_size":19,"events":{"change":"atlas_accessibility","key":"atlas_form_key"}},[]),
+            component("atlas_text_scale","slider",{"rect":[1145,735,310,30],"text":"","accessible_label":"Taille du texte","accessible_label_key":"Taille du texte","binding":"atlas_text_scale","min":0.85,"max":1.25,"font_size":1,"foreground":[0,0,0,0],"auto_background":false,"background":[0,0,0,0],"border_width":0,"padding":0.01,"events":{"change":"atlas_accessibility","key":"atlas_form_key"}},[])
+        ])
+    }
+    if atlas_page == 1 {
+        set children = list_append(children,atlas_button("atlas_confirm",items[atlas_selected]["verb"]+" · Entrée",[1138,824,340,57],"atlas_confirm_item",{}))
+    }
+    if atlas_page == 2 {
+        set children = list_append(children,atlas_button("atlas_travel","Voyager · Entrée",[1138,824,340,57],"atlas_confirm_travel",{}))
+    }
+    return component("atlas_root","panel",{"rect":[0,0,1920,1080],"auto_background":false,"border_width":0,"events":{"open":"atlas_on_open","close":"atlas_on_close","key":"atlas_key"}},children)
+}
+
+function atlas_item_result(index) {
+    local item = atlas_items()[index]
+    local result = {"quantities":atlas_quantities,"health":atlas_health,"equipped":atlas_equipped,"notice":""}
+    if atlas_quantities[index] <= 0 {return dict_set(result,"notice","Cet emplacement est vide.")}
+    if item["id"] == "potion" {
+        if atlas_health >= atlas_max_health {return dict_set(result,"notice","Votre vitalité est déjà complète.")}
+        set result = dict_set(result,"quantities",list_set(atlas_quantities,index,atlas_quantities[index]-1))
+        set result = dict_set(result,"health",min(atlas_max_health,atlas_health+1))
+        return dict_set(result,"notice","Élixir utilisé : un point de vitalité retrouvé.")
+    }
+    if item["verb"] == "Équiper" {
+        set result = dict_set(result,"equipped",item["id"])
+        return dict_set(result,"notice",item["name"]+" équipé(e).")
+    }
+    return dict_set(result,"notice",item["detail"])
+}
+
+handler atlas_on_open(event) {
+    set atlas_open = true
+    set atlas_view = atlas_page + 0.0
+    set atlas_notice = ""
+    ui.focus("atlas","atlas_surface")
+}
+handler atlas_on_close(event) {set atlas_open = false}
+handler atlas_close(event) {ui.close("atlas")}
+handler atlas_tab(event) {
+    set atlas_page = event["data"]["page"]
+    set atlas_notice = ""
+    ui.focus("atlas","atlas_surface")
+}
+handler atlas_step(event) {
+    set atlas_page = atlas_neighbor(atlas_page,event["data"]["delta"])
+    set atlas_notice = ""
+    ui.focus("atlas","atlas_surface")
+}
+handler atlas_tick(event) {
+    local distance = atlas_page - atlas_view
+    if distance > 1.5 {set distance = distance - 3}
+    if distance < -1.5 {set distance = distance + 3}
+    if atlas_reduced_motion or abs(distance) < 0.003 {set atlas_view = atlas_page + 0.0}
+    else {set atlas_view = atlas_view + distance * min(1,event["value"]["dt"]*13)}
+}
+handler atlas_hover(event) {
+    local hover = -1
+    if event["kind"] != "pointer_cancel" and atlas_page == 2 {
+        local hit = dict_get(event["value"],"hit","")
+        local i = 0
+        while i < 6 {if hit == "marker_"+i {set hover = i} set i = i + 1}
+    }
+    if event["state"]["hover"] != hover {
+        ui.set_state("atlas","atlas_surface",dict_set(event["state"],"hover",hover))
+    }
+}
+handler atlas_pointer(event) {
+    if event["value"]["button"] == "left" or event["value"]["button"] == "touch" {
+        local hit = dict_get(event["value"],"hit","")
+        local i = 0
+        if atlas_page == 1 {
+            while i < 18 {if hit == "item_"+i {set atlas_selected = i} set i = i + 1}
+        }
+        if atlas_page == 2 {
+            while i < 6 {if hit == "marker_"+i {set atlas_marker = i} set i = i + 1}
+        }
+        set i = 0
+        while i < 3 {if hit == "page_"+i {set atlas_page = i} set i = i + 1}
+        set atlas_notice = ""
+        if atlas_self_voicing {
+            if atlas_page == 1 {accessibility.speak(atlas_items()[atlas_selected]["name"]+". "+atlas_items()[atlas_selected]["detail"])}
+            if atlas_page == 2 {accessibility.speak(atlas_places()[atlas_marker]["name"]+". "+atlas_route_status(atlas_marker,atlas_quantities))}
+        }
+    }
+}
+handler atlas_confirm_item(event) {
+    local result = atlas_item_result(atlas_selected)
+    set atlas_quantities = result["quantities"]
+    set atlas_health = result["health"]
+    set atlas_equipped = result["equipped"]
+    set atlas_notice = result["notice"]
+    if atlas_selected == 10 and atlas_quantities[10] > 0 {set atlas_melody_played = true set atlas_notice = "Le chant de l’oiseau s’élève dans la brume."}
+    if atlas_selected == 5 and atlas_quantities[5] > 0 {set atlas_page = 2}
+    ui.focus("atlas","atlas_surface")
+}
+handler atlas_confirm_travel(event) {
+    if atlas_can_travel(atlas_marker,atlas_quantities) {
+        set atlas_destination = atlas_places()[atlas_marker]["id"]
+        set atlas_location = atlas_destination
+        set atlas_notice = "Route choisie : "+atlas_location_name(atlas_destination)
+        ui.close("atlas")
+    } else {set atlas_notice = atlas_route_requirement(atlas_marker)}
+}
+handler atlas_accessibility(event) {
+    accessibility.configure({"reduced_motion":atlas_reduced_motion,"high_contrast":atlas_high_contrast,"text_scale":atlas_text_scale,"self_voicing":atlas_self_voicing})
+}
+handler atlas_name_change(event) {
+    // A visible limit prevents long names from overflowing this authored layout.
+    set first_name = substring(first_name,0,min(24,len(first_name)))
+    set last_name = substring(last_name,0,min(24,len(last_name)))
+}
+handler atlas_form_key(event) {
+    // Do not navigate on Q/E while editing names or choosing an origin.
+    if event["key"] == "Escape" {ui.close("atlas")}
+    if event["key"] == "Enter" and (event["element"] == "atlas_first_name" or event["element"] == "atlas_last_name") {ui.focus("atlas","atlas_surface")}
+}
+handler atlas_button_key(event) {
+    // Enter belongs to this native button's Activate event, not two actions.
+    local key = event["key"]
+    if key == "Escape" {ui.close("atlas")}
+    else {
+        if key == "q" or key == "Q" or key == "PageUp" {set atlas_page = atlas_neighbor(atlas_page,-1) ui.focus("atlas","atlas_surface")}
+        if key == "e" or key == "E" or key == "PageDown" {set atlas_page = atlas_neighbor(atlas_page,1) ui.focus("atlas","atlas_surface")}
+    }
+}
+handler atlas_key(event) {
+    local key = event["key"]
+    if key == "Escape" {ui.close("atlas")}
+    else {
+        if key == "q" or key == "Q" or key == "PageUp" {set atlas_page = atlas_neighbor(atlas_page,-1) set atlas_notice = ""}
+        if key == "e" or key == "E" or key == "PageDown" {set atlas_page = atlas_neighbor(atlas_page,1) set atlas_notice = ""}
+        local page = atlas_page
+        if page == 1 {
+            local row = atlas_selected / 6
+            local column = atlas_selected - row * 6
+            if key == "ArrowLeft" {set column = max(0,column-1)}
+            if key == "ArrowRight" {set column = min(5,column+1)}
+            if key == "ArrowUp" {set row = max(0,row-1)}
+            if key == "ArrowDown" {set row = min(2,row+1)}
+            set atlas_selected = row * 6 + column
+            if key == "Enter" {
+                local result = atlas_item_result(atlas_selected)
+                set atlas_quantities = result["quantities"]
+                set atlas_health = result["health"]
+                set atlas_equipped = result["equipped"]
+                set atlas_notice = result["notice"]
+                if atlas_selected == 10 and atlas_quantities[10] > 0 {set atlas_melody_played = true set atlas_notice = "Le chant de l’oiseau s’élève dans la brume."}
+                if atlas_selected == 5 and atlas_quantities[5] > 0 {set atlas_page = 2}
+            }
+            if atlas_self_voicing and (key == "ArrowLeft" or key == "ArrowRight" or key == "ArrowUp" or key == "ArrowDown") {
+                accessibility.speak(atlas_items()[atlas_selected]["name"]+". "+atlas_items()[atlas_selected]["detail"])
+            }
+        }
+        if page == 2 {
+            if key == "ArrowLeft" or key == "ArrowUp" {set atlas_marker = max(0,atlas_marker-1)}
+            if key == "ArrowRight" or key == "ArrowDown" {set atlas_marker = min(5,atlas_marker+1)}
+            if key == "Enter" {
+                if atlas_can_travel(atlas_marker,atlas_quantities) {
+                    set atlas_destination = atlas_places()[atlas_marker]["id"]
+                    set atlas_location = atlas_destination
+                    ui.close("atlas")
+                } else {set atlas_notice = atlas_route_requirement(atlas_marker)}
+            }
+            if atlas_self_voicing and (key == "ArrowLeft" or key == "ArrowRight" or key == "ArrowUp" or key == "ArrowDown") {
+                accessibility.speak(atlas_places()[atlas_marker]["name"]+". "+atlas_route_status(atlas_marker,atlas_quantities))
+            }
+        }
+    }
+}
+
+function atlas_hud_draw(state, props, frame) {
+    local drawing = [
+        canvas_rect([14,15,766,203],[0,0,0,0.4],16),
+        canvas_rect([10,10,766,203],[0.025,0.065,0.085,0.93],16),
+        canvas_line([[26,13],[760,13]],[0.81,0.69,0.42,0.8],2),
+        atlas_text(atlas_short(props["name"],30),[30,23],[0.94,0.86,0.64,1],25),
+        atlas_text(""+props["gold"]+" éclats",[570,72],[0.95,0.77,0.38,1],21),
+        atlas_text(atlas_location_name(props["location"])+" · "+atlas_equipped_name(props["equipped"]),[30,107],[0.70,0.82,0.76,1],19),
+        atlas_text(atlas_wrap(props["quest"],61),[30,145],[0.78,0.83,0.76,1],20)
+    ]
+    local i = 0
+    while i < props["max_health"] {
+        local color = [0.15,0.25,0.27,1]
+        if i < props["health"] {set color = [0.16,0.76,0.68,1]}
+        local x = 28+i*42
+        set drawing = list_append(drawing,canvas_polygon([[x+15,66],[x+29,81],[x+15,102],[x+1,81]],color))
+        set i = i + 1
+    }
+    return drawing
+}
+screen atlas_hud() {
+    return component("atlas_hud_root","panel",{"rect":[28,26,820,240],"visible":not atlas_open,"auto_background":false,"border_width":0},[
+        component("atlas_hud_surface","canvas",{"rect":[0,0,790,230],"draw":"atlas_hud_draw","auto_background":false,"border_width":0,"focus_order":-1,"consume_input":false,"capture_pointer":false,"props":{"name":first_name+" "+last_name,"gold":atlas_gold,"health":atlas_health,"max_health":atlas_max_health,"location":atlas_location,"equipped":atlas_equipped,"quest":atlas_quest}},[])
+    ])
+}
+
+// L’Atlas des Brumes — les gestes, les visages et les souvenirs de la quête.
+// L’aventure principale possède les variables et crée keeper / lantern.
+
+function atlas_mist_curve(t) {
+    return t * t * (3 - 2 * t)
+}
+
+function atlas_keeper_accessories(attributes) {
+    if attributes["outfit"] == "travel" and attributes["accessory"] == "lantern" {
+        return {"accessory":"lantern"}
+    }
+    return {"accessory":""}
+}
+
+function atlas_keeper_portrait() {
+    return layered_image([600,1000],
+        {"outfit":"", "face":"neutral", "accessory":"", "variant":""}, [
+            image_layer("body", "layers/keeper_body.png", {}),
+            image_layer("coat", "layers/keeper_coat.png", {
+                "group":"outfit", "attribute":"travel"
+            }),
+            image_layer("neutral", "layers/keeper_neutral.png", {
+                "group":"face", "attribute":"neutral"
+            }),
+            image_layer("smile", "layers/keeper_smile.png", {
+                "group":"face", "attribute":"smile"
+            }),
+            image_layer("lantern", "layers/keeper_lantern.png", {
+                "group":"accessory", "attribute":"lantern",
+                "when":{"outfit":"travel"}
+            })
+        ], {
+            "variants":{"evening":{"outfit":"travel"}},
+            "rules":{
+                "evening_welcome":{
+                    "when":{"variant":"evening"},
+                    "set":{"face":"smile"}
+                }
+            },
+            "selector":"atlas_keeper_accessories"
+        })
+}
+
+function atlas_lantern_flight(seconds) {
+    return motion_parallel([
+        motion_spline(seconds, [
+            {"x":-520, "y":-120},
+            {"x":-200, "y":-320},
+            {"x":200, "y":-240},
+            {"x":440, "y":-140}
+        ], motion_curve("atlas_mist_curve", 65)),
+        motion_tween(seconds,
+            // Le sprite VN a un gabarit portrait : ce rapport préserve l’image carrée.
+            {"scale_x":0.40, "scale_y":0.22, "rotation":-18, "opacity":0.72},
+            {"scale_x":0.40, "scale_y":0.22, "rotation":22, "opacity":1},
+            motion_bezier(0.22,0.1,0.68,0.96)),
+        motion_repeat(4, motion_frames([
+            "sprites/lantern/default.png",
+            "sprites/lantern/bright.png"
+        ], 2))
+    ])
+}
+
+function atlas_prologue_clip(cinematic_mode) {
+    return video_clip("movies/prologue.webm", {
+        "rect":[0,0,1280,720], "cinematic":cinematic_mode,
+        "skippable":true, "keep_last_frame":false, "volume":0.16,
+        "poster":"scenes/harbor.png",
+        "subtitles":[
+            {"start":0, "end":2, "text":"Il existe des îles que les cartes ont oubliées."},
+            {"start":2, "end":4, "text":"Chaque soir, la brume referme leurs chemins."},
+            {"start":4, "end":6, "text":"Une lumière attend encore quelqu’un au port."}
+        ]
+    })
+}
+
+function atlas_echo_clip() {
+    return video_clip("movies/prologue.webm", {
+        // Le repère vidéo de scène est 1280 × 720 ; les interfaces sont 1920 × 1080.
+        "rect":[224,64,832,468], "layer":2,
+        "skippable":true, "keep_last_frame":false, "volume":0,
+        "poster":"scenes/harbor.png",
+        "subtitles":[
+            {"start":0, "end":2, "text":"La pierre se souvient du premier phare."},
+            {"start":2, "end":4, "text":"Sa lumière ne chassait pas la brume : elle lui répondait."},
+            {"start":4, "end":6, "text":"L’Atlas s’ouvre à ceux qui écoutent."}
+        ]
+    })
+}
+
+// L’Atlas des Brumes — original playable showcase, 2026-10-02.
+// The distributed/editor source is main.rvn. This is the story authoring section.
+
+function atlas_reward(index, count) {
+    return list_set(atlas_quantities,index,atlas_quantities[index]+count)
+}
+
+function atlas_dial_points() {
+    return [[0,-1],[0.707,-0.707],[1,0],[0.707,0.707],[0,1],[-0.707,0.707],[-1,0],[-0.707,-0.707]]
+}
+
+function atlas_dial_draw(state, props, frame) {
+    local gold = [0.82,0.67,0.37,1]
+    local light = [0.32,0.90,0.91,1]
+    local ink = [0.025,0.065,0.085,1]
+    local drawing = [
+        canvas_rect([0,0,1920,1080],[0.01,0.025,0.03,0.78],0),
+        canvas_group([380,170,1,1,0,1],[],atlas_panel("LE CADRAN DES MARÉES","Aligner les trois anneaux pour réveiller l’observatoire.")),
+        canvas_text("LUNE  2",[470,380],gold,30),
+        canvas_text("MARÉE  5",[470,440],gold,30),
+        canvas_text("VENT  1",[470,500],gold,30),
+        canvas_text("Un clic sélectionne et tourne un anneau.",[470,580],[0.74,0.80,0.77,1],21),
+        canvas_text("1 / 2 / 3 : anneau · ← / → : tourner",[470,620],[0.74,0.80,0.77,1],21),
+        canvas_text("Molette : tourner · Entrée : vérifier",[470,660],[0.74,0.80,0.77,1],21),
+        canvas_text(state["notice"],[470,720],light,22)
+    ]
+    local points = atlas_dial_points()
+    local ring = 0
+    while ring < 3 {
+        local radius = 234 - ring * 65
+        local color = gold
+        if state["selected"] == ring {set color = light}
+        set drawing = list_append(drawing,canvas_ellipse([1220-radius,500-radius,radius*2,radius*2],color))
+        set drawing = list_append(drawing,canvas_ellipse([1225-radius,505-radius,radius*2-10,radius*2-10],ink))
+        local marker = state["rings"][ring]
+        local step = 0
+        while step < 8 {
+            local p = points[step]
+            set drawing = list_append(drawing,canvas_line([[1220+p[0]*(radius-18),500+p[1]*(radius-18)],[1220+p[0]*(radius-30),500+p[1]*(radius-30)]],color,3))
+            if step == marker {
+                set drawing = list_append(drawing,canvas_ellipse([1211+p[0]*(radius-16),491+p[1]*(radius-16),18,18],light))
+            }
+            set step = step + 1
+        }
+        set drawing = list_append(drawing,canvas_hit("ring_"+ring,[1220-radius,500-radius,radius*2,radius*2]))
+        set ring = ring + 1
+    }
+    return list_concat(drawing,[
+        canvas_ellipse([1196,476,48,48],light),
+        canvas_text(""+state["rings"][0]+"  /  "+state["rings"][1]+"  /  "+state["rings"][2],[1125,790],gold,30),
+        canvas_rect([470,795,350,56],[0.12,0.32,0.33,1],8),
+        canvas_text("VÉRIFIER L’ALIGNEMENT",[494,810],[0.96,0.9,0.72,1],21),
+        canvas_hit("verify",[470,795,350,56]),
+        canvas_rect([1320,835,130,42],[0.2,0.14,0.1,1],8),
+        canvas_text("Retour",[1348,844],gold,20),
+        canvas_hit("cancel",[1320,835,130,42])
+    ])
+}
+
+function atlas_dial_turn(state, direction) {
+    local index = state["selected"]
+    local value = state["rings"][index] + direction
+    if value > 7 {set value = 0}
+    if value < 0 {set value = 7}
+    return dict_set(state,"rings",list_set(state["rings"],index,value))
+}
+
+handler atlas_dial_event(event) {
+    local state = event["state"]
+    local value = event["value"]
+    local verify = false
+    if event["kind"] == "pointer_down" {
+        local hit = dict_get(value,"hit","")
+        if hit == "cancel" {ui.close("atlas_dial") return 0}
+        if hit == "verify" {set verify = true}
+        if hit == "ring_0" {set state = dict_set(state,"selected",0) set state = atlas_dial_turn(state,1)}
+        if hit == "ring_1" {set state = dict_set(state,"selected",1) set state = atlas_dial_turn(state,1)}
+        if hit == "ring_2" {set state = dict_set(state,"selected",2) set state = atlas_dial_turn(state,1)}
+    }
+    if event["kind"] == "wheel" {
+        local direction = 1
+        if dict_get(value,"dy",0) > 0 {set direction = -1}
+        set state = atlas_dial_turn(state,direction)
+    }
+    if event["kind"] == "key" and dict_get(value,"pressed",false) {
+        local code = value["code"]
+        if code == "Digit1" {set state = dict_set(state,"selected",0)}
+        if code == "Digit2" {set state = dict_set(state,"selected",1)}
+        if code == "Digit3" {set state = dict_set(state,"selected",2)}
+        if code == "ArrowLeft" {set state = atlas_dial_turn(state,-1)}
+        if code == "ArrowRight" {set state = atlas_dial_turn(state,1)}
+        if code == "Enter" {set verify = true}
+        if code == "Escape" {ui.close("atlas_dial") return 0}
+    }
+    if verify {
+        if state["rings"] == [2,5,1] {
+            set atlas_puzzle_solved = true
+            ui.close("atlas_dial")
+            return 0
+        }
+        set state = dict_set(state,"notice","Le mécanisme attend 2 / 5 / 1. Les anneaux restent en place.")
+    }
+    ui.set_state(event["screen"],event["element"],state)
+}
+
+screen atlas_dial() {
+    return component("dial_root","canvas",{
+            "rect":[0,0,1920,1080],"auto_background":false,
+            "draw":"atlas_dial_draw","props":{},
+            "state":{"rings":[0,0,0],"selected":0,"notice":"Les indices sont gravés à gauche du cadran."},
+            "accessible_label":"Cadran des marées. Alignez les anneaux Lune2, Marée5 et Vent1 avec1,2,3 et les flèches.",
+            "events":{"pointer_down":"atlas_dial_event","wheel":"atlas_dial_event","key":"atlas_dial_event"}
+        },[])
+}
+
+init {
+    character.create("keeper","Maëlys")
+    character.create("lantern","Lanterne")
+    set first_name = "Alix"
+    set last_name = "Vey"
+    set origin = "rivage"
+    set atlas_reduced_motion = false
+    set atlas_high_contrast = false
+    set atlas_text_scale = 1.0
+    set atlas_self_voicing = false
+    set atlas_page = 1
+    set atlas_view = 1.0
+    set atlas_selected = 0
+    set atlas_marker = 0
+    set atlas_destination = ""
+    set atlas_location = "havre"
+    set atlas_open = false
+    set atlas_notice = "Bienvenue : identité à gauche, inventaire au centre, carte à droite."
+    set atlas_quest = "Au Havre, rencontrer Maëlys pour commencer le voyage."
+    set atlas_equipped = "boussole"
+    set atlas_quantities = [1,0,0,1,0,1,3,0,1,0,0,0,0,0,0,1,1,0]
+    set atlas_gold = 125
+    set atlas_health = 5
+    set atlas_max_health = 6
+    set atlas_has_compass = true
+    set atlas_has_lantern = false
+    set atlas_keeper_trust = 0
+    set atlas_crossing_ready = false
+    set atlas_melody_played = false
+    set atlas_puzzle_solved = false
+    set atlas_seen_havre = false
+    set atlas_seen_clairiere = false
+    set atlas_seen_observatoire = false
+    set atlas_seen_archives = false
+    set atlas_seen_falaises = false
+    set atlas_finished = false
+    set atlas_draw = 0
+}
+
+label start
+typewriter.speed(38)
+scene "scenes/harbor.png" with dissolve
+music.play("music/fog_theme.wav") with fade
+music.volume("0.32")
+accessibility.configure({"text_scale":1.0,"high_contrast":false,"reduced_motion":false,"self_voicing":false})
+ui.open("atlas_hud",[],false,2)
+jump explore
+
+label explore
+set atlas_has_lantern = atlas_quantities[1] > 0
+set atlas_destination = ""
+set atlas_open = true
+ui.open("atlas",[],true,20)
+ui.focus("atlas","atlas_surface")
+// Finite, saveable lifetime fence: closing the atlas removes its motion track
+// and releases wait on the next tick, so travel needs no extra dialogue click.
+motion.play("ui:atlas/atlas_root",motion_pause(86400))
+motion.wait("ui:atlas/atlas_root")
+ui.close("atlas")
+set atlas_open = false
+call atlas_apply_accessibility
+if atlas_destination == "havre" {jump atlas_visit_havre}
+if atlas_destination == "clairiere" {jump atlas_visit_clairiere}
+if atlas_destination == "observatoire" {jump atlas_visit_observatoire}
+if atlas_destination == "archives" {jump atlas_visit_archives}
+if atlas_destination == "falaises" {jump atlas_visit_falaises}
+if atlas_destination == "tour" {jump atlas_visit_tour}
+choice {
+    "Explorer [atlas_location_name(atlas_location)]" => {
+        if atlas_location == "havre" {jump atlas_visit_havre}
+        if atlas_location == "clairiere" {jump atlas_visit_clairiere}
+        if atlas_location == "observatoire" {jump atlas_visit_observatoire}
+        if atlas_location == "archives" {jump atlas_visit_archives}
+        if atlas_location == "falaises" {jump atlas_visit_falaises}
+        jump atlas_visit_tour
+    }
+    "Rouvrir l’Atlas" => {jump explore}
+    "Voir l’ouverture animée" => {call atlas_prologue jump explore}
+    "Lire les commandes" => {
+        "Dans l’Atlas : Q/E ou Page précédente/suivante changent de volet. Flèches et Entrée naviguent dans les objets et lieux. La souris sélectionne, survole et active."
+        "Échap ferme l’Atlas ; hors Atlas, Échap ouvre le menu système. F5/F6 sauvegardent et chargent rapidement hors Atlas. F8 ouvre les préférences accessibles du moteur."
+        "Les noms, possessions, choix, puzzles, animations et positions du menu sont conservés dans les sauvegardes. Le rollback reste disponible pendant les dialogues."
+        jump explore
+    }
+}
+
+label atlas_visit_havre
+set atlas_location = "havre"
+scene "scenes/harbor.png" with dissolve
+if not atlas_seen_havre {
+    set atlas_seen_havre = true
+    call atlas_keeper_outfit
+    keeper "[first_name] [last_name]… Un nom à inscrire dans l’Atlas. La brume a effacé cinq de nos routes. Aidez-moi à rallumer le phare."
+    choice {
+        "Partager mes relevés avec Maëlys" => {
+            set atlas_keeper_trust = atlas_keeper_trust + 2
+            keeper "Alors nous voyagerons ensemble. Une carte appartient à toutes celles et ceux qui l’habitent."
+        }
+        "Négocier une récompense" => {
+            set atlas_gold = atlas_gold + 30
+            keeper "Trente écus, et la même mission. La confiance se gagne en chemin."
+        }
+    }
+    set atlas_quantities = atlas_reward(1,1)
+    set atlas_quantities = atlas_reward(4,1)
+    set atlas_quantities = atlas_reward(11,1)
+    set atlas_quantities = atlas_reward(14,1)
+    set atlas_has_lantern = true
+    character.attributes("keeper",{"accessory":"lantern"})
+    if atlas_keeper_trust > 0 {character.attributes("keeper",{"face":"smile"})}
+    set atlas_notice = "Reçus : lanterne, sceau, amulette et fiole."
+    set atlas_quest = "Clairière : retrouver le grappin et le fragment de l’Atlas."
+    keeper "Prenez cette lanterne et mon sceau. La Clairière cache un fragment ; les Archives sauront le lire. L’Observatoire est un détour qui peut nous aider."
+    keeper.hide() with dissolve
+} else {
+    "Le Havre vous accueille, [first_name]. Les marins ont reconnu le sceau accroché à votre sac."
+    choice {
+        "Se reposer — restaurer la vitalité" => {set atlas_health = atlas_max_health set atlas_notice = "Repos au Havre : vitalité restaurée."}
+        "Acheter un élixir — 15 écus" if atlas_gold >= 15 => {set atlas_gold = atlas_gold - 15 set atlas_quantities = atlas_reward(6,1) set atlas_notice = "Un élixir rejoint l’inventaire."}
+        "Repartir" => {set atlas_notice = "Les routes attendent votre prochain choix."}
+    }
+}
+jump explore
+
+label atlas_visit_clairiere
+set atlas_location = "clairiere"
+scene "scenes/forest.png" with fade
+if not atlas_seen_clairiere {
+    if not atlas_has_lantern {
+        "La forêt se referme dès les premières racines. Maëlys garde au Havre la lanterne capable de réveiller ces chemins."
+        set atlas_quest = "Havre : rencontrer Maëlys avant d’entrer dans la forêt."
+        jump explore
+    }
+    "Une passerelle cassée coupe la Clairière d’Azur. Au pied des racines, une malle porte un signe en forme de vent."
+    choice {
+        "Suivre la boussole" if atlas_equipped == "boussole" => {
+            set atlas_keeper_trust = atlas_keeper_trust + 1
+            "L’aiguille s’aligne sur les pierres les plus sûres. Vous contournez le torrent sans vous blesser."
+        }
+        "Tendre la corde" if atlas_quantities[8] > 0 => {"Votre corde tendue entre deux branches vous fait traverser."}
+        "Sauter de pierre en pierre" => {
+            set atlas_draw = random(1,6)
+            if atlas_draw <= 3 {set atlas_health = atlas_health - 1 "Une pierre glisse. Une égratignure, mais vous atteignez l’autre rive."}
+            else {"Votre saut est précis. Vous atteignez la malle, le sac encore sec."}
+        }
+    }
+    set atlas_seen_clairiere = true
+    set atlas_quantities = atlas_reward(2,1)
+    set atlas_quantities = atlas_reward(10,1)
+    set atlas_quantities = atlas_reward(17,1)
+    set atlas_gold = atlas_gold + 20
+    set atlas_crossing_ready = true
+    call atlas_crossing
+    if not atlas_crossing_ready {
+        set atlas_notice = "La traversée attend une boussole et une lanterne."
+        jump explore
+    }
+    "La malle renferme un grappin, un sifflet de terre cuite et le fragment recherché. Votre équipement ouvre maintenant la route des Falaises."
+    set atlas_notice = "Trouvés : grappin, sifflet, fragment et20 écus."
+    set atlas_quest = "Archives : présenter le fragment pour recevoir la clé du phare."
+} else {
+    "Le torrent murmure sous la passerelle. Le chemin est désormais sûr, et vos annotations restent dans le carnet."
+}
+jump explore
+
+label atlas_visit_observatoire
+set atlas_location = "observatoire"
+scene "scenes/temple.png" with dissolve
+if not atlas_puzzle_solved {
+    "Votre lanterne révèle trois mots gravés : Lune2, Marée5, Vent1. Les anneaux de l’observatoire peuvent encore tourner."
+    ui.open("atlas_dial",[],true,22)
+    ui.focus("atlas_dial","dial_root")
+    motion.play("ui:atlas_dial/dial_root",motion_pause(86400))
+    motion.wait("ui:atlas_dial/dial_root")
+    ui.close("atlas_dial")
+}
+if atlas_puzzle_solved and not atlas_seen_observatoire {
+    set atlas_seen_observatoire = true
+    set atlas_quantities = atlas_reward(9,1)
+    set atlas_quantities = atlas_reward(12,1)
+    set atlas_keeper_trust = atlas_keeper_trust + 1
+    call atlas_temple_vision
+    "Les constellations se relient. Une lentille et une relique remontent du mécanisme ; vous avez appris à lire la mémoire de la brume."
+    set atlas_notice = "Cadran résolu : monocle et relique obtenus."
+} else {
+    if atlas_puzzle_solved {"Les anneaux gardent votre alignement. Le ciel paraît plus proche."}
+    else {"Vous laissez les anneaux en silence. Les indices resteront là si vous revenez."}
+}
+jump explore
+
+label atlas_visit_archives
+set atlas_location = "archives"
+scene "scenes/temple.png" with blur
+if not atlas_seen_archives {
+    if atlas_quantities[17] > 0 {
+        set atlas_seen_archives = true
+        "Le sceau de Maëlys ouvre les Archives. Vous placez le fragment dans la rainure d’une table d’obsidienne."
+        if atlas_quantities[9] > 0 {"Le monocle révèle une signature invisible : le phare n’était pas une arme, mais une promesse de retour." set atlas_keeper_trust = atlas_keeper_trust + 1}
+        else {"Les archivistes déchiffrent les lignes estompées pour vous. Le phare guidait jadis tous les voyageurs."}
+        set atlas_quantities = atlas_reward(7,1)
+        set atlas_notice = "La clé ancienne ouvre désormais la Tour, une fois le cristal trouvé."
+        set atlas_quest = "Falaises : équiper le grappin et recueillir un cristal de lumière."
+        "Une clé ancienne sort de la table. Il manque seulement un cristal de lumière pour réveiller le phare : cherchez-le aux Falaises."
+    } else {
+        "Votre sceau ouvre la porte, mais les archivistes demandent le fragment de la Clairière avant d’ouvrir le coffre."
+        set atlas_quest = "Retourner à la Clairière pour trouver le fragment."
+    }
+} else {"Les archivistes classent vos relevés sous le nom [last_name]. La clé attend déjà dans votre sac."}
+jump explore
+
+label atlas_visit_falaises
+set atlas_location = "falaises"
+scene "scenes/forest.png" with slideleft
+if not atlas_seen_falaises {
+    if atlas_equipped == "grappin" {
+        set atlas_seen_falaises = true
+        "Le grappin mord la corniche. La lumière enfermée dans la roche répond à celle de votre lanterne."
+        set atlas_quantities = atlas_reward(13,2)
+        set atlas_notice = "Deux cristaux rejoignent l’inventaire. La Tour est accessible avec la clé."
+        set atlas_quest = "Tour du Veilleur : insérer la clé et rallumer le phare."
+        "Vous recueillez deux cristaux. La carte révèle une dernière route vers la Tour du Veilleur."
+    } else {
+        "Le vent vous retient au pied des corniches. Posséder le grappin ne suffit pas : équipez-le dans l’inventaire, puis revenez."
+        set atlas_notice = "Équipez le grappin dans l’inventaire avant d’explorer les Falaises."
+    }
+} else {"Vos cordages brillent le long de la falaise. La route est sûre pour les prochains voyageurs."}
+jump explore
+
+label atlas_visit_tour
+set atlas_location = "tour"
+scene "scenes/temple.png" with fade
+if not atlas_finished {
+    "La clé ouvre le socle du phare. Les deux cristaux se mettent à résonner. Vous pouvez canaliser leur lumière de deux façons."
+    if atlas_melody_played {"Le sifflet porte encore la mélodie de la forêt. Une troisième voie se dessine entre les deux cristaux."}
+    choice {
+        "Partager la lumière avec les six routes" if atlas_keeper_trust >= 2 => {jump atlas_end_light}
+        "Écouter la mélodie du sifflet" if atlas_melody_played => {set atlas_keeper_trust = atlas_keeper_trust + 1 jump atlas_end_light}
+        "Rallumer le phare depuis la Tour" => {jump atlas_end_mist}
+    }
+} else {
+    "Le phare continue de briller. L’aventure est achevée ; vous pouvez explorer librement les pages, les lieux et les souvenirs."
+    jump explore
+}
+
+label atlas_end_light
+set atlas_finished = true
+set atlas_quest = "Atlas accompli : les six routes sont reliées. Exploration libre."
+unlock_ending "atlas_shared_light"
+cinematic "atlas_memory" with dissolve
+"La lumière parcourt les six routes comme un trait d’encre vivante. La brume ne disparaît pas : elle devient un ciel pour celles et ceux qui voyagent."
+"[first_name] [last_name], cartographe du [origin], inscrit un dernier nom dans le carnet : Maëlys. Le vôtre reste à côté."
+cinematic hide with dissolve
+jump atlas_epilogue
+
+label atlas_end_mist
+set atlas_finished = true
+set atlas_quest = "Phare rallumé : les routes pourront encore grandir. Exploration libre."
+unlock_ending "atlas_beacon"
+cinematic "atlas_memory" with fade
+"Le phare perce la brume. Une seule lumière suffit pour que les bateaux trouvent de nouveau le Havre. Les autres routes attendront votre prochain voyage."
+cinematic hide with fade
+jump atlas_epilogue
+
+label atlas_epilogue
+sfx.play("sfx/beacon.wav")
+set persistent.atlas_completed = true
+if persistent.atlas_completed {"Votre signature a rejoint les archives des voyageurs, au-delà de cette partie."}
+"Fin de L’Atlas des Brumes. Les choix, objets et détour par l’observatoire ont façonné cette conclusion. Le souvenir et la fin ont rejoint la galerie du moteur."
+"Le jeu reste ouvert pour tester l’inventaire, la carte et les préférences. Sauvegarde, chargement, historique et rollback sont disponibles dans le menu système hors Atlas."
+set atlas_notice = "Aventure achevée. Vous pouvez continuer à explorer et à tester le menu."
+jump explore
+
+
+label atlas_apply_accessibility
+accessibility.configure({
+    "text_scale":atlas_text_scale,
+    "high_contrast":atlas_high_contrast,
+    "reduced_motion":atlas_reduced_motion,
+    "self_voicing":atlas_self_voicing
+})
+return
+
+label atlas_prologue
+music.volume("0.22")
+if not atlas_reduced_motion {
+    music.stop() with fade
+    video.play("atlas_prologue_movie", atlas_prologue_clip(true))
+    video.wait("atlas_prologue_movie")
+    video.stop("atlas_prologue_movie")
+}
+music.play("music/fog_theme.wav") with fade
+"La brume avale les routes, jamais les promesses. Ce soir, l’île vous a rendu son port."
+return
+
+label atlas_keeper_outfit
+character.compose("keeper", atlas_keeper_portrait())
+keeper.show() at right
+keeper "Maëlys, gardienne du phare. Je garde les cartes que la mer refuse d’emporter."
+character.attributes("keeper", {"outfit":"travel"})
+if atlas_keeper_trust > 0 {
+    character.attributes("keeper", {"face":"smile"})
+    keeper "Vous êtes revenu avec une promesse tenue. Alors je peux vous confier le chemin."
+} else {
+    keeper "Je prends mon manteau. La forêt écoute les voix, mais elle reconnaît les lumières."
+}
+if atlas_has_lantern {
+    character.attributes("keeper", {"accessory":"lantern"})
+    keeper "Gardez cette lanterne près du cœur. La boussole indiquera où aller ; sa flamme vous dira quand."
+}
+return
+
+label atlas_crossing
+set atlas_crossing_ready = false
+if not atlas_has_compass {
+    "Sans boussole, les passerelles semblent toutes mener au même reflet. Retournez au port chercher un cap."
+    return
+}
+if not atlas_has_lantern {
+    "La boussole s’agite, mais aucun passage ne répond. Une lumière du phare pourrait réveiller les balises."
+    return
+}
+keeper.hide()
+sfx.play("sfx/beacon.wav")
+if atlas_reduced_motion {
+    "Vous posez la lanterne sur la première balise. Les trois suivantes s’allument, une à une ; la route est sûre."
+} else {
+    lantern.show("default") at center
+    motion.play("background", motion_tween(4,
+        {"tint_r":0.84, "tint_g":0.9, "tint_b":1},
+        {"tint_r":1, "tint_g":1, "tint_b":1}, "ease_in_out"))
+    motion.play("sprite:lantern", atlas_lantern_flight(4))
+    motion.wait("sprite:lantern")
+    motion.play("sprite:lantern", motion_sequence([
+        motion_pause(0.2),
+        motion_tween(0.4, {}, {"opacity":0}, "ease_in")
+    ]))
+    motion.wait("sprite:lantern")
+    motion.stop("sprite:lantern")
+    motion.stop("background")
+    lantern.hide()
+    "La flamme dessine une courbe entre les balises. Là où elle passe, la forêt révèle une passerelle oubliée."
+}
+set atlas_crossing_ready = true
+return
+
+label atlas_temple_vision
+character.attributes("keeper", {"variant":"evening"})
+if atlas_has_lantern {
+    character.attributes("keeper", {"accessory":"lantern"})
+}
+keeper.show() at right
+if not atlas_reduced_motion {
+    motion.play("layer:keeper/lantern", motion_sequence([
+        motion_tween(0.5, {"opacity":0.7}, {"opacity":1}, "ease_out"),
+        motion_pause(0.3),
+        motion_tween(0.5, {}, {"opacity":0.85}, "ease_in_out")
+    ]))
+    video.play("atlas_stone_memory", atlas_echo_clip())
+    video.wait("atlas_stone_memory")
+    video.stop("atlas_stone_memory")
+    motion.wait("layer:keeper/lantern")
+    motion.stop("layer:keeper/lantern")
+}
+keeper "Le phare n’était pas un rempart contre la brume. C’était une invitation à retrouver le monde."
+"Dans la pierre, trois lignes rejoignent le port, la forêt et le temple. L’Atlas attend votre dernier choix."
+keeper.hide()
+return

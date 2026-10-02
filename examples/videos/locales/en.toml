@@ -1,0 +1,9 @@
+[strings]
+"video.first" = "This subtitle comes from the locale file."
+"video.second" = "Video and sound share the same playback clock."
+"video.playing" = "The video is playing. Save or roll back to restore it."
+"video.paused" = "Playback is paused; neither picture nor sound should advance."
+"video.seeked" = "Seeked to 0.8 seconds, still paused, volume at 30%."
+"video.finished" = "The video finished; the end handler ran once."
+"video.closed" = "The player and its audio have been removed."
+"video.cinematic" = "The cinematic finished before this dialogue appeared."

@@ -1,8 +1,9 @@
 use crate::{
     EdgeId, GraphDocument, NodeId, NodeKind, PinCardinality, PinDirection, PinId, PropertyValue,
+    ValueType,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,8 +44,22 @@ impl GraphDiagnostic {
 pub(crate) fn validate_document(graph: &GraphDocument) -> Vec<GraphDiagnostic> {
     let mut diagnostics = Vec::new();
     let mut seen_pin_keys = BTreeSet::new();
+    let types = graph.effective_pin_types();
+    let mut incoming = BTreeMap::new();
+    for edge in graph.edges.values() {
+        incoming
+            .entry(edge.input)
+            .and_modify(|source| *source = None)
+            .or_insert(Some(edge.output));
+    }
 
     for node in graph.nodes.values() {
+        if let (Some(PropertyValue::String(name)), Some(PropertyValue::StringList(types))) = (
+            node.properties.get("name"),
+            node.properties.get("inferred_conflict_types"),
+        ) {
+            diagnostics.push(GraphDiagnostic{severity:DiagnosticSeverity::Warning,code:"variable_type_conflict".into(),message:format!("La variable globale « {name} » reçoit plusieurs types connus ({}). Son type effectif est Wildcard ; RVN reste dynamique. Utilisez une conversion explicite pour stabiliser son type.",types.join(", ")),node:Some(node.id),pin:None,edge:None});
+        }
         if matches!(node.kind, NodeKind::VariableGet | NodeKind::SetVariable) {
             let name = node
                 .properties
@@ -125,6 +140,55 @@ pub(crate) fn validate_document(graph: &GraphDocument) -> Vec<GraphDiagnostic> {
                     None,
                 ));
             }
+            // Preserve the initialized variable's declared type, and diagnose
+            // incompatible authored assignments instead of erasing it to Any
+            // or silently parsing a String as an Int during source import.
+            if matches!(node.kind, NodeKind::SetVariable | NodeKind::LocalVariable)
+                && pin.key == "value"
+                && !graph.edges.values().any(|edge| edge.input == pin.id)
+            {
+                if let Some(value) = &pin.default_value {
+                    let source = crate::type_inference::property_type(value);
+                    let input = graph.pin_constraint_type(pin.id).unwrap_or(ValueType::Any);
+                    if !input.accepts(&source)
+                        && !(input == ValueType::InterpolatedText && source == ValueType::String)
+                    {
+                        diagnostics.push(GraphDiagnostic::error(
+                            "incompatible_types",
+                            format!("pin type {input:?} cannot accept {source:?}"),
+                            Some(node.id),
+                            Some(pin.id),
+                            None,
+                        ));
+                    }
+                }
+            }
+            if node.uses_blueprint_operator_policy()
+                && pin.direction == PinDirection::Input
+                && !pin.value_type.is_execution()
+                && !incoming.contains_key(&pin.id)
+            {
+                if let Some(value) = &pin.default_value {
+                    let source = crate::blueprint_policy::authored_default_type(graph, pin, value);
+                    if !graph.accepts_pin_source_with_context(
+                        pin.id,
+                        &source,
+                        &types,
+                        Some(&incoming),
+                    ) {
+                        diagnostics.push(GraphDiagnostic::error(
+                            "incompatible_types",
+                            format!(
+                                "Blueprint operand {} cannot accept {source:?} in this operator",
+                                pin.key
+                            ),
+                            Some(node.id),
+                            Some(pin.id),
+                            None,
+                        ));
+                    }
+                }
+            }
         }
     }
 
@@ -177,18 +241,14 @@ pub(crate) fn validate_document(graph: &GraphDocument) -> Vec<GraphDiagnostic> {
                 Some(edge.id),
             ));
         }
-        if !input.value_type.accepts(&output.value_type)
-            || graph
-                .nodes
-                .get(&input.node)
-                .is_some_and(|node| !node.kind.accepts_data_source(&output.value_type))
-        {
+        let output_type = types.get(&output.id).unwrap_or(&output.value_type);
+        let input_type = graph
+            .pin_constraint_type(input.id)
+            .unwrap_or_else(|| input.value_type.clone());
+        if !graph.accepts_pin_source_with_context(input.id, output_type, &types, Some(&incoming)) {
             diagnostics.push(GraphDiagnostic::error(
                 "incompatible_types",
-                format!(
-                    "pin type {:?} cannot accept {:?}",
-                    input.value_type, output.value_type
-                ),
+                format!("pin type {:?} cannot accept {:?}", input_type, output_type),
                 Some(input.node),
                 Some(input.id),
                 Some(edge.id),

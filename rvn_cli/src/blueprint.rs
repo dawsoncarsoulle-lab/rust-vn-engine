@@ -4,6 +4,15 @@ use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+/// Linking is an explicit authoring operation, never an export side effect.
+pub(crate) fn link_project(project: &Path, source: Option<&Path>) -> Result<PathBuf> {
+    let config = super::load_project_config(project).map_err(anyhow::Error::msg)?;
+    let source = project.join(source.unwrap_or(Path::new(&config.project.main_script)));
+    let workspace =
+        rvn_graph::SourceWorkspace::link(project, &source, &[]).map_err(anyhow::Error::msg)?;
+    Ok(workspace.source_path())
+}
+
 /// Transpile a persistent editor document. `None` means the source was written
 /// to stdout; otherwise the returned path is the atomically replaced output.
 pub(crate) fn transpile_blueprint(
@@ -89,6 +98,43 @@ fn create_temporary_file(parent: &Path, file_name: &std::ffi::OsStr) -> Result<(
 mod tests {
     use super::*;
     use rvn_graph::{GraphId, GraphKind, NodeKind};
+
+    #[test]
+    fn explicit_link_preserves_source_and_refuses_replacement() {
+        let directory = std::env::temp_dir().join(format!(
+            "rvn-cli-link-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        fs::write(
+            directory.join("rvn.toml"),
+            "[project]\nmain_script='main.rvn'\n",
+        )
+        .unwrap();
+        let source = "// Keep this exactly\nlabel start\n    \"Hello\"\n";
+        fs::write(directory.join("main.rvn"), source).unwrap();
+        fs::write(directory.join("legacy.rvngraph"), "legacy bytes").unwrap();
+        assert!(link_project(&directory, Some(Path::new("missing.rvn"))).is_err());
+        assert!(!directory.join(".rvn-authoring.json").exists());
+        let linked = link_project(&directory, None).unwrap();
+        assert_eq!(linked, directory.canonicalize().unwrap().join("main.rvn"));
+        assert_eq!(fs::read_to_string(&linked).unwrap(), source);
+        assert_eq!(
+            fs::read_to_string(directory.join("legacy.rvngraph")).unwrap(),
+            "legacy bytes"
+        );
+        let sidecar = fs::read(directory.join(".rvn-authoring.json")).unwrap();
+        assert!(link_project(&directory, None).is_err());
+        assert_eq!(
+            fs::read(directory.join(".rvn-authoring.json")).unwrap(),
+            sidecar
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn transpiles_to_the_default_sibling_path_atomically() {

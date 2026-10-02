@@ -1,0 +1,10 @@
+[strings]
+"custom.heading" = "Deux curseurs personnalisés indépendants"
+"custom.help" = "Glissez, utilisez la molette, ou sélectionnez un curseur puis les flèches."
+"custom.first" = "Premier curseur personnalisé : glisser, molette ou flèches gauche et droite"
+"custom.second" = "Second curseur personnalisé : glisser, molette ou flèches gauche et droite"
+"custom.reset" = "Réinitialiser les deux curseurs"
+"custom.close" = "Fermer"
+"custom.note" = "Note modifiable"
+"The custom controls keep independent state. Try saving and loading, then close the interface." = "Chaque contrôle conserve son état. Essayez de sauvegarder et charger, puis fermez l’interface."
+"Custom controls closed." = "Contrôles personnalisés fermés."

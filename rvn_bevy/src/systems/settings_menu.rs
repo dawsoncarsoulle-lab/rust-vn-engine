@@ -559,6 +559,8 @@ pub fn apply_settings_to_runtime_system(
     mut dialogue_text_query: Query<&mut Text, With<DialogueText>>,
     mut history: ResMut<crate::resources::DialogueHistory>,
     registry: Res<crate::resources::CharacterRegistry>,
+    mut interface_error: ResMut<crate::resources::ScriptErrorMessage>,
+    mut next: ResMut<NextState<VnState>>,
 ) {
     if !settings.is_changed() {
         return;
@@ -597,6 +599,18 @@ pub fn apply_settings_to_runtime_system(
                         }
                     }
                     refresh_current_interaction(&mut engine, &mut vn_events);
+                    match engine.0.refresh_interfaces() {
+                        Ok(()) => {
+                            for command in engine.0.renderer.take_pending() {
+                                vn_events.send(command);
+                            }
+                        }
+                        Err(problem) => {
+                            interface_error.0 =
+                                format!("Interface language refresh failed: {problem}");
+                            next.set(VnState::Error);
+                        }
+                    }
                 }
                 Err(e) => {
                     error!(

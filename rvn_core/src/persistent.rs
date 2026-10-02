@@ -75,6 +75,9 @@ impl LastResumeTarget {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct PersistentData {
+    /// Player preference, independent from narrative saves and rollback.
+    #[serde(default)]
+    pub accessibility: Option<rvn_ui::accessibility::AccessibilitySettings>,
     #[serde(default)]
     pub seen_cgs: BTreeSet<String>,
     #[serde(default)]

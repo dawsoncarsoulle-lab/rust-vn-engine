@@ -1,6 +1,7 @@
 #![allow(deprecated)]
 
 mod analysis;
+mod callables;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -107,23 +108,12 @@ impl LanguageServer for Backend {
         let text_params = params.text_document_position_params;
         let uri = text_params.text_document.uri;
         let position = text_params.position;
-        let state = self.state.read().await;
-        let Some(text) = state.document_text(&uri) else {
-            return Ok(None);
-        };
-        let Some(target) = analysis::label_reference_at(text, position) else {
-            return Ok(None);
-        };
-        drop(state);
-
         let analysis = self.analyze_for(&uri).await;
-        if let Some(label) = analysis.index.labels.get(&target) {
-            return Ok(Some(GotoDefinitionResponse::Scalar(Location {
-                uri: label.uri.clone(),
-                range: label.range,
-            })));
-        }
-        Ok(None)
+        Ok(analysis
+            .index
+            .symbol_at(&uri, position)
+            .and_then(|symbol| analysis.index.definition_for(&symbol))
+            .map(GotoDefinitionResponse::Scalar))
     }
 
     async fn document_symbol(
@@ -230,6 +220,15 @@ impl LanguageServer for Backend {
                         .get(&symbol.name)
                         .is_none_or(|character| {
                             character.uri != location.uri || character.range != location.range
+                        })
+                }
+                RvnSymbolKind::Callable => {
+                    analysis
+                        .index
+                        .functions
+                        .get(&symbol.name)
+                        .is_none_or(|function| {
+                            function.uri != location.uri || function.range != location.range
                         })
                 }
             });

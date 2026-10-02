@@ -1,0 +1,88 @@
+// Reusable components, repeated inventory entries, game bindings and handlers.
+// Composants réutilisables, inventaire répété, liaisons et gestionnaires.
+// Styles are RVN dictionaries; a cascade is applied left-to-right.
+// Les styles sont des dictionnaires RVN ; une cascade s'applique de gauche à droite.
+function inventory_style() {
+    return {"radius": 12, "border_width": 2, "border_color": [0.15, 0.4, 0.6, 1], "hover_background": [0.08, 0.3, 0.4, 1], "pressed_background": [0.05, 0.2, 0.3, 1]}
+}
+function heading(id, text) {
+    return component(id, "text", {"text": text, "text_key": "ui." + id, "font_size": 32}, [])
+}
+function inventory_item(item) {
+    return component(item, "button", {"text": item, "text_key": "ui.item." + item, "style": [inventory_style(), {"padding": 12}], "event_data": {"item": item}, "events": {"click": "pick_item"}}, [])
+}
+screen inventory(title) {
+    local children = [heading("heading", title)]
+    for item in items { set children = list_append(children, inventory_item(item)) }
+    set children = list_append(children, component("name", "input", {"binding": "player_name", "accessible_label": "Your name", "accessible_label_key": "ui.name"}, []))
+    set children = list_append(children, component("show_hints", "toggle", {"text": "Show hints", "text_key":"ui.show_hints", "binding": "show_hints"}, []))
+    set children = list_append(children, component("theme", "select", {"options": ["Dark", "Light", "High contrast", "Amber", "Blue", "Cyan", "Gold", "Green", "Indigo", "Ivory", "Jade", "Mint", "Navy", "Ochre", "Olive", "Orange", "Pink", "Plum", "Red", "Rose", "Sand", "Silver", "Teal", "Violet", "White"], "option_keys":["ui.theme.dark", "ui.theme.light", "ui.theme.contrast", "ui.theme.amber", "ui.theme.blue", "ui.theme.cyan", "ui.theme.gold", "ui.theme.green", "ui.theme.indigo", "ui.theme.ivory", "ui.theme.jade", "ui.theme.mint", "ui.theme.navy", "ui.theme.ochre", "ui.theme.olive", "ui.theme.orange", "ui.theme.pink", "ui.theme.plum", "ui.theme.red", "ui.theme.rose", "ui.theme.sand", "ui.theme.silver", "ui.theme.teal", "ui.theme.violet", "ui.theme.white"], "binding": "theme", "accessible_label": "Reading theme", "accessible_label_key":"ui.theme"}, []))
+    set children = list_append(children, component("brightness", "slider", {"text": "Brightness", "text_key":"ui.brightness", "binding": "brightness"}, []))
+    set children = list_append(children, component("disabled", "button", {"text": "Unavailable item", "text_key":"ui.disabled", "enabled": false, "events": {"click": "pick_item"}}, []))
+    set children = list_append(children, component("open_puzzle", "button", {"text": "Unlock the archive", "text_key":"ui.open_puzzle", "events": {"click": "open_puzzle"}}, []))
+    set children = list_append(children, component("more_items", "button", {"text": "Browse a long inventory", "text_key":"ui.more_items", "events": {"click": "open_long_inventory"}}, []))
+    return component("inventory_root", "column", {"width": 560, "padding": 28, "spacing": 12, "background": [0.025, 0.055, 0.09, 0.98]}, children)
+}
+screen long_inventory() {
+    local children = [heading("long_heading", "Inventory collection")]
+    local i = 0
+    while i < 40 {
+        set children = list_append(children, component("row_" + i, "button", {"text": "Item " + (i + 1), "text_key":"ui.long_item."+i, "events": {"click": "pick_long_item"}}, []))
+        set i = i + 1
+    }
+    return component("long_root", "column", {"width": 620, "padding": 28, "spacing": 12, "background": [0.025, 0.055, 0.09, 0.98]}, children)
+}
+screen journal() {
+    local children = [heading("journal_heading", "Journal")]
+    set children = list_append(children, component("welcome", "text", {"text": "Hello " + player_name, "text_key":"ui.welcome"}, []))
+    if archive_open {
+        set children = list_append(children, component("quest", "text", {"text": "Archive unlocked", "text_key":"ui.quest_complete"}, []))
+    } else {
+        set children = list_append(children, component("quest", "text", {"text": "Find the code", "text_key":"ui.quest_active"}, []))
+    }
+    return component("journal_root", "column", {"rect": [28, 28, 520, 230], "padding": 20, "background": [0.025, 0.055, 0.09, 0.98]}, children)
+}
+screen puzzle() {
+    return component("puzzle_root", "column", {"width": 600, "padding": 28, "spacing": 12, "background": [0.035, 0.08, 0.12, 1]}, [
+        heading("puzzle_heading", "Archive code"),
+        component("hint", "text", {"text": "Hint: DAWN", "text_key":"ui.hint", "visible":show_hints}, []),
+        component("code", "input", {"binding": "answer", "placeholder": "Type the code", "placeholder_key":"ui.code_placeholder", "accessible_label": "Archive code", "accessible_label_key":"ui.puzzle_heading"}, []),
+        component("message", "text", {"text": puzzle_message, "text_key":"ui.try_again", "visible":puzzle_message != ""}, []),
+        component("confirm", "button", {"text": "Confirm", "text_key":"ui.confirm", "events": {"click": "check_code"}}, []),
+        component("back", "button", {"text": "Back", "text_key":"ui.back", "events": {"click": "close_puzzle"}}, [])
+    ])
+}
+handler pick_item(event) {
+    set selected = dict_get(event["data"], "item", event["element"])
+    ui.close("inventory")
+}
+handler open_puzzle(event) { ui.open("puzzle", [], true, 2) ui.focus("puzzle", "code") }
+handler close_puzzle(event) { ui.close("puzzle") }
+handler open_long_inventory(event) { ui.open("long_inventory", [], true, 2) }
+handler pick_long_item(event) { set selected = event["element"] ui.close("long_inventory") }
+handler check_code(event) {
+    if upper(trim(answer)) == "DAWN" {
+        set archive_open = true
+        set puzzle_message = ""
+        ui.close("puzzle")
+    } else { set puzzle_message = "Try again" }
+}
+init {
+    set items = ["letter", "key"]
+    set selected = ""
+    set player_name = "Camille"
+    set show_hints = true
+    set theme = "Dark"
+    set brightness = 0.5
+    set answer = ""
+    set archive_open = false
+    set puzzle_message = ""
+}
+label start
+    ui.open("journal", [], false, 0)
+    ui.open("inventory", ["Inventory"], true, 1)
+    "Use the inventory, then select an item."
+    "Selected: [selected] — archive: [archive_open]"
+    ui.close("journal")
+    jump finished
+label finished

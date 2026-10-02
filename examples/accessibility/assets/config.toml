@@ -1,0 +1,4 @@
+[locale]
+default = "en"
+current = "en"
+available = ["en", "fr"]

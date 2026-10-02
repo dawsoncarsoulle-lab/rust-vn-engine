@@ -10,6 +10,7 @@ tower-lsp = "0.20"
 url = "2.5"
 walkdir = "2.5"
 rvn_parser = { path = "../rvn_parser" }
+logos = "0.16.1"
 
 [[bin]]
 name = "rvn-lsp"

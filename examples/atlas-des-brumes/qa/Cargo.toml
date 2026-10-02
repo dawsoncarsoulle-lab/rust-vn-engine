@@ -1,0 +1,36 @@
+[package]
+name = "atlas-des-brumes-qa"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+native-video = ["dep:rvn_media", "dep:sha2"]
+
+# Keep the example QA independent: no changes to the engine workspace needed.
+[workspace]
+
+[lib]
+path = "runner.rs"
+
+[[bin]]
+name = "atlas-authoring-cache"
+path = "authoring-cache.rs"
+
+[[bin]]
+name = "atlas-native-video"
+path = "native-video.rs"
+required-features = ["native-video"]
+
+[dependencies]
+rvn_core = { path = "../../../rvn_core" }
+rvn_parser = { path = "../../../rvn_parser" }
+rvn_graph = { path = "../../../rvn_graph" }
+rvn_ui = { path = "../../../rvn_ui" }
+serde_json = "1.0"
+rvn_media = { path = "../../../rvn_media", features = ["video"], optional = true }
+sha2 = { version = "0.10", optional = true }
+
+# Use the same audited shared-library linking as the engine workspace.
+[patch.crates-io]
+ffmpeg-sys-next = { path = "../../../vendor/ffmpeg-sys-next" }

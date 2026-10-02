@@ -1,0 +1,163 @@
+{
+  "project": "L’Atlas des Brumes",
+  "generated_on": "2026-10-02",
+  "pipeline": "Built-in image_gen tool; original bitmap assets, inspected and integrated into native RVN. No downloaded Nintendo assets.",
+  "records": [
+    {
+      "asset": "assets/scenes/harbor.png",
+      "mode": "built-in-imagegen/generate",
+      "transparent_background": false,
+      "brief": "Illustration originale de port fantastique à l'aube, pierre ancienne, arches, voiliers, brumes et accents bronze/bleu pétrole ; décor panoramique sans texte.",
+      "note": "Résumé du brief de génération ; le prompt exact n'a pas été conservé dans ce manifeste.",
+      "generation_output_id": "exec-b91bed6a-1766-4b91-8b58-7cb9ba5d0982.png"
+    },
+    {
+      "asset": "assets/maps/world.png",
+      "mode": "built-in-imagegen/generate",
+      "transparent_background": false,
+      "brief": "Carte originale panoramique d'une île, port au sud-ouest, observatoire au nord-ouest, forêt au centre, archives au nord-est, falaises à l'est et tour au sud-est ; texture détaillée sans noms ni marqueurs.",
+      "note": "Résumé du brief de génération ; le prompt exact n'a pas été conservé dans ce manifeste.",
+      "generation_output_id": "exec-8f395450-66cd-4430-9f18-ea725d5c1bcd.png"
+    },
+    {
+      "asset": "assets/ui/frame.png",
+      "mode": "built-in-imagegen/generate",
+      "transparent_background": true,
+      "brief": "Cadre d'atlas ornemental, pierre bleu pétrole et bronze poli gravé, coins sculptés, intérieur transparent, ressource séparée sans texte.",
+      "note": "Résumé du brief de génération ; le prompt exact n'a pas été conservé dans ce manifeste.",
+      "generation_output_id": "exec-30160716-1425-4b0a-833c-e040449641f2.png"
+    },
+    {
+      "asset": "assets/scenes/forest.png",
+      "mode": "built-in-imagegen/generate",
+      "transparent_background": false,
+      "brief": "Clairière fantastique originale, forêt brumeuse lumineuse, architecture ancienne et mécanismes d'observation, palette bleue/bronze cohérente.",
+      "note": "Résumé du brief de génération ; le prompt exact n'a pas été conservé dans ce manifeste.",
+      "generation_output_id": "exec-6185ec4b-0c93-4a74-bfe1-fd0b80e5aef3.png"
+    },
+    {
+      "asset": "assets/scenes/temple.png",
+      "mode": "built-in-imagegen/generate",
+      "transparent_background": false,
+      "brief": "Sanctuaire d'observation fantastique original, architecture ancienne détaillée, cristaux azur, lumière contemplative, illustration panoramique.",
+      "note": "Résumé du brief de génération ; le prompt exact n'a pas été conservé dans ce manifeste.",
+      "generation_output_id": "exec-435cb13a-1f02-46eb-85f2-9a1969a99a13.png"
+    },
+    {
+      "asset": "assets/portraits/keeper.png",
+      "mode": "built-in-imagegen/generate",
+      "transparent_background": true,
+      "brief": "Maëlys, gardienne originale, silhouette entière en pose neutre, chemise ivoire, pantalon charbon, long manteau marine, châle pétrole et lanterne bronze bleue ; transparence.",
+      "note": "Résumé du brief de génération ; le prompt exact n'a pas été conservé dans ce manifeste.",
+      "generation_output_id": "exec-6bee1411-f170-49fc-b862-1e102169bdbd.png"
+    },
+    {
+      "asset": "assets/layers/keeper_body.png",
+      "mode": "built-in-imagegen/edit",
+      "transparent_background": true,
+      "prompt": "Editthistransparentcharacterartintoabasebodylayerforamultilayervisualnovelcharacter. Preserveexactoriginalcanvassizeandallpixelpositions, pose, scale, silhouetteorigin, lighting, faceandcharacteridentity. Removetheentirelongnavycoat, tealshawl, nauticalbroochandheldlantern, reconstructtheivoryshirt, charcoaltrousers, handsandleatherbootsbeneath. Keepneutralfaceandhairunchanged. Theleft hand(onviewer'sleft) retainsitsexactpositionnowempty. Fullbody,transparentsurroundings. Noaccessoriesorbackground. Do notmoveorresizethecharacter.",
+      "reference": "assets/portraits/keeper.png",
+      "generation_output_id": "exec-c29a096e-45ab-4adb-88d6-062f7ed555fd.png"
+    },
+    {
+      "asset": "assets/layers/keeper_coat.png",
+      "mode": "built-in-imagegen/edit",
+      "transparent_background": true,
+      "prompt": "Createanexactlyregisteredtransparentoverlaylayerfromthischaracterreference. Sameoriginalcanvasdimensionsandpixelpositions. KeepONLYthelongnavytravellingcoatandtealshawlwiththebronzebrooch, intheirexactoriginalposition, shapeandlight. Deleteeverythingelse: body, head, face, hair, shirt, trousers, boots, hands, lanternbecomefullytransparent. Transparentareasbetweentheclothpieces. Noimageofwholeperson. Thisassetwilloverlaythebasebodywithnocoordinatechanges.",
+      "reference": "assets/portraits/keeper.png",
+      "generation_output_id": "exec-e8edf248-2028-4e67-82be-86ae19e7b03a.png"
+    },
+    {
+      "asset": "assets/layers/keeper_neutral.png",
+      "mode": "built-in-imagegen/edit",
+      "transparent_background": true,
+      "prompt": "Extractanexactlyregisteredtransparenthead/faceexpressionlayerfromthischaracterreference. Preserveoriginalcanvasdimensionsandallpositions. KeepONLYtheentirehead,face, earsandhairwiththeexistingneutralfriendlyexpression, inexactlythesamepixelpositionandsize. Everythingbelowthejawlineandoutsideheadishundredpercenttransparent. No torso,coat,shoulders,hands,lantern,boots. Transparentcanvasaslargeastheoriginalfullbodyimage, doNOTcenter,enlarge,cropormovethehead.",
+      "reference": "assets/portraits/keeper.png",
+      "generation_output_id": "exec-58f31b96-fb12-4828-92b4-97c372eb8eec.png"
+    },
+    {
+      "asset": "assets/layers/keeper_smile.png",
+      "mode": "built-in-imagegen/edit",
+      "transparent_background": true,
+      "prompt": "Createanexactlyregisteredtransparenthead/faceexpressionlayerfromthischaracterreference. Preserveoriginalcanvasdimensionsandallpositions. KeepONLYtheentirehead,face, earsandhairatthesamepixelpositionandsize. Modifyonlytheexpressiontoawarmnaturalsoftsmilewithslightlysmilingeyes,samecharacterlikeness. Everythingbelowthejawlineandoutsideheadishundredpercenttransparent. No torso,coat,shoulders,hands,lantern,boots. Transparentcanvasaslargeastheoriginalfullbodyimage, doNOTcenter,enlarge,cropormovethehead.",
+      "reference": "assets/portraits/keeper.png",
+      "generation_output_id": "exec-1b611ecd-6281-4f8d-aca1-8c46258020b0.png"
+    },
+    {
+      "asset": "assets/layers/keeper_lantern.png",
+      "mode": "built-in-imagegen/edit",
+      "transparent_background": true,
+      "prompt": "Extractanexactlyregisteredtransparentaccessorylayerfromthischaracterreference. Preserveoriginalcanvasdimensionsandpixelpositions. KeepONLYtheheldbronzelanternwithitscyanlightintheexactoriginalposition(viewer'sleftofperson), completelydeletepersonincludingfingersandhand, allface/clothing/bodybecomestransparent. Originalfulllargecanvas, accessory stayswhereitwas. DoNOTcenter,crop,enlargeormoveit. Thistransparentlanternoverlayfitsabasebodyatzeroposition.",
+      "reference": "assets/portraits/keeper.png",
+      "generation_output_id": "exec-e0fdcb1d-5b18-4c13-960e-2171aca0cb81.png"
+    },
+    {
+      "asset": "assets/icons/boussole.png",
+      "mode": "built-in-imagegen/generate",
+      "transparent_background": true,
+      "prompt": "A single polished finished fantasygame inventory icon: an intricate antique brass marine compass with midnightteal enamel, obsidian and ivory needle, bright polished glass reflections. Original art for \"L'Atlas des Brumes\". Painterly realistic collectible-game remaster style, beautiful meticulous tactile materials, crisp recognizable silhouette, luminous highlights and soft selfshading, elegant highquality object render. Centered object entirely visible in a square image with generous transparent margins, large clean silhouette occupying72%canvas. Frontthree-quarterview. No text, no UI frame, no floor or scenery, no background, no franchise markings, clean alpha aroundobject. Transparent background mandatory. This is an individual asset, not a sprite sheet.",
+      "generation_output_id": "exec-ef0aa5db-08a1-4cac-b02b-0d2b0b62aac2.png"
+    },
+    {
+      "asset": "assets/icons/lanterne.png",
+      "mode": "built-in-imagegen/generate",
+      "transparent_background": true,
+      "prompt": "A single polished finished fantasygame inventory icon: a delicate antique bronze lantern, cage with a beautiful glowing azure blue magicflame and polished glass. Original art for \"L'Atlas des Brumes\". Painterly realistic collectible-game remaster style, beautiful meticulous tactile materials, crisp recognizable silhouette, luminous highlights and soft selfshading, elegant highquality object render. Centered object entirely visible in a square image with generous transparent margins, large clean silhouette occupying72%canvas. Frontthree-quarterview. No text, no UI frame, no floor or scenery, no background, no franchise markings, clean alpha aroundobject. Transparent background mandatory. This is an individual asset, not a sprite sheet.",
+      "generation_output_id": "exec-871cfecc-a05d-472e-88f4-eadd0299b0d9.png"
+    },
+    {
+      "asset": "assets/icons/grappin.png",
+      "mode": "built-in-imagegen/generate",
+      "transparent_background": true,
+      "prompt": "A single polished finished fantasygame inventory icon: an elegant threeprong grapplinghook madeof polished brass and darksteel, coil of teal braided rope. Original art for \"L'Atlas des Brumes\". Painterly realistic collectible-game remaster style, beautiful meticulous tactile materials, crisp recognizable silhouette, luminous highlights and soft selfshading, elegant highquality object render. Centered object entirely visible in a square image with generous transparent margins, large clean silhouette occupying72%canvas. Frontthree-quarterview. No text, no UI frame, no floor or scenery, no background, no franchise markings, clean alpha aroundobject. Transparent background mandatory. This is an individual asset, not a sprite sheet.",
+      "generation_output_id": "exec-7910dfa4-fc14-45e2-a66e-fabf4ac1d789.png"
+    },
+    {
+      "asset": "assets/icons/sceau.png",
+      "mode": "built-in-imagegen/generate",
+      "transparent_background": true,
+      "prompt": "A single polished finished fantasygame inventory icon: a circular old bronze sealmedallion inset with an original embossed sailingstar motif, narrow teal ribbon. Original art for \"L'Atlas des Brumes\". Painterly realistic collectible-game remaster style, beautiful meticulous tactile materials, crisp recognizable silhouette, luminous highlights and soft selfshading, elegant highquality object render. Centered object entirely visible in a square image with generous transparent margins, large clean silhouette occupying72%canvas. Frontthree-quarterview. No text, no UI frame, no floor or scenery, no background, no franchise markings, clean alpha aroundobject. Transparent background mandatory. This is an individual asset, not a sprite sheet.",
+      "generation_output_id": "exec-b69544ac-ff28-4167-96bf-f05e18d089c7.png"
+    },
+    {
+      "asset": "assets/icons/cle.png",
+      "mode": "built-in-imagegen/generate",
+      "transparent_background": true,
+      "prompt": "A single polished finished fantasygame inventory icon: an intricate old bronze key with round windshaped bow and ornate long teeth, tiny turquoiseinlay. Original art for \"L'Atlas des Brumes\". Painterly realistic collectible-game remaster style, beautiful meticulous tactile materials, crisp recognizable silhouette, luminous highlights and soft selfshading, elegant highquality object render. Centered object entirely visible in a square image with generous transparent margins, large clean silhouette occupying72%canvas. Frontthree-quarterview. No text, no UI frame, no floor or scenery, no background, no franchise markings, clean alpha aroundobject. Transparent background mandatory. This is an individual asset, not a sprite sheet.",
+      "generation_output_id": "exec-60904b54-4975-45ac-95b3-143c521048dd.png"
+    },
+    {
+      "asset": "assets/icons/cristal.png",
+      "mode": "built-in-imagegen/generate",
+      "transparent_background": true,
+      "prompt": "A single polished finished fantasygame inventory icon: two azure magical crystal shards with faceted rich turquoise glass, luminous cyan core and warmbronze filigree bases. Original art for \"L'Atlas des Brumes\". Painterly realistic collectible-game remaster style, beautiful meticulous tactile materials, crisp recognizable silhouette, luminous highlights and soft selfshading, elegant highquality object render. Centered object entirely visible in a square image with generous transparent margins, large clean silhouette occupying72%canvas. Frontthree-quarterview. No text, no UI frame, no floor or scenery, no background, no franchise markings, clean alpha aroundobject. Transparent background mandatory. This is an individual asset, not a sprite sheet.",
+      "generation_output_id": "exec-d13a3495-a5f5-447e-b884-e8748ddf3bd1.png"
+    },
+    {
+      "asset": "assets/portraits/player.png",
+      "mode": "built-in-imagegen/generate",
+      "transparent_background": true,
+      "prompt": "Production-ready original fantasy character portrait for a game identity menu, transparent background. Alix, an androgynous young adult cartographer with warm brown complexion, shoulderlength dark wavy hair, confident kind expression. Teal fitted fieldcoat with polished bronze edges and nautical ornaments, ivory shirt, leather satchel, a beautiful compass attached to belt, scarf. Threequarterfront-facing head-to-upper-thigh composition, all head/hair/arms inside canvas; relaxedpose handsnear belt. Exquisite painterly JRPG remaster illustration, finely woven cloth, richly shadedleather, elegant sophisticated polished metal reflections, warmgentleface. Vertical3:4aspect, centeredsilhouette with clean transparent alpha outside body. Entirely original design, not Nintendo/Link, no text, logos, symbols from franchises, no backdrop. This is a player identity character portrait, not a screenshot.",
+      "generation_output_id": "exec-9ab9e568-3709-47e7-9646-0e02850ead90.png"
+    },
+    {
+      "asset": "assets/sprites/lantern/bright.png",
+      "mode": "built-in-imagegen/edit",
+      "transparent_background": true,
+      "prompt": "Edit this exact transparent fantasy lantern icon into its brighter animation frame. Keep original canvas dimensions, exact position, size, contours, brass metal and glass completely unchanged. Only change the blue magical flame inside glass: swirl it gently toward right and increase cyan light brightness by25%, preserving rich visible detail. Clean existing transparency outside lantern, no extra aura outside object, no background or text. This alternates with the original sprite and must not move at all.",
+      "reference": "assets/icons/lanterne.png",
+      "generation_output_id": "exec-02440ecc-eaec-4aca-b093-b2484c64c46d.png"
+    }
+  ],
+  "derived_copies": [
+    {
+      "asset": "assets/sprites/lantern/default.png",
+      "source": "assets/icons/lanterne.png"
+    },
+    {
+      "asset": "assets/cgs/atlas_memory.png",
+      "source": "assets/scenes/temple.png"
+    }
+  ],
+  "known_registration_tolerance": "Keeper neutral expression source height differs by 1 pixel; every layer uses the same registered full-canvas logical size."
+}

@@ -3,13 +3,16 @@ pub mod error;
 pub mod eval;
 pub mod locale;
 pub mod persistent;
+pub mod random;
 pub mod renderer;
 pub mod rollback;
 pub mod save;
 pub mod text_tags;
 pub mod types;
+pub mod ui;
+pub mod value_limits;
 
-pub use engine::{Engine, Interaction};
+pub use engine::{Engine, Interaction, LoadCompatibility};
 pub use error::RuntimeError;
 pub use eval::{eval_bool, eval_expr, eval_interpolated, EvalError};
 pub use locale::{collect_strings_from_flat_script, collect_strings_from_script, LocaleManager};
@@ -34,6 +37,43 @@ mod tests {
         pub events: Vec<String>,
         pub screen: String,
         pub visible: Vec<String>,
+    }
+
+    #[test]
+    fn timed_calls_enforce_the_narrative_depth_and_reject_invalid_actions_atomically() {
+        let mut engine = Engine::new(
+            parse("label start\n\"wait\"\nlabel target\nreturn\n").unwrap(),
+            Mock::default(),
+            16,
+        )
+        .unwrap();
+        engine.step_until_interaction().unwrap();
+        for action in ["noop target", "call", "call target extra", "call missing"] {
+            let before = engine.state.clone();
+            assert!(engine.execute_timer_action(action).is_err());
+            assert_eq!(engine.state.pc, before.pc);
+            assert_eq!(engine.state.call_stack, before.call_stack);
+        }
+        engine.state.call_stack = vec![0; 128];
+        let before = engine.state.pc;
+        assert!(engine.execute_timer_action("call target").is_err());
+        assert_eq!(engine.state.pc, before);
+        assert_eq!(engine.state.call_stack.len(), 128);
+        engine.state.call_stack.clear();
+        engine.execute_timer_action("  call   target  ").unwrap();
+        assert_eq!(engine.state.call_stack.len(), 1);
+    }
+
+    #[test]
+    fn unresolved_narrative_call_does_not_leak_a_return_frame() {
+        let mut engine = Engine::new(
+            parse("label start\ncall missing\n").unwrap(),
+            Mock::default(),
+            16,
+        )
+        .unwrap();
+        assert!(engine.step_until_interaction().is_err());
+        assert!(engine.state.call_stack.is_empty());
     }
 
     #[test]
@@ -473,3 +513,6 @@ set total = persistent.count + 10"#;
         );
     }
 }
+pub mod composition;
+pub mod motion;
+pub mod video;

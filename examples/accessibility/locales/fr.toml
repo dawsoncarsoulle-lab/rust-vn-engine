@@ -1,0 +1,12 @@
+# Fichier de localisation — langue : fr
+# Clés = textes originaux du script.
+# Valeurs = traductions. Gardez les [variables] intactes.
+
+[strings]
+"a11y.title" = "Inventaire au clavier"
+"a11y.hints" = "Afficher les indices"
+"a11y.letter" = "Prendre la lettre"
+"a11y.key" = "Prendre la clé"
+"a11y.welcome" = "F8 ouvre les réglages d’accessibilité. Tab et les flèches déplacent le focus ; Entrée active un contrôle. V active la lecture vocale, sauf pendant la saisie dans un champ de texte."
+"a11y.controls" = "Essayez l’inventaire avec le clavier ou un lecteur d’écran. Le focus est visible et les informations sont aussi présentées sous forme de texte."
+"a11y.done [selected]" = "Objet sélectionné : [selected]. Votre choix est enregistré dans l’état du jeu. Les préférences d’accessibilité sont conservées séparément : charger une partie ou revenir en arrière ne les supprime pas."

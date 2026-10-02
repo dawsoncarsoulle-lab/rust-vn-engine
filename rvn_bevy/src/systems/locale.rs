@@ -3,7 +3,13 @@ use bevy::prelude::*;
 
 /// Hot-reload des fichiers de locale.
 /// Surveille les timestamps et recharge si le fichier a changé sur le disque.
-pub fn locale_reload_system(mut engine: ResMut<VnEngine>, mut locale_cfg: ResMut<LocaleConfig>) {
+pub fn locale_reload_system(
+    mut engine: ResMut<VnEngine>,
+    mut locale_cfg: ResMut<LocaleConfig>,
+    mut output: EventWriter<crate::vn_command::VnCommand>,
+    mut error: ResMut<crate::resources::ScriptErrorMessage>,
+    mut next: ResMut<NextState<crate::resources::VnState>>,
+) {
     let Some(locale) = &engine.0.locale else {
         return;
     };
@@ -39,12 +45,28 @@ pub fn locale_reload_system(mut engine: ResMut<VnEngine>, mut locale_cfg: ResMut
             locale.reload_current();
             info!("[locale] hot-reloaded — langue : {}", current);
         }
+        match engine.0.refresh_interfaces() {
+            Ok(()) => {
+                for command in engine.0.renderer.take_pending() {
+                    output.send(command);
+                }
+            }
+            Err(problem) => {
+                error.0 = format!("Interface locale reload failed: {problem}");
+                next.set(crate::resources::VnState::Error);
+            }
+        }
     }
 }
 
 /// Surveille la variable `__lang` dans le moteur.
 /// `set __lang = "en"` dans le script change la langue instantanément.
-pub fn locale_lang_watch_system(mut engine: ResMut<VnEngine>) {
+pub fn locale_lang_watch_system(
+    mut engine: ResMut<VnEngine>,
+    mut output: EventWriter<crate::vn_command::VnCommand>,
+    mut error: ResMut<crate::resources::ScriptErrorMessage>,
+    mut next: ResMut<NextState<crate::resources::VnState>>,
+) {
     use rvn_parser::Value;
 
     let lang_opt = engine.0.get_var("__lang").and_then(|v| {
@@ -68,6 +90,17 @@ pub fn locale_lang_watch_system(mut engine: ResMut<VnEngine>) {
                 match locale.set_language(&lang) {
                     Ok(_) => info!("[locale] langue changée → {}", lang),
                     Err(e) => error!("[locale] impossible de charger `{}` : {}", lang, e),
+                }
+            }
+            match engine.0.refresh_interfaces() {
+                Ok(()) => {
+                    for command in engine.0.renderer.take_pending() {
+                        output.send(command);
+                    }
+                }
+                Err(problem) => {
+                    error.0 = format!("Interface language refresh failed: {problem}");
+                    next.set(crate::resources::VnState::Error);
                 }
             }
         }

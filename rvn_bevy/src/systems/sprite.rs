@@ -15,7 +15,7 @@ fn position_to_x(pos: &Position) -> f32 {
     }
 }
 
-fn sprite_default_transform(position: &Position) -> Transform {
+pub(crate) fn sprite_default_transform(position: &Position) -> Transform {
     let x = position_to_x(position);
     let sprite_h = WIN_H * 0.85;
     let y = -(WIN_H / 2.0) + (sprite_h / 2.0);
@@ -52,7 +52,10 @@ fn f32_param(params: &[AnimationParam], name: &str, default: f32) -> f32 {
         .unwrap_or(default)
 }
 
-fn build_sprite_animation(animation: &str, params: &[AnimationParam]) -> Option<SpriteAnimation> {
+pub(crate) fn build_sprite_animation(
+    animation: &str,
+    params: &[AnimationParam],
+) -> Option<SpriteAnimation> {
     let looping = bool_param(params, "loop", false);
     let duration_secs = f32_param(
         params,
@@ -144,12 +147,18 @@ pub fn resize_sprite_stage(
 pub fn sprite_system(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    engine: Res<crate::resources::VnEngine>,
     stages: Query<Entity, With<SpriteStage>>,
     mut vn_events: EventReader<VnCommand>,
     mut queries: ParamSet<(
         Query<(Entity, &VnSprite)>,
         Query<(Entity, &VnSprite, &SpriteBaseTransform, &mut Transform), With<SpriteAnimation>>,
-        Query<(&VnSprite, &mut Transform, &mut Sprite)>,
+        Query<(
+            &VnSprite,
+            &mut Transform,
+            &mut Sprite,
+            &mut SpriteBaseTransform,
+        )>,
     )>,
 ) {
     let mut spawned_this_frame: HashMap<String, Entity> = HashMap::new();
@@ -177,6 +186,9 @@ pub fn sprite_system(
                 position,
                 transition,
             } => {
+                if engine.0.state.layered.characters.contains_key(&id) {
+                    continue;
+                }
                 let file = match &emotion {
                     Some(path) if path.contains('/') => {
                         path.strip_prefix("assets/").unwrap_or(path).to_owned()
@@ -253,6 +265,9 @@ pub fn sprite_system(
             }
 
             VnCommand::HideSprite { id, transition } => {
+                if engine.0.state.layered.characters.contains_key(&id) {
+                    continue;
+                }
                 let mut found = false;
 
                 for (entity, sprite) in queries.p0().iter() {
@@ -286,6 +301,9 @@ pub fn sprite_system(
             }
 
             VnCommand::MoveSprite { id, position, .. } => {
+                if engine.0.state.layered.characters.contains_key(&id) {
+                    continue;
+                }
                 let transform = sprite_default_transform(&position);
                 let base = base_from_transform(&transform);
 
@@ -360,7 +378,7 @@ pub fn sprite_system(
                 ref rotation,
                 ref tint,
             } => {
-                for (sprite, mut transform, mut sprite_vis) in queries.p2().iter_mut() {
+                for (sprite, mut transform, mut sprite_vis, mut base) in queries.p2().iter_mut() {
                     if &sprite.id != id {
                         continue;
                     }
@@ -377,6 +395,7 @@ pub fn sprite_system(
                     if let Some(deg) = rotation {
                         transform.rotation = Quat::from_rotation_z(deg.to_radians());
                     }
+                    base.scale = transform.scale;
                     if let Some(color) = tint {
                         if let Ok(c) = Srgba::hex(color.trim_start_matches('#')) {
                             sprite_vis.color = Color::from(c);
@@ -391,15 +410,20 @@ pub fn sprite_system(
 
 pub fn sprite_animation_system(
     time: Res<Time>,
+    accessibility: Res<crate::accessibility::Accessibility>,
     mut query: Query<(
         Entity,
         &SpriteBaseTransform,
         &mut SpriteAnimation,
         &mut Transform,
+        Option<&mut crate::layered_characters::LayeredFade>,
     )>,
     mut commands: Commands,
 ) {
-    for (entity, base, mut animation, mut transform) in query.iter_mut() {
+    if accessibility.blocked {
+        return;
+    }
+    for (entity, base, mut animation, mut transform, fade) in query.iter_mut() {
         animation.elapsed_secs += time.delta_seconds();
         let mut progress = animation.elapsed_secs / animation.duration_secs;
 
@@ -412,25 +436,27 @@ pub fn sprite_animation_system(
         transform.translation = base.translation;
         transform.scale = base.scale;
 
-        match animation.kind {
-            AnimationKind::Shake { intensity } => {
-                // Oscillation rapide qui revient naturellement à zéro en fin de cycle.
-                let decay = if animation.looping {
-                    1.0
-                } else {
-                    1.0 - progress
-                };
-                let offset = (progress * std::f32::consts::TAU * 6.0).sin() * intensity * decay;
-                transform.translation.x += offset;
-            }
-            AnimationKind::Bounce { height } => {
-                let offset = (progress * std::f32::consts::PI).sin() * height;
-                transform.translation.y += offset;
-            }
-            AnimationKind::Pulse { scale } => {
-                let wave = (progress * std::f32::consts::TAU).sin();
-                let factor = 1.0 + (scale - 1.0) * wave.max(0.0);
-                transform.scale = base.scale * factor;
+        if !accessibility.settings.reduced_motion {
+            match animation.kind {
+                AnimationKind::Shake { intensity } => {
+                    // Oscillation rapide qui revient naturellement à zéro en fin de cycle.
+                    let decay = if animation.looping {
+                        1.0
+                    } else {
+                        1.0 - progress
+                    };
+                    let offset = (progress * std::f32::consts::TAU * 6.0).sin() * intensity * decay;
+                    transform.translation.x += offset;
+                }
+                AnimationKind::Bounce { height } => {
+                    let offset = (progress * std::f32::consts::PI).sin() * height;
+                    transform.translation.y += offset;
+                }
+                AnimationKind::Pulse { scale } => {
+                    let wave = (progress * std::f32::consts::TAU).sin();
+                    let factor = 1.0 + (scale - 1.0) * wave.max(0.0);
+                    transform.scale = base.scale * factor;
+                }
             }
         }
 
@@ -438,6 +464,11 @@ pub fn sprite_animation_system(
             transform.translation = base.translation;
             transform.scale = base.scale;
             commands.entity(entity).remove::<SpriteAnimation>();
+        }
+        if let Some(mut fade) = fade {
+            // The transition is applied afterwards to this frame's animated
+            // pose; it must never replace the shake/bounce/pulse contribution.
+            fade.base = *transform;
         }
     }
 }

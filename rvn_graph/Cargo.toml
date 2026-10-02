@@ -7,6 +7,7 @@ edition = "2021"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 rvn_parser = { path = "../rvn_parser" }
+rvn_ui = { path = "../rvn_ui" }
 
 [dev-dependencies]
 rvn_core = { path = "../rvn_core" }

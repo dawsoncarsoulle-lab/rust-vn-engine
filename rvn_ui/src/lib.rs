@@ -10,12 +10,19 @@ use std::{
 
 mod card_layout;
 mod design;
+mod programmable_layout;
 pub use card_layout::fit_card_rows;
 mod controls;
 mod style_names;
 pub use controls::LocalControl;
 mod animation;
 pub use animation::*;
+pub mod accessibility;
+pub mod composition;
+pub mod custom_canvas;
+pub mod motion;
+pub mod video;
+pub mod webm;
 pub use design::*;
 mod editing;
 mod templates;
@@ -1404,3 +1411,4 @@ mod tests {
         assert_eq!(session.variables["count"], 255);
     }
 }
+pub mod programmable;

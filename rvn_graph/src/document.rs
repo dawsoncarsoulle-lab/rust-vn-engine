@@ -48,6 +48,13 @@ pub struct GraphEdge {
     pub input: PinId,
 }
 
+/// One undoable connection edit, including any visible conversion nodes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConvertedConnection {
+    pub edge: EdgeId,
+    pub conversions: Vec<NodeId>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GraphDocument {
     pub schema_version: u32,
@@ -67,6 +74,288 @@ pub struct GraphDocument {
 }
 
 impl GraphDocument {
+    /// Preserve identities and presentation when re-importing changed source.
+    /// This is in-memory only; callers keep the previous document on failure.
+    pub fn reconcile_import(&mut self, previous: &Self) -> Result<(), String> {
+        if self.kind != previous.kind {
+            return Err("Cannot reconcile different graph kinds".into());
+        }
+        for graph in [&*self, previous] {
+            if graph.nodes.values().any(|node| {
+                node.pins
+                    .iter()
+                    .any(|id| !graph.pins.get(id).is_some_and(|pin| pin.node == node.id))
+            }) || graph.pins.values().any(|pin| {
+                !graph
+                    .nodes
+                    .get(&pin.node)
+                    .is_some_and(|node| node.pins.contains(&pin.id))
+            }) || graph.edges.values().any(|edge| {
+                !graph.pins.contains_key(&edge.output) || !graph.pins.contains_key(&edge.input)
+            }) || graph.nodes.values().any(|node| {
+                node.position
+                    .iter()
+                    .any(|value| !value.is_finite() || value.abs() > 1_000_000_000.0)
+            }) || graph.nodes.keys().any(|id| id.get() >= graph.next_node_id)
+                || graph.pins.keys().any(|id| id.get() >= graph.next_pin_id)
+                || graph.edges.keys().any(|id| id.get() >= graph.next_edge_id)
+            {
+                return Err("Cannot reconcile a structurally invalid graph".into());
+            }
+        }
+        fn signature(graph: &GraphDocument, node: &GraphNode) -> Result<String, String> {
+            fn input_signatures(
+                graph: &GraphDocument,
+                node: &GraphNode,
+                seen: &mut BTreeSet<NodeId>,
+                depth: usize,
+            ) -> Result<String, String> {
+                if depth == 0 || !seen.insert(node.id) {
+                    return Ok("cycle-or-depth-limit".into());
+                }
+                let mut inputs = Vec::new();
+                for id in &node.pins {
+                    let pin = &graph.pins[id];
+                    if pin.direction != PinDirection::Input || pin.value_type.is_execution() {
+                        continue;
+                    }
+                    for edge in graph.edges.values().filter(|edge| edge.input == *id) {
+                        let output = &graph.pins[&edge.output];
+                        let source = &graph.nodes[&output.node];
+                        inputs.push((
+                            pin.key.clone(),
+                            output.key.clone(),
+                            source.kind,
+                            source.properties.clone(),
+                            input_signatures(graph, source, seen, depth - 1)?,
+                        ));
+                    }
+                }
+                seen.remove(&node.id);
+                serde_json::to_string(&inputs).map_err(|e| e.to_string())
+            }
+            let pins: Vec<_> = node
+                .pins
+                .iter()
+                .map(|id| {
+                    let pin = &graph.pins[id];
+                    (
+                        &pin.key,
+                        pin.direction,
+                        &pin.value_type,
+                        pin.cardinality,
+                        &pin.default_value,
+                    )
+                })
+                .collect();
+            let inputs = input_signatures(graph, node, &mut BTreeSet::new(), 32)?;
+            serde_json::to_string(&(node.kind, &node.properties, pins, inputs))
+                .map_err(|e| e.to_string())
+        }
+        fn allocate(next: &mut u64) -> Result<u64, String> {
+            let id = *next;
+            *next = next
+                .checked_add(1)
+                .ok_or("Graph identity space exhausted")?;
+            Ok(id)
+        }
+        let mut matches: BTreeMap<String, std::collections::VecDeque<NodeId>> = BTreeMap::new();
+        for node in previous.nodes.values() {
+            matches
+                .entry(signature(previous, node)?)
+                .or_default()
+                .push_back(node.id);
+        }
+        let mut matched_nodes = BTreeMap::new();
+        let mut used = BTreeSet::new();
+        for node in self.nodes.values() {
+            if let Some(id) = matches
+                .get_mut(&signature(self, node)?)
+                .and_then(|ids| ids.pop_front())
+            {
+                matched_nodes.insert(node.id, id);
+                used.insert(id);
+            }
+        }
+        // Changed values keep their identity when their unchanged connected
+        // neighbors identify them unambiguously. No position/order guessing.
+        loop {
+            let mut proposals = Vec::new();
+            for node in self
+                .nodes
+                .values()
+                .filter(|node| !matched_nodes.contains_key(&node.id))
+            {
+                let shape = |graph: &GraphDocument, node: &GraphNode| {
+                    node.pins
+                        .iter()
+                        .map(|id| {
+                            let pin = &graph.pins[id];
+                            (
+                                pin.key.clone(),
+                                pin.direction,
+                                pin.value_type.clone(),
+                                pin.cardinality,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let mut candidates = Vec::new();
+                for old in previous
+                    .nodes
+                    .values()
+                    .filter(|old| !used.contains(&old.id) && old.kind == node.kind)
+                {
+                    if shape(self, node) != shape(previous, old) {
+                        continue;
+                    }
+                    let mut score = 0;
+                    for edge in self.edges.values() {
+                        let output = &self.pins[&edge.output];
+                        let input = &self.pins[&edge.input];
+                        let anchor = if output.node == node.id {
+                            matched_nodes.get(&input.node).map(|id| (*id, true))
+                        } else if input.node == node.id {
+                            matched_nodes.get(&output.node).map(|id| (*id, false))
+                        } else {
+                            None
+                        };
+                        if let Some((neighbor, outgoing)) = anchor {
+                            if previous.edges.values().any(|edge| {
+                                let old_output = &previous.pins[&edge.output];
+                                let old_input = &previous.pins[&edge.input];
+                                old_output.key == output.key
+                                    && old_input.key == input.key
+                                    && if outgoing {
+                                        old_output.node == old.id && old_input.node == neighbor
+                                    } else {
+                                        old_input.node == old.id && old_output.node == neighbor
+                                    }
+                            }) {
+                                score += 1;
+                            }
+                        }
+                    }
+                    if score > 0 {
+                        candidates.push((score, old.id));
+                    }
+                }
+                candidates.sort_by(|a, b| b.0.cmp(&a.0));
+                if let Some((score, id)) = candidates.first().copied() {
+                    if candidates.get(1).is_none_or(|other| other.0 < score) {
+                        proposals.push((node.id, id));
+                    }
+                }
+            }
+            let unique: Vec<_> = proposals
+                .iter()
+                .filter(|(_, old)| {
+                    proposals
+                        .iter()
+                        .filter(|(_, candidate)| candidate == old)
+                        .count()
+                        == 1
+                })
+                .copied()
+                .collect();
+            if unique.is_empty() {
+                break;
+            }
+            for (node, old) in unique {
+                matched_nodes.insert(node, old);
+                used.insert(old);
+            }
+        }
+        let mut next_node = previous.next_node_id;
+        let mut next_pin = previous.next_pin_id;
+        let mut next_edge = previous.next_edge_id;
+        // BranchEnd stores a node reference in its owner property, not in a
+        // pin. Resolve every fresh identity before copying any node so a
+        // forward/backward owner reference follows the same remapping.
+        let mut node_ids = matched_nodes.clone();
+        for original in self.nodes.values() {
+            if !node_ids.contains_key(&original.id) {
+                node_ids.insert(original.id, NodeId::new(allocate(&mut next_node)?));
+            }
+        }
+        let mut nodes = BTreeMap::new();
+        let mut pins = BTreeMap::new();
+        let mut pin_ids = BTreeMap::new();
+        for original in self.nodes.values() {
+            let matched = matched_nodes.get(&original.id).copied();
+            let id = node_ids[&original.id];
+            let mut node = original.clone();
+            node.id = id;
+            if node.kind == NodeKind::BranchEnd {
+                if let Some(PropertyValue::Int(owner)) = node.properties.get_mut("owner") {
+                    if let Ok(owner_id) = u64::try_from(*owner) {
+                        if let Some(mapped) = node_ids.get(&NodeId::new(owner_id)) {
+                            *owner = i64::try_from(mapped.get()).map_err(|_| {
+                                "Branch owner identity exceeds its property representation"
+                            })?;
+                        }
+                    }
+                }
+            }
+            node.pins.clear();
+            if let Some(old) = matched.and_then(|id| previous.nodes.get(&id)) {
+                node.position = old.position;
+                node.title_override = old.title_override.clone();
+            }
+            for original_pin in &original.pins {
+                let mut pin = self.pins[original_pin].clone();
+                let old_pin = matched.and_then(|old| previous.pin_by_key(old, &pin.key));
+                let pin_id = match old_pin {
+                    Some(old) => old.id,
+                    None => PinId::new(allocate(&mut next_pin)?),
+                };
+                pin_ids.insert(*original_pin, pin_id);
+                pin.id = pin_id;
+                pin.node = id;
+                node.pins.push(pin_id);
+                pins.insert(pin_id, pin);
+            }
+            nodes.insert(id, node);
+        }
+        let old_edges: BTreeMap<_, _> = previous
+            .edges
+            .values()
+            .map(|edge| ((edge.output, edge.input), edge.id))
+            .collect();
+        let mut edges = BTreeMap::new();
+        for original in self.edges.values() {
+            let output = pin_ids[&original.output];
+            let input = pin_ids[&original.input];
+            let id = match old_edges.get(&(output, input)) {
+                Some(id) => *id,
+                None => EdgeId::new(allocate(&mut next_edge)?),
+            };
+            edges.insert(id, GraphEdge { id, output, input });
+        }
+        // Keep all existing placements untouched, including intentional
+        // overlaps. Only freshly imported nodes receive automatic placement.
+        let mut trial = self.clone();
+        trial.graph_id = previous.graph_id;
+        trial.nodes = nodes;
+        trial.pins = pins;
+        trial.edges = edges;
+        trial.next_node_id = next_node;
+        trial.next_pin_id = next_pin;
+        trial.next_edge_id = next_edge;
+        let new_nodes: Vec<_> = trial
+            .nodes
+            .keys()
+            .copied()
+            .filter(|id| !used.contains(id))
+            .collect();
+        for node in new_nodes {
+            trial.place_without_overlap(node);
+        }
+        // Commit only after all allocations and placement succeed.
+        *self = trial;
+        Ok(())
+    }
+
     pub fn new(graph_id: GraphId, kind: GraphKind) -> Self {
         Self {
             schema_version: GRAPH_SCHEMA_VERSION,
@@ -232,6 +521,14 @@ impl GraphDocument {
                     ("args", PropertyValue::StringList(Vec::new())),
                 ]
             }
+            NodeKind::FunctionEntry | NodeKind::ScreenEntry => {
+                vec![("parameters", PropertyValue::StringList(Vec::new()))]
+            }
+            NodeKind::HandlerEntry => vec![(
+                "parameters",
+                PropertyValue::StringList(vec!["event".into()]),
+            )],
+            NodeKind::ForEach => vec![("name", PropertyValue::String("item".into()))],
             NodeKind::ListLiteral => {
                 vec![("items", PropertyValue::StringList(Vec::new()))]
             }
@@ -424,7 +721,16 @@ impl GraphDocument {
                 node,
                 key: key.to_owned(),
             })?;
+        if self.has_blueprint_operator_policy(node) {
+            let value_type = crate::type_inference::property_type(&value);
+            return self.set_blueprint_pin_default(pin, value, value_type);
+        }
         self.pins.get_mut(&pin).unwrap().default_value = Some(value);
+        self.nodes
+            .get_mut(&node)
+            .unwrap()
+            .properties
+            .remove(&format!("@blueprint_default_type:{key}"));
         Ok(())
     }
 
@@ -527,6 +833,7 @@ impl GraphDocument {
         let value_type = match owner.kind {
             NodeKind::LogicAnd | NodeKind::LogicOr => ValueType::Bool,
             NodeKind::MathAdd | NodeKind::MathMultiply => ValueType::Any,
+            NodeKind::StringAppend => ValueType::String,
             _ => return Err(GraphEditError::UnsupportedDynamicOperand(node)),
         };
         let input_count = owner
@@ -537,13 +844,20 @@ impl GraphDocument {
         let pin = self.add_pin(
             node,
             format!("operand_{input_count}"),
-            format!("Entrée {}", input_count + 1),
+            if owner.kind == NodeKind::StringAppend && input_count < 26 {
+                ((b'A' + input_count as u8) as char).to_string()
+            } else {
+                format!("Entrée {}", input_count + 1)
+            },
             PinDirection::Input,
             value_type.clone(),
             PinCardinality::One,
         )?;
         if value_type == ValueType::Bool {
             self.pins.get_mut(&pin).unwrap().default_value = Some(PropertyValue::Bool(false));
+        } else if value_type == ValueType::String {
+            self.pins.get_mut(&pin).unwrap().default_value =
+                Some(PropertyValue::String(String::new()));
         }
         Ok(pin)
     }
@@ -782,10 +1096,20 @@ impl GraphDocument {
                             == Some(&PropertyValue::Bool(false)))
             })
             .filter(|pin| {
-                !matches!(
-                    self.nodes[&pin.node].kind,
-                    NodeKind::LogicAnd | NodeKind::LogicOr | NodeKind::LogicNot
-                )
+                !crate::type_inference::has_adaptive_operand_defaults(&self.nodes[&pin.node])
+                    && !matches!(
+                        self.nodes[&pin.node].kind,
+                        NodeKind::LogicAnd
+                            | NodeKind::LogicOr
+                            | NodeKind::LogicNot
+                            | NodeKind::If
+                            | NodeKind::While
+                            | NodeKind::ConvertIntToFloat
+                            | NodeKind::ConvertNumberToText
+                            | NodeKind::ConvertTextToInt
+                            | NodeKind::ConvertStringToText
+                            | NodeKind::ConvertTextToString
+                    )
             })
             // Le nom affiché par un SET est son identité, pas une valeur de
             // graphe. UE l'intègre au nœud SET et ne crée jamais une fausse
@@ -973,21 +1297,27 @@ impl GraphDocument {
     pub fn materialize_implicit_conversions(&mut self) -> Result<usize, GraphEditError> {
         let mut trial = self.clone();
         let mut changed = trial.normalize_literal_pin_types();
+        let types = trial.effective_pin_types();
         let candidates: Vec<_> = trial
             .edges
             .values()
             .filter_map(|edge| {
                 let output = trial.pins.get(&edge.output)?;
                 let input = trial.pins.get(&edge.input)?;
-                if input.value_type.accepts(&output.value_type) {
+                let source = types.get(&output.id).unwrap_or(&output.value_type);
+                let target = trial
+                    .pin_constraint_type(input.id)
+                    .unwrap_or_else(|| input.value_type.clone());
+                if target.accepts(source) {
                     return None;
                 }
-                conversion_kind_for(&output.value_type, &input.value_type)
-                    .map(|kind| (edge.id, edge.output, edge.input, kind))
+                target
+                    .conversion_path_from(source)
+                    .map(|_| (edge.id, edge.output, edge.input))
             })
             .collect();
 
-        for (edge, output, input, kind) in candidates {
+        for (edge, output, input) in candidates {
             let output_node = trial.pins[&output].node;
             let input_node = trial.pins[&input].node;
             let output_position = trial.nodes[&output_node].position;
@@ -997,12 +1327,22 @@ impl GraphDocument {
                 (output_position[1] + input_position[1]) * 0.5,
             ];
             trial.remove_edge(edge);
-            let converter = trial.add_catalog_node(kind, position)?;
-            let converter_input = trial.pin_by_key(converter, "value").unwrap().id;
-            let converter_output = trial.pin_by_key(converter, "result").unwrap().id;
-            trial.connect(output, converter_input)?;
-            trial.connect(converter_output, input)?;
-            changed += 1;
+            let connection = trial.connect_with_conversions(output, input, position)?;
+            for node in &connection.conversions {
+                if matches!(
+                    trial.nodes[node].kind,
+                    NodeKind::ConvertStringToText | NodeKind::ConvertTextToString
+                ) {
+                    // Old Text/String wires were representation aliases. Keep
+                    // their exact RVN/locale keys while showing the boundary.
+                    trial.set_property(*node, "legacy_passthrough", PropertyValue::Bool(true))?;
+                }
+            }
+            // The original destination edge remains identifiable after upgrade.
+            let mut restored = trial.edges.remove(&connection.edge).unwrap();
+            restored.id = edge;
+            trial.edges.insert(edge, restored);
+            changed += connection.conversions.len();
         }
 
         *self = trial;
@@ -1255,14 +1595,24 @@ impl GraphDocument {
         {
             return Err(GraphEditError::InvalidDirection { output, input });
         }
-        if !input_pin.value_type.accepts(&output_pin.value_type)
-            || !self.nodes[&input_pin.node]
-                .kind
-                .accepts_data_source(&output_pin.value_type)
-        {
+        let contextual = matches!(
+            crate::blueprint_policy::blueprint_operand_domain(&self.nodes[&input_pin.node]),
+            Some(crate::blueprint_policy::BlueprintOperandDomain::Equality)
+        );
+        let types = if contextual {
+            self.effective_pin_types()
+        } else {
+            BTreeMap::new()
+        };
+        let output_type = types
+            .get(&output)
+            .cloned()
+            .unwrap_or_else(|| self.effective_pin_type(output).unwrap_or(ValueType::Any));
+        let input_type = self.pin_constraint_type(input).unwrap_or(ValueType::Any);
+        if !self.accepts_pin_source_with_types(input, &output_type, &types) {
             return Err(GraphEditError::IncompatibleTypes {
-                output: output_pin.value_type.clone(),
-                input: input_pin.value_type.clone(),
+                output: output_type,
+                input: input_type,
             });
         }
         if self
@@ -1289,10 +1639,99 @@ impl GraphDocument {
         let id = EdgeId::new(self.next_edge_id);
         self.next_edge_id += 1;
         self.edges.insert(id, GraphEdge { id, output, input });
-        if !self.pins[&input].value_type.is_execution() {
+        let inline_default = matches!(
+            self.nodes[&self.pins[&input].node].kind,
+            NodeKind::SetVariable
+                | NodeKind::LocalVariable
+                | NodeKind::LogicAnd
+                | NodeKind::LogicOr
+                | NodeKind::LogicNot
+                | NodeKind::If
+                | NodeKind::While
+                | NodeKind::ConvertIntToFloat
+                | NodeKind::ConvertNumberToText
+                | NodeKind::ConvertTextToInt
+                | NodeKind::ConvertStringToText
+                | NodeKind::ConvertTextToString
+                | NodeKind::MathAdd
+                | NodeKind::MathSubtract
+                | NodeKind::MathMultiply
+                | NodeKind::MathDivide
+                | NodeKind::MathNegate
+                | NodeKind::MathEqual
+                | NodeKind::MathNotEqual
+                | NodeKind::StringAppend
+                | NodeKind::MathLess
+                | NodeKind::MathLessEqual
+                | NodeKind::MathGreater
+                | NodeKind::MathGreaterEqual
+                | NodeKind::BinaryOperator
+                | NodeKind::UnaryOperator
+        );
+        // A wire takes precedence during evaluation. Retain an inline default
+        // while hidden, so disconnect restores it rather than deleting a value
+        // merely because the user tried a connection.
+        if !self.pins[&input].value_type.is_execution() && !inline_default {
             self.pins.get_mut(&input).unwrap().default_value = None;
         }
         Ok(id)
+    }
+
+    /// Connect distinct data types through visible conversion nodes. The whole
+    /// change is atomic: invalid directions, cycles and occupied inputs leave
+    /// the original graph and its identity counters untouched.
+    pub fn connect_with_conversions(
+        &mut self,
+        output: PinId,
+        input: PinId,
+        position: [f64; 2],
+    ) -> Result<ConvertedConnection, GraphEditError> {
+        let output_pin = self
+            .pins
+            .get(&output)
+            .ok_or(GraphEditError::PinNotFound(output))?;
+        let input_pin = self
+            .pins
+            .get(&input)
+            .ok_or(GraphEditError::PinNotFound(input))?;
+        if output_pin.direction != PinDirection::Output
+            || input_pin.direction != PinDirection::Input
+        {
+            return Err(GraphEditError::InvalidDirection { output, input });
+        }
+        let output_type = self.effective_pin_type(output).unwrap_or(ValueType::Any);
+        let input_type = self.pin_constraint_type(input).unwrap_or(ValueType::Any);
+        let needs_precision_cast = input_type == ValueType::Float
+            && output_type == ValueType::Int
+            && self.nodes[&input_pin.node].kind != NodeKind::ConvertNumberToText;
+        if input_type.accepts(&output_type) && !needs_precision_cast {
+            let edge = self.connect(output, input)?;
+            return Ok(ConvertedConnection {
+                edge,
+                conversions: Vec::new(),
+            });
+        }
+        let path = input_type
+            .conversion_path_from(&output_type)
+            .ok_or_else(|| GraphEditError::IncompatibleTypes {
+                output: output_type.clone(),
+                input: input_type.clone(),
+            })?;
+        let mut trial = self.clone();
+        let mut tail = output;
+        let mut conversions = Vec::new();
+        for (index, kind) in path.into_iter().enumerate() {
+            let converter =
+                trial.add_catalog_node(kind, [position[0] + index as f64 * 180.0, position[1]])?;
+            let converter_input = trial.pin_by_key(converter, "value").unwrap().id;
+            let converter_output = trial.pin_by_key(converter, "result").unwrap().id;
+            trial.connect(tail, converter_input)?;
+            conversions.push(converter);
+            tail = converter_output;
+        }
+        let edge = trial.connect(tail, input)?;
+        *self = trial;
+        Ok(ConvertedConnection { edge, conversions })
     }
 
     pub fn remove_node(&mut self, node: NodeId) -> Option<GraphNode> {
@@ -1458,6 +1897,11 @@ impl GraphDocument {
             graph.pins.get_mut(&id).unwrap().default_value =
                 Some(PropertyValue::String("none".into()));
         }
+        if report.from < 3 {
+            graph
+                .materialize_implicit_conversions()
+                .map_err(GraphLoadError::Migration)?;
+        }
         Ok((graph, report))
     }
 
@@ -1503,10 +1947,6 @@ fn property_value_type(value: &PropertyValue) -> ValueType {
         PropertyValue::String(_) => ValueType::String,
         PropertyValue::StringList(_) => ValueType::List(Box::new(ValueType::String)),
     }
-}
-
-fn conversion_kind_for(output: &ValueType, input: &ValueType) -> Option<NodeKind> {
-    input.conversion_from(output)
 }
 
 fn transition_kind(value: &PropertyValue) -> NodeKind {
@@ -1592,6 +2032,7 @@ fn is_compact_node(kind: NodeKind) -> bool {
             | NodeKind::ConvertIntToFloat
             | NodeKind::ConvertNumberToText
             | NodeKind::ConvertTextToInt
+            | NodeKind::ConvertTextToString
             | NodeKind::BinaryOperator
             | NodeKind::UnaryOperator
             | NodeKind::TextValue
@@ -1641,6 +2082,7 @@ fn rectangles_overlap(
 #[derive(Debug)]
 pub enum GraphLoadError {
     Json(serde_json::Error),
+    Migration(GraphEditError),
     UnsupportedSchema { found: u32, supported: u32 },
 }
 
@@ -1648,6 +2090,7 @@ impl std::fmt::Display for GraphLoadError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Json(error) => error.fmt(formatter),
+            Self::Migration(error) => write!(formatter, "graph migration failed: {error}"),
             Self::UnsupportedSchema { found, supported } => write!(
                 formatter,
                 "unsupported graph schema {found}; this build supports schema {supported}"
@@ -1698,6 +2141,7 @@ pub enum GraphEditError {
         key: String,
     },
     UnsupportedDynamicOperand(NodeId),
+    UnsupportedBlueprintOperator(NodeId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

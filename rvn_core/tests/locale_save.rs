@@ -89,7 +89,9 @@ fn choice_save_keeps_dialogue_and_snapshot_values_in_both_languages() {
         .unwrap()
         .set_language("en")
         .unwrap();
-    restored.load_data(serde_json::from_str(&json).unwrap());
+    restored
+        .load_data(serde_json::from_str(&json).unwrap())
+        .unwrap();
     assert!(
         matches!(restored.last_dialogue_interaction().unwrap(),Some(Interaction::Dialogue{text,..}) if text=="Number 3")
     );

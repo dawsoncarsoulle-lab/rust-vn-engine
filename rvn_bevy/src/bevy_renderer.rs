@@ -27,6 +27,43 @@ impl BevyRenderer {
 mod restore_tests {
     use super::*;
     #[test]
+    fn load_compatibility_is_reported_only_after_a_successful_load() {
+        let script = rvn_parser::parse("label start\n\"Hello\"\nreturn").unwrap();
+        let mut engine = rvn_core::Engine::new(script, BevyRenderer::new(), 10).unwrap();
+        engine.step_until_interaction().unwrap();
+        let saved = rvn_core::save::SaveData::from_state(
+            &engine.state,
+            1,
+            "test".into(),
+            "main.rvn".into(),
+        );
+        engine.renderer.take_pending();
+        let mut invalid = saved.clone();
+        invalid.pc = usize::MAX;
+        assert!(engine.load_data(invalid).is_err());
+        assert!(!engine
+            .renderer
+            .take_pending()
+            .iter()
+            .any(|command| matches!(command, VnCommand::LoadedCompatibility(_))));
+        let mut legacy = saved.clone();
+        legacy.story_identity = None;
+        engine.load_data(legacy).unwrap();
+        assert!(matches!(
+            engine.renderer.take_pending().last(),
+            Some(VnCommand::LoadedCompatibility(
+                rvn_core::LoadCompatibility::LegacyUnchecked
+            ))
+        ));
+        engine.load_data(saved).unwrap();
+        assert!(matches!(
+            engine.renderer.take_pending().last(),
+            Some(VnCommand::LoadedCompatibility(
+                rvn_core::LoadCompatibility::Verified
+            ))
+        ));
+    }
+    #[test]
     fn restoring_an_empty_cast_discards_previous_visual_and_music_commands() {
         let mut engine = rvn_core::Engine::new(vec![], BevyRenderer::new(), 10).unwrap();
         engine.renderer.pending.push(VnCommand::ShowSprite {
@@ -48,6 +85,92 @@ mod restore_tests {
 }
 
 impl Renderer for BevyRenderer {
+    fn loaded_compatibility(&mut self, compatibility: rvn_core::LoadCompatibility) {
+        self.pending
+            .retain(|command| !matches!(command, VnCommand::LoadedCompatibility(_)));
+        self.pending
+            .push(VnCommand::LoadedCompatibility(compatibility));
+    }
+    fn supports_accessibility(&self) -> bool {
+        cfg!(any(
+            target_os = "linux",
+            target_os = "windows",
+            target_arch = "wasm32"
+        ))
+    }
+    fn update_accessibility(
+        &mut self,
+        settings: &rvn_ui::accessibility::AccessibilitySettings,
+    ) -> Result<(), String> {
+        settings.validate()?;
+        if settings != &Default::default() && !self.supports_accessibility() {
+            return Err("Accessibility is unavailable on this renderer platform".into());
+        }
+        self.pending
+            .retain(|command| !matches!(command, VnCommand::Accessibility(_)));
+        self.pending
+            .push(VnCommand::Accessibility(settings.clone()));
+        Ok(())
+    }
+    fn accessibility_speech(
+        &mut self,
+        request: &rvn_ui::accessibility::SpeechRequest,
+    ) -> Result<(), String> {
+        if !self.supports_accessibility() {
+            return Err("Speech synthesis is unavailable on this renderer platform".into());
+        }
+        self.pending.push(VnCommand::Speech(request.clone()));
+        Ok(())
+    }
+    fn supports_video(&self) -> bool {
+        cfg!(any(target_arch = "wasm32", feature = "video"))
+    }
+    fn update_videos(&mut self, views: &[rvn_core::video::VideoView]) -> Result<(), String> {
+        if !views.is_empty() && !self.supports_video() {
+            return Err("Video playback is unavailable in this renderer build".into());
+        }
+        self.pending
+            .retain(|command| !matches!(command, VnCommand::Videos(_)));
+        self.pending.push(VnCommand::Videos(views.to_vec()));
+        Ok(())
+    }
+    fn supports_layered_characters(&self) -> bool {
+        true
+    }
+    fn update_layered_characters(
+        &mut self,
+        views: &[rvn_core::composition::LayeredView],
+    ) -> Result<(), String> {
+        self.pending
+            .retain(|command| !matches!(command, VnCommand::LayeredCharacters(_)));
+        self.pending
+            .push(VnCommand::LayeredCharacters(views.to_vec()));
+        Ok(())
+    }
+    fn supports_composable_motion(&self) -> bool {
+        true
+    }
+    fn update_motions(&mut self, views: &[rvn_core::motion::MotionView]) -> Result<(), String> {
+        self.pending
+            .retain(|command| !matches!(command, VnCommand::Motions(_)));
+        self.pending.push(VnCommand::Motions(views.to_vec()));
+        Ok(())
+    }
+    fn supports_programmable_ui(&self) -> bool {
+        true
+    }
+    fn supports_custom_canvas(&self) -> bool {
+        true
+    }
+    fn update_interfaces(
+        &mut self,
+        screens: &[rvn_ui::programmable::ScreenView],
+    ) -> Result<(), String> {
+        self.pending
+            .retain(|command| !matches!(command, VnCommand::Interfaces(_)));
+        self.pending.push(VnCommand::Interfaces(screens.to_vec()));
+        Ok(())
+    }
     fn set_background(&mut self, path: &str, transition: &Transition) {
         self.pending.push(VnCommand::SetBackground {
             path: path.to_string(),

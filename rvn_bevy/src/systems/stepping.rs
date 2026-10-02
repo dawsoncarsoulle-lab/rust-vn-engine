@@ -24,7 +24,11 @@ pub fn stepping_system(
     project_paths: Res<ProjectPaths>,
     mut persistent: ResMut<PersistentDataResource>,
     mut thumbnails: ResMut<crate::save_thumbnails::SaveThumbnails>,
+    accessibility: Res<crate::accessibility::Accessibility>,
 ) {
+    if accessibility.open {
+        return;
+    }
     // En mode debug, on ne progresse que si un step a été demandé (touche F10).
     if debug_state.visible {
         if !step_req.pending {

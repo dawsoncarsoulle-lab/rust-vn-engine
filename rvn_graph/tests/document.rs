@@ -119,9 +119,19 @@ fn rejects_wrong_direction_and_incompatible_types() {
 }
 
 #[test]
-fn text_and_interpolated_text_are_connection_compatible() {
+fn text_and_interpolated_text_require_a_visible_conversion() {
     let mut graph = GraphDocument::new(GraphId::new(1), GraphKind::Init);
     let source_node = graph.add_node(NodeKind::VariableGet, [0.0, 0.0]);
+    graph
+        .add_variable(
+            "source",
+            ValueType::String,
+            PropertyValue::String(String::new()),
+        )
+        .unwrap();
+    graph
+        .set_property(source_node, "name", PropertyValue::String("source".into()))
+        .unwrap();
     let dialogue_node = graph.add_node(NodeKind::Dialogue, [100.0, 0.0]);
     let string_output = pin(
         &mut graph,
@@ -138,7 +148,18 @@ fn text_and_interpolated_text_are_connection_compatible() {
         ValueType::InterpolatedText,
     );
 
-    assert!(graph.connect(string_output, dialogue_text).is_ok());
+    assert!(matches!(
+        graph.connect(string_output, dialogue_text),
+        Err(GraphEditError::IncompatibleTypes { .. })
+    ));
+    let connection = graph
+        .connect_with_conversions(string_output, dialogue_text, [50.0, 50.0])
+        .unwrap();
+    assert_eq!(connection.conversions.len(), 1);
+    assert_eq!(
+        graph.nodes[&connection.conversions[0]].kind,
+        NodeKind::ConvertStringToText
+    );
 }
 
 #[test]
@@ -322,7 +343,17 @@ fn upgrades_a_legacy_text_to_integer_edge_with_a_converter() {
     let input = graph.pin_by_key(setter, "value").unwrap().id;
     graph.pins.get_mut(&output).unwrap().value_type = ValueType::Any;
     graph.pins.get_mut(&input).unwrap().value_type = ValueType::Int;
-    graph.connect(output, input).unwrap();
+    // This is an old serialized edge, not a newly authored connection (which
+    // correctly refuses known String→Int even with a stale Any pin cache).
+    let mut raw = serde_json::to_value(&graph).unwrap();
+    raw["edges"]["99"] = serde_json::to_value(GraphEdge {
+        id: EdgeId(99),
+        output,
+        input,
+    })
+    .unwrap();
+    raw["next_edge_id"] = serde_json::json!(100);
+    graph = serde_json::from_value(raw).unwrap();
 
     assert_eq!(graph.materialize_implicit_conversions().unwrap(), 2);
     let converter = graph
@@ -450,7 +481,9 @@ fn clears_a_hidden_default_when_the_input_is_already_connected() {
         .unwrap();
     let output = graph.pin_by_key(getter, "value").unwrap().id;
     let input = graph.pin_by_key(dialogue, "text").unwrap().id;
-    graph.connect(output, input).unwrap();
+    graph
+        .connect_with_conversions(output, input, [100.0, 0.0])
+        .unwrap();
     // Simule un ancien document sérialisé avant que `connect` ne nettoie la
     // valeur masquée automatiquement.
     graph
@@ -573,7 +606,10 @@ fn migrates_an_unversioned_graph_without_changing_stable_ids() {
         report.steps,
         vec![
             "v0_to_v1_stable_ids_and_defaults",
-            "v1_to_v2_typed_variables"
+            "v1_to_v2_typed_variables",
+            "v2_to_v3_explicit_text_conversions",
+            "v3_to_v4_advanced_authoring",
+            "v4_to_v5_programmable_canvas"
         ]
     );
     assert_eq!(restored.schema_version, GRAPH_SCHEMA_VERSION);

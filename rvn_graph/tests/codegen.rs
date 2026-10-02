@@ -212,7 +212,9 @@ fn connect(
 ) {
     let output = pin(graph, output_node, output_key);
     let input = pin(graph, input_node, input_key);
-    graph.connect(output, input).unwrap();
+    graph
+        .connect_with_conversions(output, input, [60.0, 60.0])
+        .unwrap();
 }
 
 fn define(
@@ -417,7 +419,7 @@ fn transpiles_text_to_integer_conversion_as_a_runtime_conversion() {
 }
 
 #[test]
-fn set_variable_value_output_reuses_the_assigned_expression() {
+fn set_variable_value_output_reads_the_assigned_value() {
     let mut graph = GraphDocument::new(
         GraphId::new(19),
         GraphKind::Label {
@@ -461,7 +463,7 @@ fn set_variable_value_output_reuses_the_assigned_expression() {
         concat!(
             "label set_passthrough\n",
             "    set score = 7\n",
-            "    set score_copy = 7\n",
+            "    set score_copy = score\n",
         )
     );
 }
@@ -491,7 +493,28 @@ fn dialogue_text_connected_to_variable_get_emits_interpolation() {
     connect(&mut graph, variable, "value", dialogue, "text");
 
     let generated = transpile(&graph).unwrap();
-    assert_eq!(generated.source, "label start\n    \"[testVar]\"\n");
+    assert!(
+        graph
+            .nodes
+            .values()
+            .any(|node| node.kind == NodeKind::ConvertStringToText),
+        "Known String→Text authoring must expose its conversion"
+    );
+    assert_eq!(
+        generated.source,
+        "label start\n    \"[string_to_text(testVar)]\"\n"
+    );
+    let Statement::Dialogue { text, .. } = &generated.ast[1] else {
+        panic!()
+    };
+    let values = std::collections::HashMap::from([(
+        "testVar".into(),
+        rvn_parser::Value::Str("Été [unchanged]".into()),
+    )]);
+    assert_eq!(
+        rvn_core::eval::eval_interpolated(text, &values).unwrap(),
+        "Été [unchanged]"
+    );
 }
 
 #[test]
@@ -547,8 +570,8 @@ fn set_then_get_text_variable_drives_dialogue_like_the_editor_workflow() {
         generated.source,
         concat!(
             "label start\n",
-            "    set dialogue1 = \"salut cava\"\n",
-            "    \"[dialogue1]\"\n",
+            "    set dialogue1 = text_to_string(\"salut cava\")\n",
+            "    \"[string_to_text(dialogue1)]\"\n",
         )
     );
 }
@@ -589,7 +612,7 @@ fn set_text_output_drives_dialogue_with_inline_value() {
     connect(&mut graph, setter, "value_out", dialogue, "text");
     assert_eq!(
         transpile(&graph).unwrap().source,
-        "label start\n    set dialogue_tila = \"salut\"\n    \"[dialogue_tila]\"\n"
+        "label start\n    set dialogue_tila = \"salut\"\n    \"[string_to_text(dialogue_tila)]\"\n"
     );
     let text_pin = pin(&graph, dialogue, "text");
     graph.edges.retain(|_, edge| edge.input != text_pin);

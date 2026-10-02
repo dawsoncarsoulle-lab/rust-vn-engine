@@ -21,6 +21,13 @@ impl From<&rvn_parser::Hotspot> for ImagemapZone {
 
 #[derive(Event, Debug, Clone)]
 pub enum VnCommand {
+    LoadedCompatibility(rvn_core::LoadCompatibility),
+    Accessibility(rvn_ui::accessibility::AccessibilitySettings),
+    Speech(rvn_ui::accessibility::SpeechRequest),
+    Videos(Vec<rvn_core::video::VideoView>),
+    LayeredCharacters(Vec<rvn_core::composition::LayeredView>),
+    Motions(Vec<rvn_core::motion::MotionView>),
+    Interfaces(Vec<rvn_ui::programmable::ScreenView>),
     /// Replace the rendered cast when restoring a complete saved screen.
     ClearSprites,
     // ── Visuels ───────────────────────────────────────────────────────────────

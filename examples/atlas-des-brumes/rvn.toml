@@ -1,0 +1,15 @@
+[project]
+title = "L’Atlas des Brumes"
+main_script = "main.rvn"
+start_label = "start"
+
+[window]
+width = 1280
+height = 720
+resizable = true
+
+[paths]
+assets = "assets"
+locales = "locales"
+theme = "theme.toml"
+saves = "saves"

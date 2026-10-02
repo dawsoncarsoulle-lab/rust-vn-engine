@@ -82,10 +82,35 @@ pub struct CinematicState {
 pub struct DialogueSnapshot {
     pub pc: usize,
     pub vars: HashMap<String, Value>,
+    #[serde(default)]
+    pub random: crate::random::RandomState,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GameState {
+    #[serde(default)]
+    pub accessibility: rvn_ui::accessibility::AccessibilitySettings,
+    /// Transaction-local speech requests. They must not be replayed by load or rollback.
+    #[serde(skip)]
+    pub(crate) speech_requests: Vec<rvn_ui::accessibility::SpeechRequest>,
+    #[serde(default)]
+    pub videos: crate::video::VideoState,
+    #[serde(default)]
+    pub layered: crate::composition::LayeredState,
+    #[serde(default)]
+    pub motions: crate::motion::MotionState,
+    #[serde(default)]
+    pub ui: crate::ui::UiState,
+    /// Compatibility identity of the prepared story, not a security checksum.
+    #[serde(default)]
+    pub story_identity: Option<String>,
+    #[serde(default)]
+    pub random: crate::random::RandomState,
+    /// A separate stream keeps redraws and language switches side-effect free.
+    #[serde(default)]
+    pub display_random: crate::random::RandomState,
+    #[serde(default)]
+    pub display_random_pc: Option<usize>,
     #[serde(default)]
     pub last_dialogue: Option<DialogueSnapshot>,
     pub pc: usize,

@@ -1,6 +1,6 @@
 use crate::{
     DiagnosticSeverity, GraphDiagnostic, GraphDocument, GraphKind, GraphNode, GraphPin, NodeId,
-    NodeKind, PinDirection, PinId, PropertyValue,
+    NodeKind, PinDirection, PinId, PropertyValue, ValueType,
 };
 use rvn_parser::Script;
 use std::collections::{BTreeMap, BTreeSet};
@@ -20,7 +20,7 @@ pub fn transpile(graph: &GraphDocument) -> Result<TranspiledScript, TranspileErr
         return Err(TranspileError::InvalidGraph(diagnostics));
     }
 
-    let source = Emitter { graph }.emit_document()?;
+    let source = Emitter::new(graph).emit_document()?;
     let ast = rvn_parser::parse(&source)
         .map_err(|error| TranspileError::GeneratedSourceInvalid(error.to_string()))?;
     Ok(TranspiledScript { source, ast })
@@ -28,6 +28,44 @@ pub fn transpile(graph: &GraphDocument) -> Result<TranspiledScript, TranspileErr
 
 struct Emitter<'a> {
     graph: &'a GraphDocument,
+    default_values: BTreeMap<PinId, PropertyValue>,
+    pin_types: BTreeMap<PinId, ValueType>,
+}
+
+impl<'a> Emitter<'a> {
+    fn new(graph: &'a GraphDocument) -> Self {
+        Self {
+            graph,
+            default_values: graph.effective_pin_default_values(),
+            pin_types: graph.effective_pin_types(),
+        }
+    }
+}
+
+/// Compile only a data subgraph for bounded previews. The same emitter is
+/// used by export; disconnected/incomplete narrative nodes do not interfere.
+pub fn transpile_value_output(
+    graph: &GraphDocument,
+    node: NodeId,
+    key: &str,
+) -> Result<String, TranspileError> {
+    let emitter = Emitter::new(graph);
+    let pin = emitter.pin(node, key)?;
+    if pin.direction != PinDirection::Output || pin.value_type.is_execution() {
+        return Err(TranspileError::ExpectedInput(pin.id));
+    }
+    let expression = emitter.expression_from_output(pin.id, &mut BTreeSet::new())?;
+    validate_expression(&expression)?;
+    Ok(expression)
+}
+pub fn transpile_value_input(
+    graph: &GraphDocument,
+    node: NodeId,
+    key: &str,
+) -> Result<String, TranspileError> {
+    let expression = Emitter::new(graph).expression_from_input(node, key)?;
+    validate_expression(&expression)?;
+    Ok(expression)
 }
 
 /// Validate editor expressions without accepting extra injected statements.
@@ -50,6 +88,18 @@ impl Emitter<'_> {
                 format!("label {}\n", validate_identifier(name)?),
             ),
             GraphKind::Init => (NodeKind::Init, "init {\n".to_owned()),
+            GraphKind::Function { name } => (
+                NodeKind::FunctionEntry,
+                format!("function {}", validate_identifier(name)?),
+            ),
+            GraphKind::Screen { name } => (
+                NodeKind::ScreenEntry,
+                format!("screen {}", validate_identifier(name)?),
+            ),
+            GraphKind::Handler { name } => (
+                NodeKind::HandlerEntry,
+                format!("handler {}", validate_identifier(name)?),
+            ),
             kind => return Err(TranspileError::UnsupportedGraphKind(kind.clone())),
         };
         let roots: Vec<_> = self
@@ -104,6 +154,30 @@ impl Emitter<'_> {
             source.push_str("}\n");
         }
         source.push_str(&header);
+        if matches!(
+            self.graph.kind,
+            GraphKind::Function { .. } | GraphKind::Screen { .. } | GraphKind::Handler { .. }
+        ) {
+            let parameters = match self.graph.nodes[root].properties.get("parameters") {
+                Some(PropertyValue::StringList(parameters)) => parameters,
+                _ => {
+                    return Err(TranspileError::GeneratedSourceInvalid(
+                        "Paramètres de fonction absents".into(),
+                    ))
+                }
+            };
+            for parameter in parameters {
+                validate_identifier(parameter)?;
+            }
+            if parameters.len() > 128
+                || parameters.iter().collect::<BTreeSet<_>>().len() != parameters.len()
+            {
+                return Err(TranspileError::GeneratedSourceInvalid(
+                    "Paramètres de fonction dupliqués ou trop nombreux".into(),
+                ));
+            }
+            source.push_str(&format!("({}) {{\n", parameters.join(", ")));
+        }
         self.emit_sequence(
             self.successor(*root, "exec_out")?,
             1,
@@ -111,7 +185,13 @@ impl Emitter<'_> {
             &mut source,
             &mut BTreeSet::new(),
         )?;
-        if matches!(self.graph.kind, GraphKind::Init) {
+        if matches!(
+            self.graph.kind,
+            GraphKind::Init
+                | GraphKind::Function { .. }
+                | GraphKind::Screen { .. }
+                | GraphKind::Handler { .. }
+        ) {
             source.push_str("}\n");
         }
         if let GraphKind::Label { name } = &self.graph.kind {
@@ -188,14 +268,18 @@ impl Emitter<'_> {
                     source.push('\n');
                     self.successor(node_id, "exec_out")?
                 }
-                NodeKind::SetVariable => {
+                NodeKind::SetVariable | NodeKind::LocalVariable => {
                     let name = match node.properties.get("name") {
                         Some(PropertyValue::String(name)) => name.clone(),
                         _ => self.pin_string(node_id, "name")?,
                     };
                     let value = self.expression_from_input(node_id, "value")?;
                     push_indent(source, indent);
-                    source.push_str("set ");
+                    source.push_str(if node.kind == NodeKind::LocalVariable {
+                        "local "
+                    } else {
+                        "set "
+                    });
                     source.push_str(validate_variable_name(&name)?);
                     source.push_str(" = ");
                     source.push_str(&value);
@@ -262,17 +346,25 @@ impl Emitter<'_> {
                 }
                 NodeKind::SpriteShow => {
                     let character = self.pin_string(node_id, "character")?;
-                    let emotion = self.connected_sprite(node_id)?.ok_or(
-                        TranspileError::MissingInputValue {
+                    let emotion = self.connected_sprite(node_id)?;
+                    if emotion.is_none()
+                        && node.properties.get("use_default_sprite")
+                            != Some(&PropertyValue::Bool(true))
+                    {
+                        return Err(TranspileError::MissingInputValue {
                             node: node_id,
-                            key: "Sprite : reliez une image au personnage".into(),
-                        },
-                    )?;
+                            key:
+                                "Sprite : reliez une image au personnage ou utilisez sa composition"
+                                    .into(),
+                        });
+                    }
                     let position = self.pin_string(node_id, "position")?;
                     push_indent(source, indent);
                     source.push_str(validate_identifier(&character)?);
                     source.push_str(".show(");
-                    source.push_str(&quote(&emotion));
+                    if let Some(emotion) = emotion {
+                        source.push_str(&quote(&emotion));
+                    }
                     source.push(')');
                     if !position.is_empty() {
                         source.push_str(" at ");
@@ -536,6 +628,127 @@ impl Emitter<'_> {
                     self.emit_if(node_id, indent, source, visited)?;
                     self.successor(node_id, "completed")?
                 }
+                NodeKind::While | NodeKind::ForEach => {
+                    push_indent(source, indent);
+                    if node.kind == NodeKind::While {
+                        source.push_str(&format!(
+                            "while {} {{\n",
+                            self.expression_from_input(node_id, "condition")?
+                        ));
+                    } else {
+                        let name = property_string(node_id, &node.properties, "name")?;
+                        source.push_str(&format!(
+                            "for {} in {} {{\n",
+                            validate_identifier(&name)?,
+                            self.expression_from_input(node_id, "collection")?
+                        ));
+                    }
+                    self.emit_sequence(
+                        self.successor(node_id, "body")?,
+                        indent + 1,
+                        Some(node_id),
+                        source,
+                        visited,
+                    )?;
+                    push_indent(source, indent);
+                    source.push_str("}\n");
+                    self.successor(node_id, "completed")?
+                }
+                NodeKind::FunctionReturn => {
+                    push_indent(source, indent);
+                    source.push_str(&format!(
+                        "return {}\n",
+                        self.expression_from_input(node_id, "value")?
+                    ));
+                    None
+                }
+                NodeKind::UiOpen
+                | NodeKind::UiClose
+                | NodeKind::UiFocus
+                | NodeKind::UiSetState
+                | NodeKind::MotionPlay
+                | NodeKind::MotionStop
+                | NodeKind::MotionWait
+                | NodeKind::CharacterCompose
+                | NodeKind::CharacterAttributes
+                | NodeKind::VideoPlay
+                | NodeKind::VideoPause
+                | NodeKind::VideoResume
+                | NodeKind::VideoStop
+                | NodeKind::VideoSkip
+                | NodeKind::VideoSeek
+                | NodeKind::VideoVolume
+                | NodeKind::VideoWait
+                | NodeKind::AccessibilityConfigure
+                | NodeKind::AccessibilitySpeak
+                | NodeKind::AccessibilityStop => {
+                    let (method, inputs): (&str, &[&str]) = match node.kind {
+                        NodeKind::UiOpen => ("open", &["name", "arguments", "modal", "layer"]),
+                        NodeKind::UiClose => ("close", &["name"]),
+                        NodeKind::UiSetState => ("set_state", &["name", "element", "state"]),
+                        NodeKind::MotionPlay => ("play", &["target", "definition"]),
+                        NodeKind::MotionStop => ("stop", &["target"]),
+                        NodeKind::MotionWait => ("wait", &["target"]),
+                        NodeKind::CharacterCompose => ("compose", &["character", "definition"]),
+                        NodeKind::CharacterAttributes => {
+                            ("attributes", &["character", "attributes"])
+                        }
+                        NodeKind::VideoPlay => ("play", &["name", "definition"]),
+                        NodeKind::VideoPause => ("pause", &["name"]),
+                        NodeKind::VideoResume => ("resume", &["name"]),
+                        NodeKind::VideoStop => ("stop", &["name"]),
+                        NodeKind::VideoSkip => ("skip", &["name"]),
+                        NodeKind::VideoWait => ("wait", &["name"]),
+                        NodeKind::VideoSeek => ("seek", &["name", "seconds"]),
+                        NodeKind::VideoVolume => ("volume", &["name", "volume"]),
+                        NodeKind::AccessibilityConfigure => ("configure", &["settings"]),
+                        NodeKind::AccessibilitySpeak => ("speak", &["text"]),
+                        NodeKind::AccessibilityStop => ("stop", &[]),
+                        _ => ("focus", &["name", "element"]),
+                    };
+                    let arguments = inputs
+                        .iter()
+                        .map(|input| self.expression_from_input(node_id, input))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    push_indent(source, indent);
+                    let namespace = if matches!(
+                        node.kind,
+                        NodeKind::MotionPlay | NodeKind::MotionStop | NodeKind::MotionWait
+                    ) {
+                        "motion"
+                    } else if matches!(
+                        node.kind,
+                        NodeKind::CharacterCompose | NodeKind::CharacterAttributes
+                    ) {
+                        "character"
+                    } else if matches!(
+                        node.kind,
+                        NodeKind::VideoPlay
+                            | NodeKind::VideoPause
+                            | NodeKind::VideoResume
+                            | NodeKind::VideoStop
+                            | NodeKind::VideoSkip
+                            | NodeKind::VideoWait
+                            | NodeKind::VideoSeek
+                            | NodeKind::VideoVolume
+                    ) {
+                        "video"
+                    } else {
+                        "ui"
+                    };
+                    let namespace = if matches!(
+                        node.kind,
+                        NodeKind::AccessibilityConfigure
+                            | NodeKind::AccessibilitySpeak
+                            | NodeKind::AccessibilityStop
+                    ) {
+                        "accessibility"
+                    } else {
+                        namespace
+                    };
+                    source.push_str(&format!("{namespace}.{method}({})\n", arguments.join(", ")));
+                    self.successor(node_id, "exec_out")?
+                }
                 NodeKind::Choice => {
                     self.emit_choice(node_id, indent, source, visited)?;
                     self.successor(node_id, "completed")?
@@ -673,16 +886,39 @@ impl Emitter<'_> {
             .filter(|edge| edge.input == input.id)
             .collect();
         match connections.as_slice() {
-            [] => match input.default_value.as_ref() {
+            [] => match self.default_values.get(&input.id) {
                 // Une chaîne vide provenant du catalogue est un placeholder
                 // d'édition, pas une expression câblée par l'utilisateur.
                 // Elle ne doit donc jamais produire `to_int("")` ou un SET
                 // silencieux dans le script généré.
-                Some(PropertyValue::String(value)) if value.is_empty() => {
+                Some(PropertyValue::String(value))
+                    if value.is_empty()
+                        && !self
+                            .graph
+                            .nodes
+                            .get(&node)
+                            .is_some_and(crate::type_inference::allows_empty_string_operand) =>
+                {
                     Err(TranspileError::MissingInputValue {
                         node,
                         key: key.to_owned(),
                     })
+                }
+                Some(value)
+                    if crate::blueprint_policy::authored_default_type(self.graph, input, value)
+                        == ValueType::InterpolatedText
+                        || (self
+                            .graph
+                            .nodes
+                            .get(&node)
+                            .is_some_and(GraphNode::uses_blueprint_operator_policy)
+                            && self.pin_types.get(&input.id)
+                                == Some(&ValueType::InterpolatedText)) =>
+                {
+                    Ok(format!(
+                        "string_to_text({})",
+                        emit_property_expression(value)?
+                    ))
                 }
                 Some(value) => emit_property_expression(value),
                 None => Err(TranspileError::MissingInputValue {
@@ -710,6 +946,117 @@ impl Emitter<'_> {
         }
         let node = self.graph.nodes.get(&pin.node).unwrap();
         let expression = match node.kind {
+            NodeKind::UiComponent => {
+                let arguments = ["id", "kind", "properties", "children"]
+                    .iter()
+                    .map(|key| {
+                        let pin = self.graph.pin_by_key(node.id, key).ok_or_else(|| {
+                            TranspileError::MissingProperty {
+                                node: node.id,
+                                key: (*key).into(),
+                            }
+                        })?;
+                        if matches!(*key, "properties" | "children")
+                            && pin.default_value.is_none()
+                            && !self.graph.edges.values().any(|edge| edge.input == pin.id)
+                        {
+                            Ok(if *key == "properties" { "dict()" } else { "[]" }.into())
+                        } else {
+                            self.expression_from_input_with_stack(node.id, key, active)
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                format!("component({})", arguments.join(", "))
+            }
+            NodeKind::CanvasRect
+            | NodeKind::CanvasEllipse
+            | NodeKind::CanvasLine
+            | NodeKind::CanvasPolygon
+            | NodeKind::CanvasText
+            | NodeKind::CanvasImage
+            | NodeKind::CanvasGroup
+            | NodeKind::CanvasHit
+            | NodeKind::MotionTween
+            | NodeKind::MotionSpline
+            | NodeKind::MotionBezier
+            | NodeKind::MotionCurve
+            | NodeKind::MotionPause
+            | NodeKind::MotionSequence
+            | NodeKind::MotionParallel
+            | NodeKind::MotionRepeat
+            | NodeKind::MotionFrames
+            | NodeKind::LayeredImage
+            | NodeKind::ImageLayer
+            | NodeKind::ImageLayers
+            | NodeKind::VideoClip => {
+                let (name, keys): (&str, &[&str]) = match node.kind {
+                    NodeKind::CanvasRect => ("canvas_rect", &["rect", "color", "radius"]),
+                    NodeKind::CanvasEllipse => ("canvas_ellipse", &["rect", "color"]),
+                    NodeKind::CanvasLine => ("canvas_line", &["points", "color", "width"]),
+                    NodeKind::CanvasPolygon => ("canvas_polygon", &["points", "color"]),
+                    NodeKind::CanvasText => ("canvas_text", &["text", "position", "color", "size"]),
+                    NodeKind::CanvasImage => ("canvas_image", &["image", "rect"]),
+                    NodeKind::CanvasGroup => ("canvas_group", &["transform", "clip", "children"]),
+                    NodeKind::CanvasHit => ("canvas_hit", &["id", "rect"]),
+                    NodeKind::MotionTween => ("motion_tween", &["seconds", "from", "to", "curve"]),
+                    NodeKind::MotionSpline => ("motion_spline", &["seconds", "points", "curve"]),
+                    NodeKind::MotionBezier => ("motion_bezier", &["x1", "y1", "x2", "y2"]),
+                    NodeKind::MotionCurve => ("motion_curve", &["function", "samples"]),
+                    NodeKind::MotionPause => ("motion_pause", &["seconds"]),
+                    NodeKind::MotionSequence => ("motion_sequence", &["steps"]),
+                    NodeKind::MotionParallel => ("motion_parallel", &["steps"]),
+                    NodeKind::MotionRepeat => ("motion_repeat", &["times", "motion"]),
+                    NodeKind::LayeredImage => (
+                        "layered_image",
+                        if self
+                            .graph
+                            .pin_by_key(node.id, "options")
+                            .is_some_and(|pin| {
+                                pin.default_value.is_some()
+                                    || self.graph.edges.values().any(|edge| edge.input == pin.id)
+                            })
+                        {
+                            &["size", "defaults", "layers", "options"][..]
+                        } else {
+                            &["size", "defaults", "layers"][..]
+                        },
+                    ),
+                    NodeKind::ImageLayer => ("image_layer", &["id", "image", "properties"]),
+                    NodeKind::ImageLayers => ("image_layers", &["prefix", "images"]),
+                    NodeKind::VideoClip => ("video_clip", &["source", "properties"]),
+                    _ => ("motion_frames", &["images", "fps"]),
+                };
+                let args = keys
+                    .iter()
+                    .map(|key| {
+                        if node.kind == NodeKind::MotionTween
+                            && matches!(*key, "from" | "to")
+                            && !self.input_is_connected(node.id, key)?
+                            && self
+                                .graph
+                                .pin_by_key(node.id, key)
+                                .is_some_and(|pin| pin.default_value.is_none())
+                        {
+                            return Ok("{}".into());
+                        }
+                        if matches!(
+                            (node.kind, *key),
+                            (NodeKind::LayeredImage, "defaults")
+                                | (NodeKind::ImageLayer, "properties")
+                                | (NodeKind::VideoClip, "properties")
+                        ) && !self.input_is_connected(node.id, key)?
+                            && self
+                                .graph
+                                .pin_by_key(node.id, key)
+                                .is_some_and(|pin| pin.default_value.is_none())
+                        {
+                            return Ok("{}".into());
+                        }
+                        self.expression_from_input_with_stack(node.id, key, active)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                format!("{name}({})", args.join(", "))
+            }
             NodeKind::Literal => {
                 let value = node
                     .properties
@@ -766,11 +1113,15 @@ impl Emitter<'_> {
                 validate_variable_name(&property_string(node.id, &node.properties, "name")?)?
                     .to_owned()
             }
-            // Comme le nœud SET de Blueprint, `value_out` réexpose exactement la
-            // valeur affectée. Cela permet d'enchaîner une affectation et la
-            // réutilisation de sa valeur sans transformer SET en expression pure.
+            // SET exposes the already assigned value, not the expression that
+            // produced it. Re-evaluating a function/random expression here
+            // would give consumers a different value and repeat side effects.
             NodeKind::SetVariable => {
-                self.expression_from_input_with_stack(node.id, "value", active)?
+                let name = match node.properties.get("name") {
+                    Some(PropertyValue::String(name)) => name.clone(),
+                    _ => self.pin_string(node.id, "name")?,
+                };
+                validate_variable_name(&name)?.to_owned()
             }
             NodeKind::ConvertIntToFloat => {
                 let value = self.expression_from_input_with_stack(node.id, "value", active)?;
@@ -783,6 +1134,19 @@ impl Emitter<'_> {
             NodeKind::ConvertTextToInt => {
                 let value = self.expression_from_input_with_stack(node.id, "value", active)?;
                 format!("to_int({value})")
+            }
+            NodeKind::ConvertStringToText | NodeKind::ConvertTextToString => {
+                let value = self.expression_from_input_with_stack(node.id, "value", active)?;
+                if node.properties.get("legacy_passthrough") == Some(&PropertyValue::Bool(true)) {
+                    value
+                } else {
+                    let function = if node.kind == NodeKind::ConvertStringToText {
+                        "string_to_text"
+                    } else {
+                        "text_to_string"
+                    };
+                    format!("{function}({value})")
+                }
             }
             NodeKind::VariableReference => {
                 quote(&property_string(node.id, &node.properties, "name")?)
@@ -805,6 +1169,7 @@ impl Emitter<'_> {
                 }
             }
             NodeKind::MathAdd
+            | NodeKind::StringAppend
             | NodeKind::MathSubtract
             | NodeKind::MathMultiply
             | NodeKind::MathDivide
@@ -995,6 +1360,9 @@ impl Emitter<'_> {
                     property_string(source.id, &source.properties, "position")
                 }
                 NodeKind::Reroute => self.pin_string(source.id, "value"),
+                NodeKind::ConvertStringToText | NodeKind::ConvertTextToString => {
+                    self.pin_interpolated_text(source.id, "value")
+                }
                 NodeKind::CharacterValue => {
                     property_string(source.id, &source.properties, "character")
                 }
@@ -1080,6 +1448,30 @@ impl Emitter<'_> {
         }
         if source.kind == NodeKind::Reroute {
             return self.pin_interpolated_text(source.id, "value");
+        }
+        if matches!(
+            source.kind,
+            NodeKind::ConvertStringToText | NodeKind::ConvertTextToString
+        ) {
+            if source.properties.get("legacy_passthrough") == Some(&PropertyValue::Bool(true)) {
+                // Historical alias wires keep their original template and key.
+                return self.pin_interpolated_text(source.id, "value");
+            }
+            // A new String -> Text cast does not reinterpret string contents as
+            // another RVN template. Keep the same strict call as script mode.
+            return Ok(format!(
+                "[{}]",
+                self.expression_from_output(source_pin.id, &mut BTreeSet::new())?
+            ));
+        }
+        if matches!(
+            source.kind,
+            NodeKind::FunctionCall | NodeKind::MathAdd | NodeKind::StringAppend | NodeKind::Index
+        ) {
+            return Ok(format!(
+                "[{}]",
+                self.expression_from_output(source_pin.id, &mut BTreeSet::new())?
+            ));
         }
         self.pin_string(node, key)
     }
@@ -1389,7 +1781,7 @@ fn validate_operator(operator: &str, unary: bool) -> Result<(), TranspileError> 
 
 fn explicit_binary_operator(kind: NodeKind) -> &'static str {
     match kind {
-        NodeKind::MathAdd => "+",
+        NodeKind::MathAdd | NodeKind::StringAppend => "+",
         NodeKind::MathSubtract => "-",
         NodeKind::MathMultiply => "*",
         NodeKind::MathDivide => "/",

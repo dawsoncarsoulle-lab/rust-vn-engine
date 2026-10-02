@@ -283,8 +283,9 @@ struct ScriptUnit {
     script: Script,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Symbols {
+    functions: HashMap<String, Location>,
     labels: HashMap<String, Location>,
     label_order: Vec<String>,
     duplicate_labels: Vec<(String, Location)>,
@@ -294,11 +295,17 @@ struct Symbols {
     backgrounds: Vec<(String, Location)>,
     cinematics: Vec<(String, Location)>,
     sprites: Vec<(String, Option<String>, Location)>,
+    composed_characters: HashSet<String>,
     music_files: Vec<(String, Location)>,
     sfx_files: Vec<(String, Location)>,
     assigned_vars: HashMap<String, Location>,
+    local_vars: HashSet<String>,
     used_vars: Vec<(String, Location)>,
     locale_keys: HashSet<String>,
+    locale_prefixes: HashSet<String>,
+    interface_bindings: Vec<(String, Location)>,
+    interface_images: Vec<(String, Location)>,
+    video_files: Vec<(String, Location)>,
 }
 
 pub fn check_project(project: &str, options: CheckOptions) -> CheckReport {
@@ -360,6 +367,21 @@ impl<'a> CheckContext<'a> {
         };
 
         let symbols = collect_symbols(&scripts, &mut self.diagnostics);
+        let complete_script = scripts
+            .units
+            .iter()
+            .flat_map(|unit| unit.script.clone())
+            .collect::<Vec<_>>();
+        for error in rvn_parser::validate_logic(&complete_script, false) {
+            if error.code == "duplicate-function" {
+                continue;
+            }
+            let location = scripts.files.iter().find_map(|file| {
+                find_location(&file.path, &file.source, &format!("{}(", error.name))
+            });
+            self.diagnostics
+                .push(Diagnostic::error(error.code, error.english).at(location));
+        }
         validate_symbols(
             &symbols,
             cfg.project.start_label.as_deref(),
@@ -376,6 +398,7 @@ impl<'a> CheckContext<'a> {
             project_dir,
             &cfg.paths.locales,
             &symbols.locale_keys,
+            &symbols.locale_prefixes,
             &mut self.diagnostics,
         );
         validate_orphan_scripts(
@@ -580,9 +603,176 @@ fn collect_block(
     detect_dead_code(stmts, source, diagnostics);
     for stmt in stmts {
         let loc = locate_stmt(source, stmt);
+        collect_interface_metadata(stmt, symbols, &loc);
         match stmt {
             Statement::Use { .. } => {}
             Statement::Init { body } => collect_block(body, source, symbols, diagnostics),
+            Statement::Function {
+                name,
+                parameters,
+                body,
+            }
+            | Statement::Screen {
+                name,
+                parameters,
+                body,
+            }
+            | Statement::Handler {
+                name,
+                parameters,
+                body,
+            } => {
+                if symbols
+                    .functions
+                    .insert(name.clone(), loc.clone())
+                    .is_some()
+                    || rvn_core::eval::is_builtin(name)
+                {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            "duplicate-function",
+                            format!("function '{name}' is already defined"),
+                        )
+                        .at(Some(loc.clone())),
+                    );
+                }
+                let mut local = Symbols::default();
+                for parameter in parameters {
+                    local.assigned_vars.insert(parameter.clone(), loc.clone());
+                }
+                local.local_vars.extend(parameters.iter().cloned());
+                collect_block(body, source, &mut local, diagnostics);
+                if matches!(stmt, Statement::Handler { .. }) {
+                    // A handler's `set` updates game state, unless the binding
+                    // was explicitly local (including parameters/loop items).
+                    symbols.used_vars.extend(
+                        local
+                            .used_vars
+                            .into_iter()
+                            .filter(|(name, _)| !local.local_vars.contains(name)),
+                    );
+                    symbols.assigned_vars.extend(
+                        local
+                            .assigned_vars
+                            .into_iter()
+                            .filter(|(name, _)| !local.local_vars.contains(name)),
+                    );
+                } else {
+                    symbols.used_vars.extend(
+                        local
+                            .used_vars
+                            .into_iter()
+                            .filter(|(name, _)| !local.assigned_vars.contains_key(name)),
+                    );
+                }
+                symbols.interface_bindings.extend(local.interface_bindings);
+                symbols.interface_images.extend(local.interface_images);
+                symbols.video_files.extend(local.video_files);
+                symbols
+                    .composed_characters
+                    .extend(local.composed_characters);
+                symbols.used_characters.extend(local.used_characters);
+                symbols.locale_keys.extend(local.locale_keys);
+                symbols.locale_prefixes.extend(local.locale_prefixes);
+            }
+            Statement::FunctionReturn { value } => {
+                collect_expr_vars(value, &mut symbols.used_vars, &loc)
+            }
+            Statement::UiOpen {
+                name,
+                arguments,
+                modal,
+                layer,
+            } => {
+                for value in [name, arguments, modal, layer] {
+                    collect_expr_vars(value, &mut symbols.used_vars, &loc);
+                }
+            }
+            Statement::UiClose { name } => collect_expr_vars(name, &mut symbols.used_vars, &loc),
+            Statement::UiFocus { name, element } => {
+                collect_expr_vars(name, &mut symbols.used_vars, &loc);
+                collect_expr_vars(element, &mut symbols.used_vars, &loc);
+            }
+            Statement::UiSetState {
+                name,
+                element,
+                state,
+            } => {
+                for value in [name, element, state] {
+                    collect_expr_vars(value, &mut symbols.used_vars, &loc);
+                }
+            }
+            Statement::MotionPlay { target, definition } => {
+                collect_expr_vars(target, &mut symbols.used_vars, &loc);
+                collect_expr_vars(definition, &mut symbols.used_vars, &loc);
+            }
+            Statement::CharacterCompose {
+                character,
+                definition,
+            } => {
+                collect_expr_vars(character, &mut symbols.used_vars, &loc);
+                collect_expr_vars(definition, &mut symbols.used_vars, &loc);
+                if let Expr::Str(id) = character {
+                    symbols.used_characters.push((id.clone(), loc.clone()));
+                    symbols.composed_characters.insert(id.clone());
+                }
+            }
+            Statement::CharacterAttributes {
+                character,
+                attributes,
+            } => {
+                collect_expr_vars(character, &mut symbols.used_vars, &loc);
+                collect_expr_vars(attributes, &mut symbols.used_vars, &loc);
+                if let Expr::Str(id) = character {
+                    symbols.used_characters.push((id.clone(), loc.clone()));
+                }
+            }
+            Statement::MotionStop { target } | Statement::MotionWait { target } => {
+                collect_expr_vars(target, &mut symbols.used_vars, &loc)
+            }
+            Statement::VideoPlay { name, definition } => {
+                collect_expr_vars(name, &mut symbols.used_vars, &loc);
+                collect_expr_vars(definition, &mut symbols.used_vars, &loc);
+            }
+            Statement::VideoSeek { name, seconds } => {
+                collect_expr_vars(name, &mut symbols.used_vars, &loc);
+                collect_expr_vars(seconds, &mut symbols.used_vars, &loc);
+            }
+            Statement::AccessibilityConfigure { settings } => {
+                collect_expr_vars(settings, &mut symbols.used_vars, &loc)
+            }
+            Statement::AccessibilitySpeak { text } => {
+                collect_expr_vars(text, &mut symbols.used_vars, &loc)
+            }
+            Statement::AccessibilityStop => {}
+            Statement::VideoVolume { name, volume } => {
+                collect_expr_vars(name, &mut symbols.used_vars, &loc);
+                collect_expr_vars(volume, &mut symbols.used_vars, &loc);
+            }
+            Statement::VideoPause { name }
+            | Statement::VideoResume { name }
+            | Statement::VideoStop { name }
+            | Statement::VideoSkip { name }
+            | Statement::VideoWait { name } => {
+                collect_expr_vars(name, &mut symbols.used_vars, &loc)
+            }
+            Statement::While { condition, body } => {
+                collect_expr_vars(condition, &mut symbols.used_vars, &loc);
+                collect_block(body, source, symbols, diagnostics);
+            }
+            Statement::ForEach {
+                name,
+                collection,
+                body,
+            } => {
+                collect_expr_vars(collection, &mut symbols.used_vars, &loc);
+                symbols
+                    .assigned_vars
+                    .entry(name.clone())
+                    .or_insert(loc.clone());
+                symbols.local_vars.insert(name.clone());
+                collect_block(body, source, symbols, diagnostics);
+            }
             Statement::CharacterCreate { id, .. } => {
                 if let Some(prev) = symbols.declared_characters.insert(id.clone(), loc.clone()) {
                     diagnostics.push(
@@ -617,8 +807,11 @@ fn collect_block(
                     collect_block(&opt.body, source, symbols, diagnostics);
                 }
             }
-            Statement::SetVar { name, value } => {
+            Statement::SetVar { name, value } | Statement::LocalVar { name, value } => {
                 collect_expr_vars(value, &mut symbols.used_vars, &loc);
+                if matches!(stmt, Statement::LocalVar { .. }) {
+                    symbols.local_vars.insert(name.clone());
+                }
                 symbols
                     .assigned_vars
                     .entry(name.clone())
@@ -845,8 +1038,13 @@ fn validate_symbols(
         }
     }
 
-    let used_vars: HashSet<&str> = symbols.used_vars.iter().map(|(v, _)| v.as_str()).collect();
-    for (var, loc) in &symbols.used_vars {
+    let used_vars: HashSet<&str> = symbols
+        .used_vars
+        .iter()
+        .chain(&symbols.interface_bindings)
+        .map(|(v, _)| v.as_str())
+        .collect();
+    for (var, loc) in symbols.used_vars.iter().chain(&symbols.interface_bindings) {
         if !var.starts_with("__") && !symbols.assigned_vars.contains_key(var) {
             diagnostics.push(
                 Diagnostic::error(
@@ -1196,6 +1394,59 @@ fn validate_assets(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let assets_dir = project_dir.join(&paths.assets);
+    for (path, loc) in &symbols.video_files {
+        let result = (|| -> Result<(), String> {
+            use std::io::Read;
+            if !rvn_ui::programmable::safe_asset_path(path)
+                || !path.to_ascii_lowercase().ends_with(".webm")
+            {
+                return Err("expected a relative .webm resource inside the asset directory".into());
+            }
+            let root = assets_dir
+                .canonicalize()
+                .map_err(|error| error.to_string())?;
+            let file = assets_dir
+                .join(path)
+                .canonicalize()
+                .map_err(|error| error.to_string())?;
+            if !file.starts_with(&root) {
+                return Err("resource resolves outside the asset directory".into());
+            }
+            let metadata = std::fs::metadata(&file).map_err(|error| error.to_string())?;
+            if !metadata.is_file() || metadata.len() > 1_073_741_824 {
+                return Err("expected a regular video file of at most 1 GiB".into());
+            }
+            let mut bytes = Vec::new();
+            std::fs::File::open(file)
+                .map_err(|error| error.to_string())?
+                .take(rvn_ui::webm::HEADER_LIMIT as u64)
+                .read_to_end(&mut bytes)
+                .map_err(|error| error.to_string())?;
+            rvn_ui::webm::validate_header(&bytes, false)
+        })();
+        if let Err(error) = result {
+            diagnostics.push(
+                Diagnostic::error("invalid-video-resource", format!("video '{path}': {error}"))
+                    .at(Some(loc.clone())),
+            );
+        }
+    }
+    for (image, loc) in &symbols.interface_images {
+        if !rvn_ui::programmable::safe_asset_path(image) {
+            diagnostics.push(Diagnostic::error("invalid-interface-image",format!("interface image must be a relative resource inside the asset directory: '{image}'")).at(Some(loc.clone())));
+        } else if !assets_dir.join(image).is_file() {
+            diagnostics.push(
+                Diagnostic::error(
+                    "missing-interface-image",
+                    format!(
+                        "interface image '{image}' not found under '{}'",
+                        assets_dir.display()
+                    ),
+                )
+                .at(Some(loc.clone())),
+            );
+        }
+    }
     let bg_exts = ["png", "jpg", "jpeg", "webp"];
     for (bg, loc) in &symbols.backgrounds {
         if !asset_exists(&assets_dir, bg, &bg_exts) {
@@ -1229,6 +1480,11 @@ fn validate_assets(
     }
     let sprite_exts = ["png", "jpg", "jpeg", "webp"];
     for (character_id, emotion, loc) in &symbols.sprites {
+        // A composition supplies its own ordered resources, checked above.
+        // Do not demand an unused conventional sprites/<id>/default image.
+        if emotion.is_none() && symbols.composed_characters.contains(character_id) {
+            continue;
+        }
         let sprite_path = match emotion {
             Some(path) if path.contains('/') => {
                 path.strip_prefix("assets/").unwrap_or(path).to_owned()
@@ -1874,6 +2130,7 @@ fn validate_locales(
     project_dir: &Path,
     locales_path: &str,
     used_keys: &HashSet<String>,
+    prefixes: &HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let dir = project_dir.join(locales_path);
@@ -1910,7 +2167,7 @@ fn validate_locales(
             }
         }
         for key in keys {
-            if !used_keys.contains(&key) {
+            if !used_keys.contains(&key) && !prefixes.iter().any(|prefix| key.starts_with(prefix)) {
                 diagnostics.push(
                     Diagnostic::warning(
                         "unused-locale-key",
@@ -1956,7 +2213,7 @@ fn validate_orphan_scripts(
         .unwrap_or_else(|| project_dir.join("scripts"));
     let loaded: HashSet<PathBuf> = scripts.files.iter().map(|f| f.path.clone()).collect();
     let mut all = Vec::new();
-    collect_rvn_files(&scripts_dir, &mut all);
+    collect_rvn_files(&scripts_dir, project_dir, &mut all);
     for file in all {
         if let Ok(canonical) = fs::canonicalize(&file) {
             if !loaded.contains(&canonical) {
@@ -1981,15 +2238,27 @@ fn validate_orphan_scripts(
     }
 }
 
-fn collect_rvn_files(dir: &Path, out: &mut Vec<PathBuf>) {
+fn collect_rvn_files(dir: &Path, project_dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
-            collect_rvn_files(&path, out);
-        } else if path.extension().and_then(|s| s.to_str()) == Some("rvn") {
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        // Exported games and recovery snapshots are not project source. Do
+        // not follow directory symlinks into other projects or recursive loops.
+        if kind.is_dir() {
+            let name = entry.file_name();
+            if name == ".git"
+                || name == ".rvn-backups"
+                || (dir == project_dir && (name == "dist" || name == "dist-web"))
+            {
+                continue;
+            }
+            collect_rvn_files(&path, project_dir, out);
+        } else if kind.is_file() && path.extension().and_then(|s| s.to_str()) == Some("rvn") {
             out.push(path);
         }
     }
@@ -2044,6 +2313,229 @@ fn collect_text_vars(text: &InterpolatedText, out: &mut Vec<(String, Location)>,
         if let TextSegment::Interp(expr) = segment {
             collect_expr_vars(expr, out, loc);
         }
+    }
+}
+
+fn collect_interface_metadata(statement: &Statement, symbols: &mut Symbols, loc: &Location) {
+    fn key(value: &Expr, symbols: &mut Symbols) {
+        fn prefix(value: &Expr) -> String {
+            match value {
+                Expr::Str(text) => text.clone(),
+                Expr::BinOp {
+                    op: rvn_parser::BinOpKind::Add,
+                    left,
+                    ..
+                } => prefix(left),
+                _ => String::new(),
+            }
+        }
+        if let Expr::Str(text) = value {
+            symbols.locale_keys.insert(text.clone());
+        } else {
+            symbols.locale_prefixes.insert(prefix(value));
+        }
+    }
+    fn properties(value: &Expr, symbols: &mut Symbols, loc: &Location) {
+        let Expr::Call { name, args } = value else {
+            symbols.locale_prefixes.insert(String::new());
+            return;
+        };
+        if name != "dict" {
+            symbols.locale_prefixes.insert(String::new());
+            return;
+        }
+        for pair in args.chunks_exact(2) {
+            let Expr::Str(name) = &pair[0] else {
+                continue;
+            };
+            match (name.as_str(), &pair[1]) {
+                ("binding", Expr::Str(name)) => {
+                    symbols.interface_bindings.push((name.clone(), loc.clone()))
+                }
+                ("image", Expr::Str(path)) => {
+                    symbols.interface_images.push((path.clone(), loc.clone()))
+                }
+                ("text_key" | "placeholder_key" | "accessible_label_key", value) => {
+                    key(value, symbols)
+                }
+                ("option_keys", Expr::ListLit(values)) => {
+                    for value in values {
+                        key(value, symbols);
+                    }
+                }
+                ("option_keys", _) => {
+                    symbols.locale_prefixes.insert(String::new());
+                }
+                ("text" | "placeholder" | "accessible_label", Expr::Str(text)) => {
+                    if let Ok(text) = rvn_parser::parse_interpolated_str(text) {
+                        collect_text_vars(&text, &mut symbols.interface_bindings, loc);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    fn walk(value: &Expr, symbols: &mut Symbols, loc: &Location) {
+        match value {
+            Expr::Call { name, args } => {
+                if name == "component" && args.len() == 4 {
+                    properties(&args[2], symbols, loc);
+                }
+                if name == "canvas_image" {
+                    if let Some(Expr::Str(path)) = args.first() {
+                        symbols.interface_images.push((path.clone(), loc.clone()));
+                    }
+                }
+                if name == "motion_frames" {
+                    if let Some(Expr::ListLit(images)) = args.first() {
+                        for image in images {
+                            if let Expr::Str(path) = image {
+                                symbols.interface_images.push((path.clone(), loc.clone()));
+                            }
+                        }
+                    }
+                }
+                if name == "image_layer" {
+                    if let Some(Expr::Str(path)) = args.get(1) {
+                        symbols.interface_images.push((path.clone(), loc.clone()));
+                    }
+                }
+                if name == "image_layers" {
+                    if let Some(Expr::ListLit(images)) = args.get(1) {
+                        let marker = match args.first() {
+                            Some(Expr::Str(prefix)) => Some(format!("{prefix}__")),
+                            _ => None,
+                        };
+                        for image in images {
+                            if let Expr::Str(path) = image {
+                                if marker.as_ref().is_none_or(|marker| {
+                                    path.rsplit('/')
+                                        .next()
+                                        .is_some_and(|name| name.starts_with(marker))
+                                }) {
+                                    symbols.interface_images.push((path.clone(), loc.clone()));
+                                }
+                            }
+                        }
+                    }
+                }
+                if name == "video_clip" {
+                    if let Some(Expr::Str(path)) = args.first() {
+                        symbols.video_files.push((path.clone(), loc.clone()));
+                    }
+                    if let Some(Expr::Call { name, args }) = args.get(1) {
+                        if name == "dict" {
+                            for pair in args.chunks_exact(2) {
+                                if let Expr::Str(property) = &pair[0] {
+                                    match (property.as_str(), &pair[1]) {
+                                        ("poster" | "fallback", Expr::Str(path)) => symbols
+                                            .interface_images
+                                            .push((path.clone(), loc.clone())),
+                                        ("mask", Expr::Str(path)) => {
+                                            symbols.video_files.push((path.clone(), loc.clone()))
+                                        }
+                                        ("subtitles", Expr::ListLit(cues)) => {
+                                            for cue in cues {
+                                                if let Expr::Call { name, args } = cue {
+                                                    if name == "dict" {
+                                                        for field in args.chunks_exact(2) {
+                                                            if matches!(&field[0],Expr::Str(name) if name=="text")
+                                                            {
+                                                                key(&field[1], symbols);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                for value in args {
+                    walk(value, symbols, loc);
+                }
+            }
+            Expr::BinOp { left, right, .. } | Expr::And(left, right) | Expr::Or(left, right) => {
+                walk(left, symbols, loc);
+                walk(right, symbols, loc);
+            }
+            Expr::Index { target, index } => {
+                walk(target, symbols, loc);
+                walk(index, symbols, loc);
+            }
+            Expr::Neg(value) | Expr::Not(value) => walk(value, symbols, loc),
+            Expr::ListLit(values) => {
+                for value in values {
+                    walk(value, symbols, loc);
+                }
+            }
+            _ => {}
+        }
+    }
+    match statement {
+        Statement::FunctionReturn { value }
+        | Statement::SetVar { value, .. }
+        | Statement::LocalVar { value, .. } => walk(value, symbols, loc),
+        Statement::UiOpen {
+            name,
+            arguments,
+            modal,
+            layer,
+        } => {
+            for value in [name, arguments, modal, layer] {
+                walk(value, symbols, loc);
+            }
+        }
+        Statement::UiClose { name } => walk(name, symbols, loc),
+        Statement::UiFocus { name, element } => {
+            walk(name, symbols, loc);
+            walk(element, symbols, loc);
+        }
+        Statement::UiSetState {
+            name,
+            element,
+            state,
+        } => {
+            for value in [name, element, state] {
+                walk(value, symbols, loc);
+            }
+        }
+        Statement::MotionPlay { target, definition } => {
+            walk(target, symbols, loc);
+            walk(definition, symbols, loc);
+        }
+        Statement::CharacterCompose {
+            character,
+            definition,
+        } => {
+            walk(character, symbols, loc);
+            walk(definition, symbols, loc);
+        }
+        Statement::CharacterAttributes {
+            character,
+            attributes,
+        } => {
+            walk(character, symbols, loc);
+            walk(attributes, symbols, loc);
+        }
+        Statement::MotionStop { target } | Statement::MotionWait { target } => {
+            walk(target, symbols, loc)
+        }
+        Statement::VideoPlay { name, definition } => {
+            walk(name, symbols, loc);
+            walk(definition, symbols, loc);
+        }
+        Statement::AccessibilityConfigure { settings } => walk(settings, symbols, loc),
+        Statement::AccessibilitySpeak { text } => walk(text, symbols, loc),
+        Statement::If { condition, .. } | Statement::While { condition, .. } => {
+            walk(condition, symbols, loc)
+        }
+        Statement::ForEach { collection, .. } => walk(collection, symbols, loc),
+        _ => {}
     }
 }
 
@@ -2122,6 +2614,20 @@ fn expr_to_display(expr: &Expr) -> String {
 
 fn locate_stmt(source: &SourceFile, stmt: &Statement) -> Location {
     let needles: Vec<String> = match stmt {
+        Statement::Function { name, .. } => vec![format!("function {name}")],
+        Statement::Screen { name, .. } => vec![format!("screen {name}")],
+        Statement::Handler { name, .. } => vec![format!("handler {name}")],
+        Statement::LocalVar { name, .. } => vec![format!("local {name}")],
+        Statement::UiOpen { .. } => vec!["ui.open(".into()],
+        Statement::MotionPlay { .. } => vec!["motion.play(".into()],
+        Statement::MotionStop { .. } => vec!["motion.stop(".into()],
+        Statement::MotionWait { .. } => vec!["motion.wait(".into()],
+        Statement::UiClose { .. } => vec!["ui.close(".into()],
+        Statement::UiFocus { .. } => vec!["ui.focus(".into()],
+        Statement::UiSetState { .. } => vec!["ui.set_state(".into()],
+        Statement::FunctionReturn { .. } => vec!["return ".into()],
+        Statement::While { .. } => vec!["while ".into()],
+        Statement::ForEach { name, .. } => vec![format!("for {name}")],
         Statement::Label { name } => vec![format!("label {name}")],
         Statement::Jump { target } => vec![format!("jump {target}")],
         Statement::Call { target } => vec![format!("call {target}")],
@@ -2320,6 +2826,27 @@ mod tests {
     }
 
     #[test]
+    fn handler_global_reads_and_writes_are_not_mistaken_for_local_variables() {
+        let root = fixture("init {set completed = 0}\nhandler finished(event) {local temporary = 1 for item in [1] {set completed = completed + item + temporary}}\nlabel start\nreturn\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions { strict: true });
+        assert!(!report.failed, "{:?}", report.diagnostics);
+        let root_missing =
+            fixture("handler finished(event) {set result = missing + 1}\nlabel start\nreturn\n");
+        let report = check_project(root_missing.to_str().unwrap(), CheckOptions::default());
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.kind == "unassigned-variable"
+                    && diagnostic.message.contains("missing")),
+            "{:?}",
+            report.diagnostics
+        );
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(root_missing).unwrap();
+    }
+
+    #[test]
     fn recovers_after_invalid_assignment_and_reports_unknown_jump() {
         let root = fixture("label start\n    varible = 5\n    jump ixi\n    \"Bonjour.\"\n");
         let report = check_project(root.to_str().unwrap(), CheckOptions::default());
@@ -2396,6 +2923,43 @@ mod tests {
     // ── Missing assets ────────────────────────────────────────────────
 
     #[test]
+    fn videos_validate_direct_and_function_resources_and_localized_cues() {
+        let root=fixture("function clip(){return video_clip(\"clip.webm\",{\"rect\":[0,0,320,180],\"subtitles\":[{\"start\":0,\"end\":1,\"text\":\"video.cue\"}]})}\nlabel start\nvideo.play(\"intro\",clip())\nvideo.play(\"other\",video_clip(\"missing.webm\",{}))\nreturn\n");
+        fs::write(
+            root.join("assets/clip.webm"),
+            include_bytes!("../../examples/videos/assets/clip.webm"),
+        )
+        .unwrap();
+        write_locale(&root, "en.toml", "[strings]\n\"video.cue\"=\"A caption\"\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        let errors: Vec<_> = report
+            .diagnostics
+            .iter()
+            .filter(|problem| problem.kind == "invalid-video-resource")
+            .collect();
+        assert_eq!(errors.len(), 1, "{:?}", report.diagnostics);
+        assert!(errors[0].message.contains("missing.webm"));
+        assert!(!kinds(&report).contains(&"unused-locale-key"));
+        let mut invalid = include_bytes!("../../examples/videos/assets/clip.webm").to_vec();
+        let offset = invalid
+            .windows(5)
+            .position(|bytes| bytes == b"V_VP8")
+            .unwrap();
+        invalid[offset + 4] = b'9';
+        fs::write(root.join("assets/clip.webm"), invalid).unwrap();
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert_eq!(
+            report
+                .diagnostics
+                .iter()
+                .filter(|problem| problem.kind == "invalid-video-resource")
+                .count(),
+            2
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn reports_missing_background_asset() {
         let root = fixture("label start\n    scene \"backgrounds/forest.png\"\n    return\n");
         let report = check_project(root.to_str().unwrap(), CheckOptions::default());
@@ -2410,6 +2974,28 @@ mod tests {
         );
         let report = check_project(root.to_str().unwrap(), CheckOptions::default());
         assert!(kinds(&report).contains(&"missing-asset"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn composed_characters_check_their_layers_without_a_legacy_default_sprite() {
+        let root=fixture("function portrait(){return layered_image([600,1000],{},[image_layer(\"body\",\"body.png\",{})])}\ninit {character.create(\"iris\",\"Iris\")}\nlabel start\ncharacter.compose(\"iris\",portrait())\niris.show()\nreturn\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"missing-interface-image"));
+        assert!(!kinds(&report).contains(&"missing-asset"));
+        write_asset(&root, "body.png");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(!report.has_errors(), "{:?}", report.diagnostics);
+        let _ = fs::remove_dir_all(root);
+    }
+    #[test]
+    fn discovered_character_layers_diagnose_missing_matching_assets() {
+        let root=fixture("function portrait(){return layered_image([600,1000],{},image_layers(\"iris\",[\"iris__body.png\",\"other.png\"]))}\ninit {character.create(\"iris\",\"Iris\")}\nlabel start\ncharacter.compose(\"iris\",portrait())\niris.show()\nreturn\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"missing-interface-image"));
+        write_asset(&root, "iris__body.png");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(!report.has_errors(), "{:?}", report.diagnostics);
         let _ = fs::remove_dir_all(root);
     }
 
@@ -2431,6 +3017,40 @@ mod tests {
     }
 
     // ── Locales ───────────────────────────────────────────────────────
+
+    #[test]
+    fn screen_bindings_translations_and_images_are_checked() {
+        let root=fixture("screen inventory() { return component(\"root\",\"column\",{},[component(\"name\",\"input\",{\"binding\":\"player_name\",\"placeholder_key\":\"ui.name\"},[]),component(\"picture\",\"image\",{\"image\":\"missing.png\"},[])]) }\ninit { set player_name=\"Camille\" }\nlabel start\nui.open(\"inventory\",[],true,1)\nreturn\n");
+        write_locale(&root, "en.toml", "[strings]\n\"ui.name\"=\"Name\"\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"missing-interface-image"));
+        assert!(!kinds(&report).contains(&"unused-variable"));
+        assert!(!kinds(&report).contains(&"unused-locale-key"));
+        assert!(!kinds(&report).contains(&"missing-locale-key"));
+        write_asset(&root, "missing.png");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(!kinds(&report).contains(&"missing-interface-image"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn dynamic_screen_keys_suppress_only_matching_unused_keys() {
+        let root=fixture("screen inventory() { return component(\"root\",\"text\",{\"text_key\":\"ui.item.\"+selected},[]) }\ninit { set selected=\"key\" }\nlabel start\nui.open(\"inventory\",[],true,1)\nreturn\n");
+        write_locale(
+            &root,
+            "en.toml",
+            "[strings]\n\"ui.item.key\"=\"Key\"\n\"obsolete\"=\"Unused\"\n",
+        );
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        let unused: Vec<_> = report
+            .diagnostics
+            .iter()
+            .filter(|problem| problem.kind == "unused-locale-key")
+            .collect();
+        assert_eq!(unused.len(), 1);
+        assert!(unused[0].message.contains("obsolete"));
+        let _ = fs::remove_dir_all(root);
+    }
 
     #[test]
     fn reports_missing_locale_key() {
@@ -2523,6 +3143,29 @@ mod tests {
         let report = check_project(root.to_str().unwrap(), CheckOptions::default());
         assert!(kinds(&report).contains(&"orphan-script"));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn root_source_does_not_treat_exports_or_backups_as_orphan_scripts() {
+        let root = fixture("label start\nreturn\n");
+        fs::write(
+            root.join("rvn.toml"),
+            "[project]\ntitle=\"Test\"\nmain_script=\"main.rvn\"\nstart_label=\"start\"\n",
+        )
+        .unwrap();
+        fs::rename(root.join("scripts/main.rvn"), root.join("main.rvn")).unwrap();
+        for folder in ["dist/Game/data", "dist-web/Game", ".rvn-backups/session"] {
+            fs::create_dir_all(root.join(folder)).unwrap();
+            fs::write(root.join(folder).join("main.rvn"), "label start\nreturn\n").unwrap();
+        }
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&root, root.join("recursive-source-link")).unwrap();
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(!kinds(&report).contains(&"orphan-script"), "{report:?}");
+        fs::write(root.join("lonely.rvn"), "label lonely\nreturn\n").unwrap();
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&report).contains(&"orphan-script"));
+        fs::remove_dir_all(root).unwrap();
     }
 
     // ── Empty choice / imagemap ───────────────────────────────────────

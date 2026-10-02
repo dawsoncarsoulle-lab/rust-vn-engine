@@ -7,6 +7,25 @@ saves/
 dist/
 dist-web/
 
+# Source-linked authoring safety data (the portable graph layout may be shared)
+.rvn-backups/
+.rvn-authoring.lock
+.rvn-authoring.transaction.json
+.rvn-authoring.recovery.json
+
+# Local automation caches
+__pycache__/
+*.pyc
+
+# Atlas delivery sessions are local evidence, not distributable project data.
+# Keep reusable test sources; retain the portable .rvn-authoring.json layout.
+examples/atlas-des-brumes/DELIVERY.json
+examples/atlas-des-brumes/qa/*
+!examples/atlas-des-brumes/qa/Cargo.toml
+!examples/atlas-des-brumes/qa/Cargo.lock
+!examples/atlas-des-brumes/qa/*.rs
+!examples/atlas-des-brumes/qa/*.mjs
+
 # OS
 .DS_Store
 Thumbs.db

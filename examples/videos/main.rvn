@@ -1,0 +1,25 @@
+// Original procedural VP8/Vorbis fixture, not a third-party movie.
+init {set completed = 0}
+handler finished(event) {set completed = completed + 1}
+function clip() {
+    return video_clip("clip.webm", {"rect":[320,80,640,360], "skippable":true, "keep_last_frame":true, "on_end":"finished", "subtitles":[{"start":0,"end":0.7,"text":"video.first"},{"start":0.7,"end":1.5,"text":"video.second"}]})
+}
+label start
+typewriter.speed(0)
+video.play("intro",clip())
+"video.playing"
+video.pause("intro")
+"video.paused"
+video.seek("intro",0.8)
+video.volume("intro",0.3)
+"video.seeked"
+video.resume("intro")
+video.wait("intro")
+"video.finished"
+video.stop("intro")
+"video.closed"
+video.play("cinema",video_clip("clip.webm",{"cinematic":true,"skippable":true}))
+"video.cinematic"
+video.stop("cinema")
+jump end
+label end

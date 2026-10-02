@@ -1,0 +1,8 @@
+[strings]
+"motion.intro" = "The background, token and card animate together. Save during motion, then load or roll back to restore their clocks."
+"motion.after_wait" = "The story resumes only when the token animation finishes. The final pose remains until replaced or stopped."
+"motion.stopped" = "Stopping restores the targets' original appearance. Motion and tint never accumulate between frames."
+"motion.end" = "The targets disappeared. Their animations were cancelled."
+"motion.caption" = "Saved, seekable animations"
+"motion.spline" = "The token follows a spline through four authored points, with a pure RVN function controlling its timing. Save and load in the middle of the flight."
+"motion.curve" = "The spline has finished. Its rotation used a custom Bézier curve. In the editor, open curved_flight and drag its spline control points."

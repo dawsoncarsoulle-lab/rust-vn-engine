@@ -1,0 +1,10 @@
+[strings]
+"layers.default" = "A shirt and a neutral face. The body stays underneath both."
+"layers.coat" = "Only the outfit changed. My expression is still neutral."
+"layers.happy" = "A new expression and a badge. The badge and the whole character animate independently."
+"layers.finished" = "The badge animation has finished. You can save and restore the exact composition."
+"layers.shirt" = "The shirt is back, but I am still happy. The conditional badge is hidden."
+"layers.hidden" = "Hiding the character cancels its animations. Rollback restores the selected attributes."
+"layers.discovered" = "These layers were discovered from filenames, not declared individually. Open discovered_portrait in the composition designer."
+"layers.variant" = "The evening preset selected my coat. A rule chose my expression; an RVN function selected my accessory. Save and roll back here."
+"layers.selector" = "Changing only my outfit kept the evening variant and expression. The selection function removed my badge."

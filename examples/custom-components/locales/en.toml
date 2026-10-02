@@ -1,0 +1,10 @@
+[strings]
+"custom.heading" = "Two independent custom sliders"
+"custom.help" = "Drag, scroll, or focus a slider and use the arrow keys."
+"custom.first" = "First custom slider: drag, scroll or use left and right arrows"
+"custom.second" = "Second custom slider: drag, scroll or use left and right arrows"
+"custom.reset" = "Reset both sliders"
+"custom.close" = "Close"
+"custom.note" = "Editable note"
+"The custom controls keep independent state. Try saving and loading, then close the interface." = "The custom controls keep independent state. Try saving and loading, then close the interface."
+"Custom controls closed." = "Custom controls closed."

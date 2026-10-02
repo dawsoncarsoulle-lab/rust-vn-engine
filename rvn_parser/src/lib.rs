@@ -4,12 +4,19 @@ pub mod ast;
 pub mod error;
 pub mod expr;
 pub mod lexer;
+pub mod logic;
 pub mod parser;
+pub mod source;
 
 pub use ast::*;
 pub use error::*;
 pub use expr::{BinOpKind, Expr, InterpolatedText, TextSegment};
-pub use parser::{parse, parse_interpolated_str, parse_recovering, RecoveredScript};
+pub use logic::{builtin_arity, is_binding_name, validate_logic, LogicDiagnostic};
+pub use parser::{
+    parse, parse_interpolated_str, parse_recovering, parse_spanned, RecoveredScript,
+    SpannedStatement,
+};
+pub use source::{SourceDocument, SourceEditError};
 
 use std::collections::HashSet;
 use std::fs;

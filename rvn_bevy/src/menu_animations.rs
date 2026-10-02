@@ -69,6 +69,7 @@ pub(super) fn start(
 }
 pub(super) fn transform(
     time: Res<Time>,
+    accessibility: Res<crate::accessibility::Accessibility>,
     mut nodes: Query<(
         &VisualNode,
         &Tracks,
@@ -78,7 +79,11 @@ pub(super) fn transform(
 ) {
     for (node, tracks, mut transform, mut bg) in &mut nodes {
         for (kind, (clip, start)) in &tracks.0 {
-            let value = clip.sample(time.elapsed_seconds() - start);
+            let value = clip.sample(if accessibility.settings.reduced_motion {
+                clip.duration
+            } else {
+                time.elapsed_seconds() - start
+            });
             match kind {
                 AnimationKind::Move => {
                     transform.translation.x += value[0] * node.scale;
@@ -116,6 +121,7 @@ mod tests {
 pub(super) fn fade(
     mut commands: Commands,
     time: Res<Time>,
+    accessibility: Res<crate::accessibility::Accessibility>,
     parents: Query<&Parent>,
     tracks: Query<&Tracks>,
     shadows: Query<&super::shadows::ShadowOf>,
@@ -137,7 +143,11 @@ pub(super) fn fade(
         for _ in 0..64 {
             if let Ok(t) = tracks.get(ancestor) {
                 if let Some((clip, start)) = t.0.get(&AnimationKind::Fade) {
-                    factor *= clip.sample(time.elapsed_seconds() - start)[0];
+                    factor *= clip.sample(if accessibility.settings.reduced_motion {
+                        clip.duration
+                    } else {
+                        time.elapsed_seconds() - start
+                    })[0];
                 }
             }
             let Ok(parent) = parents.get(ancestor) else {

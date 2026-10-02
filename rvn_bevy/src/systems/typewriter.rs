@@ -21,7 +21,22 @@ pub fn typewriter_system(
     time: Res<Time>,
     mut tw_state: ResMut<TypewriterState>,
     mut text_query: Query<&mut Text, With<DialogueText>>,
+    accessibility: Res<crate::accessibility::Accessibility>,
 ) {
+    if accessibility.blocked {
+        return;
+    }
+    if accessibility.settings.reduced_motion && tw_state.typing {
+        // Reduced motion also removes character-by-character/shaking reveal.
+        for segment in &mut tw_state.segments {
+            segment.shake = false;
+        }
+        tw_state.skip();
+        if let Ok(mut text) = text_query.get_single_mut() {
+            apply_visible_sections(&mut text, &tw_state);
+        }
+        return;
+    }
     if !tw_state.typing {
         return;
     }

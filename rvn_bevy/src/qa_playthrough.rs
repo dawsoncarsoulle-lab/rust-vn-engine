@@ -8,6 +8,11 @@ use bevy::{
     app::AppExit, prelude::*, render::view::screenshot::ScreenshotManager, window::PrimaryWindow,
 };
 use std::{collections::BTreeSet, path::PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "qa_atlas.rs"]
+mod atlas;
+#[path = "qa_compositions.rs"]
+mod compositions;
 #[path = "qa_menu_designs.rs"]
 mod design_capture;
 
@@ -19,6 +24,10 @@ impl Plugin for QaPlugin {
             return;
         };
         assert!(dir.is_dir(), "RVN_QA_OUTPUT must be an existing directory");
+        #[cfg(feature = "video")]
+        if std::env::var_os("RVN_QA_VIDEO").is_some() {
+            return;
+        }
         // Synthetic pointer events must receive a full UI frame even when the
         // compositor has not focused this isolated verification window.
         app.insert_resource(bevy::winit::WinitSettings::game());
@@ -28,6 +37,71 @@ impl Plugin for QaPlugin {
                 .after(bevy::input::InputSystem)
                 .before(bevy::ui::UiSystem::Focus),
         );
+        if std::env::var_os("RVN_QA_CUSTOM_CANVAS").is_some() {
+            app.insert_resource(bevy::winit::WinitSettings {
+                focused_mode: bevy::winit::UpdateMode::Continuous,
+                unfocused_mode: bevy::winit::UpdateMode::Continuous,
+            });
+            crate::custom_canvas::install_qa(app);
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if std::env::var_os("RVN_QA_ATLAS").is_some() {
+            app.insert_resource(bevy::winit::WinitSettings {
+                focused_mode: bevy::winit::UpdateMode::Continuous,
+                unfocused_mode: bevy::winit::UpdateMode::Continuous,
+            });
+            app.add_systems(
+                PreUpdate,
+                atlas::isolate_inputs
+                    .after(bevy::input::InputSystem)
+                    .after(apply_qa_pointer)
+                    .before(bevy::ui::UiSystem::Focus),
+            );
+            app.add_systems(
+                PostUpdate,
+                atlas::drive
+                    .after(crate::composed_motion::MotionApply)
+                    .after(bevy::ui::UiSystem::Layout)
+                    .after(bevy::transform::TransformSystem::TransformPropagate)
+                    .after(bevy::render::view::VisibilitySystems::VisibilityPropagate),
+            );
+            return;
+        }
+        if std::env::var_os("RVN_QA_COMPOSED_MOTION").is_some() {
+            app.insert_resource(bevy::winit::WinitSettings {
+                focused_mode: bevy::winit::UpdateMode::Continuous,
+                unfocused_mode: bevy::winit::UpdateMode::Continuous,
+            });
+            app.add_systems(
+                PostUpdate,
+                crate::composed_motion::qa_drive
+                    .after(crate::composed_motion::MotionApply)
+                    .after(bevy::transform::TransformSystem::TransformPropagate),
+            );
+            return;
+        }
+        if std::env::var_os("RVN_QA_ACCESSIBILITY").is_some() {
+            app.insert_resource(bevy::winit::WinitSettings {
+                focused_mode: bevy::winit::UpdateMode::Continuous,
+                unfocused_mode: bevy::winit::UpdateMode::Continuous,
+            });
+            crate::accessibility::install_qa(app);
+            return;
+        }
+        if std::env::var_os("RVN_QA_COMPOSITIONS").is_some() {
+            app.insert_resource(bevy::winit::WinitSettings {
+                focused_mode: bevy::winit::UpdateMode::Continuous,
+                unfocused_mode: bevy::winit::UpdateMode::Continuous,
+            });
+            app.add_systems(
+                PostUpdate,
+                compositions::drive
+                    .after(crate::composed_motion::MotionApply)
+                    .after(bevy::transform::TransformSystem::TransformPropagate),
+            );
+            return;
+        }
         if std::env::var_os("RVN_QA_MENU_DESIGN").is_some() {
             app.insert_resource(Qa {
                 dir,
@@ -276,7 +350,17 @@ impl Plugin for QaPlugin {
             map_clicked: None,
             slider_step: 0,
         });
-        if std::env::var_os("RVN_QA_LONG_DIALOGUE").is_some() {
+        if std::env::var_os("RVN_QA_PROGRAMMABLE").is_some() {
+            // Read hit targets only after deferred UI creation and layout.
+            // Otherwise a freshly rebuilt button still has a zero transform.
+            app.add_systems(
+                PostUpdate,
+                programmable_drive
+                    .after(bevy::ui::UiSystem::Layout)
+                    .after(bevy::transform::TransformSystem::TransformPropagate)
+                    .after(crate::programmable_ui::InterfaceScrollSet),
+            );
+        } else if std::env::var_os("RVN_QA_LONG_DIALOGUE").is_some() {
             app.add_systems(Update, long_dialogue_drive);
         } else if std::env::var_os("RVN_QA_LONG_DROPDOWN").is_some() {
             app.add_systems(Update, long_dropdown_drive);
@@ -1987,6 +2071,340 @@ struct QaPointer {
     position: Option<Vec2>,
     buttons: Vec<bevy::input::ButtonState>,
     keys: Vec<(KeyCode, bool)>,
+}
+
+fn programmable_drive(
+    mut qa: ResMut<Qa>,
+    mut pointer: ResMut<QaPointer>,
+    state: Res<State<VnState>>,
+    mut next: ResMut<NextState<VnState>>,
+    mut engine: ResMut<VnEngine>,
+    controls: Query<(&crate::programmable_ui::Control, &GlobalTransform, &Node)>,
+    windows: Query<Entity, With<PrimaryWindow>>,
+    mut shots: ResMut<ScreenshotManager>,
+    mut keyboard: EventWriter<bevy::input::keyboard::KeyboardInput>,
+    mut commands: EventWriter<crate::vn_command::VnCommand>,
+    mut exit: EventWriter<AppExit>,
+    mut wheel: EventWriter<bevy::input::mouse::MouseWheel>,
+    size: Query<&Window, With<PrimaryWindow>>,
+) {
+    let now = qa.started.elapsed().as_secs_f64();
+    assert!(
+        now < 60.0,
+        "programmable interface QA timed out: step {}",
+        qa.menu_step
+    );
+    assert_ne!(
+        *state.get(),
+        VnState::Error,
+        "programmable interface QA runtime error"
+    );
+    if *state.get() == VnState::TitleScreen {
+        if now > 2.0 {
+            next.set(VnState::Stepping);
+        }
+        return;
+    }
+    if *state.get() != VnState::Waiting || now - qa.entered < 0.8 {
+        return;
+    }
+    let position = |name: &str| {
+        controls
+            .iter()
+            .find(|(control, _, _)| control.element == name)
+            .map(|(_, transform, _)| transform.translation().truncate())
+    };
+    let key = |key_code, logical_key| bevy::input::keyboard::KeyboardInput {
+        key_code,
+        logical_key,
+        state: bevy::input::ButtonState::Pressed,
+        window: windows.single(),
+    };
+    let bottom = size.single().height() - 16.0;
+    match qa.menu_step {
+        0 => {
+            assert_eq!(engine.0.state.ui.screens.len(), 2);
+            qa.pc = engine.0.state.pc;
+            shots
+                .save_screenshot_to_disk(windows.single(), qa.dir.join("01_inventory.png"))
+                .unwrap();
+            pointer.position = position("name");
+            assert!(pointer.position.is_some());
+        }
+        1 | 5 | 10 | 13 | 17 => pointer.buttons.push(bevy::input::ButtonState::Pressed),
+        2 => {
+            pointer.buttons.push(bevy::input::ButtonState::Released);
+            pointer.keys.push((KeyCode::ControlLeft, true));
+            keyboard.send(key(
+                KeyCode::KeyA,
+                bevy::input::keyboard::Key::Character("a".into()),
+            ));
+        }
+        3 => {
+            pointer.keys.push((KeyCode::ControlLeft, false));
+            keyboard.send(key(
+                KeyCode::KeyE,
+                bevy::input::keyboard::Key::Character("Éloïse".into()),
+            ));
+        }
+        4 => {
+            assert_eq!(
+                engine.0.state.vars["player_name"],
+                rvn_parser::Value::Str("Éloïse".into())
+            );
+            shots
+                .save_screenshot_to_disk(windows.single(), qa.dir.join("02_bound_name.png"))
+                .unwrap();
+            pointer.position = position("letter");
+            assert!(pointer.position.is_some());
+        }
+        6 => pointer.buttons.push(bevy::input::ButtonState::Released),
+        7 => {
+            assert_eq!(
+                engine.0.state.vars["selected"],
+                rvn_parser::Value::Str("letter".into())
+            );
+            assert_eq!(engine.0.state.pc, qa.pc, "UI click advanced the story");
+            assert!(engine.0.rollback());
+            for command in engine.0.renderer.take_pending() {
+                commands.send(command);
+            }
+        }
+        8 => {
+            assert_eq!(engine.0.state.ui.screens.len(), 2);
+            let saved = rvn_core::save::SaveData::from_state(
+                &engine.0.state,
+                1,
+                "start".into(),
+                "main.rvn".into(),
+            );
+            let json = serde_json::to_string_pretty(&saved).unwrap();
+            std::fs::write(qa.dir.join("saved-interface.json"), &json).unwrap();
+            engine
+                .0
+                .load_data(serde_json::from_str(&json).unwrap())
+                .unwrap();
+            for command in engine.0.renderer.take_pending() {
+                commands.send(command);
+            }
+        }
+        9 => {
+            shots
+                .save_screenshot_to_disk(windows.single(), qa.dir.join("03_restored_inventory.png"))
+                .unwrap();
+            pointer.position = position("open_puzzle");
+            assert!(pointer.position.is_some());
+        }
+        11 => pointer.buttons.push(bevy::input::ButtonState::Released),
+        12 => {
+            assert!(engine
+                .0
+                .state
+                .ui
+                .screens
+                .iter()
+                .any(|screen| screen.name == "puzzle"));
+            pointer.position = position("code");
+            assert!(pointer.position.is_some());
+        }
+        14 => {
+            pointer.buttons.push(bevy::input::ButtonState::Released);
+            keyboard.send(key(
+                KeyCode::KeyD,
+                bevy::input::keyboard::Key::Character("dawn".into()),
+            ));
+        }
+        15 => {
+            assert_eq!(
+                engine.0.state.vars["answer"],
+                rvn_parser::Value::Str("dawn".into())
+            );
+            shots
+                .save_screenshot_to_disk(windows.single(), qa.dir.join("04_puzzle_input.png"))
+                .unwrap();
+        }
+        16 => {
+            pointer.position = position("confirm");
+            assert!(pointer.position.is_some());
+        }
+        18 => pointer.buttons.push(bevy::input::ButtonState::Released),
+        19 => {
+            assert_eq!(
+                engine.0.state.vars["archive_open"],
+                rvn_parser::Value::Bool(true)
+            );
+            assert!(!engine
+                .0
+                .state
+                .ui
+                .screens
+                .iter()
+                .any(|screen| screen.name == "puzzle"));
+            shots
+                .save_screenshot_to_disk(windows.single(), qa.dir.join("05_completed_journal.png"))
+                .unwrap();
+        }
+        20 => pointer.position = position("show_hints"),
+        21 | 24 | 31 | 36 => pointer.buttons.push(bevy::input::ButtonState::Pressed),
+        22 | 25 | 33 | 37 => pointer.buttons.push(bevy::input::ButtonState::Released),
+        23 => {
+            assert_eq!(
+                engine.0.state.vars["show_hints"],
+                rvn_parser::Value::Bool(false)
+            );
+            pointer.position = position("theme");
+        }
+        26 => {
+            shots
+                .save_screenshot_to_disk(windows.single(), qa.dir.join("06_selection_popup.png"))
+                .unwrap();
+            pointer.keys.push((KeyCode::ArrowUp, true));
+        }
+        27 => {
+            pointer.keys.push((KeyCode::ArrowUp, false));
+            pointer.keys.push((KeyCode::Enter, true));
+        }
+        28 => pointer.keys.push((KeyCode::Enter, false)),
+        29 => {
+            assert_eq!(
+                engine.0.state.vars["theme"],
+                rvn_parser::Value::Str("White".into())
+            );
+            shots
+                .save_screenshot_to_disk(windows.single(), qa.dir.join("06_long_selection.png"))
+                .unwrap();
+        }
+        30 => pointer.position = position("brightness"),
+        32 => {
+            let (_, transform, node) = controls
+                .iter()
+                .find(|(control, _, _)| control.element == "brightness")
+                .unwrap();
+            pointer.position =
+                Some(transform.translation().truncate() + Vec2::new(node.size().x * 0.45, 0.0));
+        }
+        34 => {
+            assert!(
+                matches!(engine.0.state.vars["brightness"],rvn_parser::Value::Float(value) if value>0.85)
+            );
+            assert_eq!(engine.0.state.pc, qa.pc);
+            shots
+                .save_screenshot_to_disk(windows.single(), qa.dir.join("07_slider_drag.png"))
+                .unwrap();
+        }
+        35 => pointer.position = position("disabled"),
+        38 => {
+            assert_eq!(engine.0.state.pc, qa.pc);
+            assert_eq!(
+                engine.0.state.vars["selected"],
+                rvn_parser::Value::Str(String::new())
+            );
+            pointer.position = position("more_items");
+            assert!(pointer.position.is_some());
+        }
+        39 | 48 => pointer.buttons.push(bevy::input::ButtonState::Pressed),
+        40 | 49 => pointer.buttons.push(bevy::input::ButtonState::Released),
+        41 => {
+            assert!(engine
+                .0
+                .state
+                .ui
+                .screens
+                .iter()
+                .any(|screen| screen.name == "long_inventory"));
+            engine
+                .0
+                .interface_event(rvn_core::ui::UiInput {
+                    screen: "long_inventory".into(),
+                    element: "row_39".into(),
+                    kind: rvn_ui::programmable::ScreenEventKind::Focus,
+                    value: None,
+                    key: None,
+                })
+                .unwrap();
+            for command in engine.0.renderer.take_pending() {
+                commands.send(command);
+            }
+        }
+        42 => {
+            let p = position("row_39").unwrap();
+            // Scroll styles applied after layout become geometry on the next
+            // frame. Low-frame-rate CI still gets that layout opportunity.
+            if !(16.0..bottom).contains(&p.y) && now - qa.entered < 5.0 {
+                return;
+            }
+            assert!(
+                (16.0..bottom).contains(&p.y),
+                "Focused final item is outside the viewport: {p:?}"
+            );
+            shots
+                .save_screenshot_to_disk(
+                    windows.single(),
+                    qa.dir.join("08_focus_reveals_long_inventory.png"),
+                )
+                .unwrap();
+            pointer.position = Some(p);
+        }
+        43 => {
+            wheel.send(bevy::input::mouse::MouseWheel {
+                unit: bevy::input::mouse::MouseScrollUnit::Line,
+                x: 0.0,
+                y: 5.0,
+                window: windows.single(),
+            });
+        }
+        44 => {
+            let p = position("row_39").unwrap();
+            if p.y <= bottom && now - qa.entered < 5.0 {
+                return;
+            }
+            assert!(p.y > bottom, "Wheel did not scroll the inventory");
+        }
+        45 => {
+            wheel.send(bevy::input::mouse::MouseWheel {
+                unit: bevy::input::mouse::MouseScrollUnit::Line,
+                x: 0.0,
+                y: -100.0,
+                window: windows.single(),
+            });
+        }
+        46 => {
+            let p = position("row_39").unwrap();
+            if !(16.0..bottom).contains(&p.y) && now - qa.entered < 5.0 {
+                return;
+            }
+            assert!((16.0..bottom).contains(&p.y));
+            shots
+                .save_screenshot_to_disk(
+                    windows.single(),
+                    qa.dir.join("09_wheel_long_inventory.png"),
+                )
+                .unwrap();
+            pointer.position = Some(p);
+        }
+        47 => {}
+        50 => {
+            assert_eq!(
+                engine.0.state.vars["selected"],
+                rvn_parser::Value::Str("row_39".into())
+            );
+            assert_eq!(engine.0.state.pc, qa.pc);
+            assert!(!engine
+                .0
+                .state
+                .ui
+                .screens
+                .iter()
+                .any(|screen| screen.name == "long_inventory"));
+            std::fs::write(qa.dir.join("result.json"),serde_json::to_vec_pretty(&serde_json::json!({"result":"pass","scenario":"native pointer, Unicode text, bindings, modal puzzle, handlers, save/load, rollback, toggle, 25-option selection, slider drag, disabled click-through protection, 40-item scrolling and keyboard focus reveal","story_pc":engine.0.state.pc})).unwrap()).unwrap();
+        }
+        51 => {
+            exit.send(AppExit::Success);
+        }
+        _ => unreachable!(),
+    }
+    qa.menu_step += 1;
+    qa.entered = now;
 }
 fn apply_qa_pointer(
     mut pointer: ResMut<QaPointer>,
