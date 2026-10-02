@@ -1,5 +1,6 @@
 use rvn_parser::{Hotspot, Position, Script, Statement, Transition, Value};
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use crate::error::RuntimeError;
 use crate::eval::{EvalError, FunctionLibrary};
@@ -261,10 +262,74 @@ pub struct InputState {
     pub mouse_y: f32,
 }
 
+struct InterfaceViewSnapshot {
+    ui: crate::ui::UiState,
+    globals: HashMap<String, Value>,
+    views: Vec<rvn_ui::programmable::ScreenView>,
+}
+
+impl InterfaceViewSnapshot {
+    fn matches(&self, state: &GameState) -> bool {
+        // RVN numeric equality intentionally treats signed zero as equal. A
+        // pure callback can still observe its text/JSON representation, so a
+        // cache key must compare floating-point inputs by their actual bits.
+        self.ui == state.ui
+            && self.globals.len() == state.vars.len()
+            && self.globals.iter().all(|(name, value)| {
+                state
+                    .vars
+                    .get(name)
+                    .is_some_and(|other| exact_ui_value(value, other))
+            })
+            && self
+                .ui
+                .screens
+                .iter()
+                .zip(&state.ui.screens)
+                .all(|(old, new)| {
+                    old.arguments
+                        .iter()
+                        .zip(&new.arguments)
+                        .all(|(a, b)| exact_ui_value(a, b))
+                        && old
+                            .values
+                            .iter()
+                            .all(|(id, value)| exact_ui_value(value, &new.values[id]))
+                        && old.canvas_states.iter().all(|(id, canvas)| {
+                            let other = &new.canvas_states[id];
+                            canvas.elapsed.to_bits() == other.elapsed.to_bits()
+                                && exact_ui_value(&canvas.state, &other.state)
+                        })
+                })
+    }
+}
+
+fn exact_ui_value(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Float(a), Value::Float(b)) => a.to_bits() == b.to_bits(),
+        (Value::List(a), Value::List(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| exact_ui_value(a, b))
+        }
+        (Value::Dict(a), Value::Dict(b)) => {
+            a.len() == b.len()
+                && a.iter().all(|(key, value)| {
+                    b.get(key).is_some_and(|other| exact_ui_value(value, other))
+                })
+        }
+        _ => left == right,
+    }
+}
+
 pub struct Engine<R: Renderer> {
     pub script: Script,
     functions: FunctionLibrary,
     ui_library: crate::ui::UiLibrary,
+    // Pure, untranslated descriptions only. Exact input keys also detect
+    // direct mutations of the public game state. Two entries retain both sides
+    // of a renderer transaction; no cache or geometry enters saves/history.
+    interface_view_cache: Mutex<Vec<InterfaceViewSnapshot>>,
+    #[cfg(test)]
+    interface_view_builds: std::sync::atomic::AtomicUsize,
     label_table: HashMap<String, usize>,
     // Lowering adds calls for branches. Their synthetic returns pop one frame;
     // an authored return must unwind those frames and return to the real caller.
@@ -373,6 +438,9 @@ impl<R: Renderer> Engine<R> {
             script,
             functions,
             ui_library,
+            interface_view_cache: Mutex::new(Vec::new()),
+            #[cfg(test)]
+            interface_view_builds: std::sync::atomic::AtomicUsize::new(0),
             label_table,
             branch_returns,
             state: GameState {
@@ -1833,8 +1901,20 @@ impl<R: Renderer> Engine<R> {
         target: &crate::motion::MotionTarget,
         state: &GameState,
     ) -> Result<bool, RuntimeError> {
+        let views = if matches!(target, crate::motion::MotionTarget::Interface { .. }) {
+            self.describe_interface_structure(state)?
+        } else {
+            Vec::new()
+        };
+        Ok(Self::motion_target_exists_in_views(target, state, &views))
+    }
+    fn motion_target_exists_in_views(
+        target: &crate::motion::MotionTarget,
+        state: &GameState,
+        views: &[rvn_ui::programmable::ScreenView],
+    ) -> bool {
         use crate::motion::MotionTarget;
-        Ok(match target {
+        match target {
             MotionTarget::Background => !state.background_image.is_empty(),
             MotionTarget::Sprite { id } => {
                 state.sprites.get(id).is_some_and(|sprite| sprite.visible)
@@ -1843,21 +1923,29 @@ impl<R: Renderer> Engine<R> {
                 state.sprites.get(id).is_some_and(|sprite| sprite.visible)
                     && state.layered.layer_visible(id, layer)
             }
-            MotionTarget::Interface { screen, element } => self
-                .describe_interfaces(state)?
+            MotionTarget::Interface { screen, element } => views
                 .iter()
                 .find(|view| view.name == *screen)
                 .is_some_and(|view| view.root.find(element).is_some()),
-        })
+        }
     }
     fn cancel_absent_motions(
         &self,
         state: &GameState,
         motions: &mut crate::motion::MotionState,
     ) -> Result<(), RuntimeError> {
+        let views = if motions
+            .tracks
+            .values()
+            .any(|track| matches!(track.target, crate::motion::MotionTarget::Interface { .. }))
+        {
+            self.describe_interface_structure(state)?
+        } else {
+            Vec::new()
+        };
         let mut absent = Vec::new();
         for (key, track) in &motions.tracks {
-            if !self.motion_target_exists(&track.target, state)? {
+            if !Self::motion_target_exists_in_views(&track.target, state, &views) {
                 absent.push(key.clone());
             }
         }
@@ -1951,10 +2039,75 @@ impl<R: Renderer> Engine<R> {
         &self,
         state: &GameState,
     ) -> Result<Vec<rvn_ui::programmable::ScreenView>, RuntimeError> {
-        let mut views = self
-            .ui_library
-            .views(&state.ui, &self.functions, &state.vars)
-            .map_err(|error| self.eval_err(error, "Interface"))?;
+        let cached = self.cached_interface_views(state);
+        let views = if let Some(views) = cached {
+            views
+        } else {
+            #[cfg(test)]
+            self.interface_view_builds
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let views = self
+                .ui_library
+                .views(&state.ui, &self.functions, &state.vars)
+                .map_err(|error| self.eval_err(error, "Interface"))?;
+            let mut cache = self
+                .interface_view_cache
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            if cache.len() == 2 {
+                cache.remove(0);
+            }
+            cache.push(InterfaceViewSnapshot {
+                ui: state.ui.clone(),
+                globals: state.vars.clone(),
+                views: views.clone(),
+            });
+            views
+        };
+        self.translate_interface_views(state, views)
+    }
+
+    fn cached_interface_views(
+        &self,
+        state: &GameState,
+    ) -> Option<Vec<rvn_ui::programmable::ScreenView>> {
+        let mut cache = self
+            .interface_view_cache
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let index = cache.iter().rposition(|entry| entry.matches(state))?;
+        // Recovery reads the previous state after describing the candidate.
+        // Promote hits so that the next frame's current snapshot is retained
+        // when its candidate arrives, rather than redrawing it for recovery.
+        let entry = cache.remove(index);
+        let views = entry.views.clone();
+        cache.push(entry);
+        Some(views)
+    }
+
+    fn describe_interface_structure(
+        &self,
+        state: &GameState,
+    ) -> Result<Vec<rvn_ui::programmable::ScreenView>, RuntimeError> {
+        let views = if let Some(mut views) = self.cached_interface_views(state) {
+            for view in &mut views {
+                view.root
+                    .visit_mut(&mut |component| component.drawing = None);
+            }
+            views
+        } else {
+            self.ui_library
+                .structural_views(&state.ui, &self.functions, &state.vars)
+                .map_err(|error| self.eval_err(error, "Interface"))?
+        };
+        self.translate_interface_views(state, views)
+    }
+
+    fn translate_interface_views(
+        &self,
+        state: &GameState,
+        mut views: Vec<rvn_ui::programmable::ScreenView>,
+    ) -> Result<Vec<rvn_ui::programmable::ScreenView>, RuntimeError> {
         for view in &mut views {
             let mut random = state
                 .ui
@@ -2526,10 +2679,10 @@ impl<R: Renderer> Engine<R> {
     }
 
     fn commit_ui_state(&mut self, mut next: GameState) -> Result<(), RuntimeError> {
-        self.ui_library
-            .reconcile_canvas_states(&mut next.ui, &self.functions, &next.vars)
-            .map_err(|error| self.eval_err(error, "Canvas instance state"))?;
         let views = self.describe_interfaces(&next)?;
+        self.ui_library
+            .reconcile_canvas_states_from_views(&mut next.ui, &views)
+            .map_err(|error| self.eval_err(error, "Canvas instance state"))?;
         self.validate_canvas_renderer(&views)?;
         if !views.is_empty() && !self.renderer.supports_programmable_ui() {
             return Err(self.eval_err(
@@ -2775,13 +2928,13 @@ impl<R: Renderer> Engine<R> {
         }
         let mut next = self.state.clone();
         self.ui_library
-            .reconcile_canvas_states(&mut next.ui, &self.functions, &next.vars)
+            .reconcile_canvas_states_from_views(&mut next.ui, &views)
             .map_err(|error| self.eval_err(error, "Canvas clock"))?;
         let mut budget = crate::ui::CanvasBudget::default();
         for (screen, element) in targets {
             // A previous callback may have removed this component or placed a
             // modal over it. Do not deliver a stale tick to a replacement.
-            let views = self.describe_interfaces(&next)?;
+            let views = self.describe_interface_structure(&next)?;
             let Some(view) = views.iter().find(|view| view.name == screen) else {
                 continue;
             };
@@ -2998,5 +3151,219 @@ impl<R: Renderer> Engine<R> {
 
     pub fn peek_statement(&self) -> Option<&Statement> {
         self.script.get(self.state.pc)
+    }
+}
+
+#[cfg(test)]
+mod interface_view_cache_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    use std::sync::atomic::Ordering;
+
+    fn game() -> Engine<crate::renderer::TerminalRenderer> {
+        let source = r#"
+function paint(state,props,frame) {
+    return [canvas_rect([frame["time"],state["x"],10,10],[1,0,0,1],radius)]
+}
+screen custom() {
+    return component("root","column",{},[
+        component("label","text",{"text":"Hello","text_key":"greeting"},[]),
+        component("canvas","canvas",{"draw":"paint","state":{"x":0},"props":{"size":size}},[])])
+}
+init {set radius=0 set size=20}
+label start
+"Waiting"
+"#;
+        let mut game = Engine::new(
+            rvn_parser::parse(source).unwrap(),
+            crate::renderer::TerminalRenderer,
+            16,
+        )
+        .unwrap();
+        game.state.ui.next_order = 1;
+        game.state.ui.screens.push(crate::ui::ScreenInstance {
+            name: "custom".into(),
+            arguments: Vec::new(),
+            modal: false,
+            layer: 0,
+            order: 0,
+            focus: None,
+            values: BTreeMap::new(),
+            random: crate::random::RandomState::seeded(7),
+            canvas_states: BTreeMap::from([(
+                "canvas".into(),
+                crate::ui::CanvasState {
+                    state: Value::Dict(BTreeMap::from([("x".into(), Value::Int(0))])),
+                    elapsed: 0.0,
+                },
+            )]),
+        });
+        game
+    }
+
+    #[test]
+    fn pure_view_reads_reuse_exact_inputs_without_mutating_saved_state_or_rng() {
+        let game = game();
+        let before = serde_json::to_value(&game.state).unwrap();
+        let first = game.interface_views().unwrap();
+        assert_eq!(first, game.interface_views().unwrap());
+        assert_eq!(game.interface_view_builds.load(Ordering::Relaxed), 1);
+        let structure = game.describe_interface_structure(&game.state).unwrap();
+        assert!(structure[0].root.find("canvas").unwrap().drawing.is_none());
+        assert_eq!(game.interface_view_builds.load(Ordering::Relaxed), 1);
+        assert_eq!(serde_json::to_value(&game.state).unwrap(), before);
+        assert!(game.interface_view_cache.lock().unwrap().len() <= 2);
+    }
+
+    #[test]
+    fn repeated_current_candidate_recovery_reads_build_only_one_drawing_per_frame() {
+        let mut game = game();
+        game.interface_views().unwrap();
+        for _ in 0..6 {
+            let before = game.interface_view_builds.load(Ordering::Relaxed);
+            let current = game.interface_views().unwrap();
+            let mut next = game.state.clone();
+            next.ui.screens[0]
+                .canvas_states
+                .get_mut("canvas")
+                .unwrap()
+                .elapsed += 1.0 / 60.0;
+            assert_ne!(game.describe_interfaces(&next).unwrap(), current);
+            game.describe_interface_structure(&next).unwrap();
+            assert_eq!(game.describe_interfaces(&game.state).unwrap(), current);
+            assert_eq!(
+                game.interface_view_builds.load(Ordering::Relaxed),
+                before + 1,
+                "Renderer recovery must retain the current snapshot after describing the candidate"
+            );
+            game.state = next;
+            assert_eq!(game.interface_view_cache.lock().unwrap().len(), 2);
+        }
+    }
+
+    #[test]
+    fn public_globals_local_state_and_clock_mutations_invalidate_without_caching_errors() {
+        let mut game = game();
+        let first = game.interface_views().unwrap();
+        game.state.vars.insert("radius".into(), Value::Int(-1));
+        assert!(game.interface_views().is_err());
+        assert!(game.interface_views().is_err());
+        assert_eq!(game.interface_view_builds.load(Ordering::Relaxed), 3);
+        game.state.vars.insert("radius".into(), Value::Int(0));
+        assert_eq!(game.interface_views().unwrap(), first);
+        assert_eq!(game.interface_view_builds.load(Ordering::Relaxed), 3);
+        game.state.ui.screens[0]
+            .canvas_states
+            .get_mut("canvas")
+            .unwrap()
+            .elapsed = 0.1;
+        let timed = game.interface_views().unwrap();
+        assert_ne!(timed, first);
+        assert_eq!(game.interface_view_builds.load(Ordering::Relaxed), 4);
+        game.state.ui.screens[0]
+            .canvas_states
+            .get_mut("canvas")
+            .unwrap()
+            .state = Value::Dict(BTreeMap::from([("x".into(), Value::Int(5))]));
+        assert_ne!(game.interface_views().unwrap(), timed);
+        assert_eq!(game.interface_view_builds.load(Ordering::Relaxed), 5);
+        assert_eq!(game.interface_view_cache.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn locale_changes_translate_fresh_text_without_replaying_canvas_or_changing_rng() {
+        let mut game = game();
+        let before = serde_json::to_value(&game.state).unwrap();
+        assert_eq!(
+            game.interface_views().unwrap()[0]
+                .root
+                .find("label")
+                .unwrap()
+                .text,
+            "Hello"
+        );
+        game.locale = Some(LocaleManager::from_tables(
+            "",
+            "en",
+            "fr",
+            vec!["en".into(), "fr".into()],
+            HashMap::from([
+                (
+                    "en".into(),
+                    crate::locale::LocaleTable {
+                        lang: "en".into(),
+                        strings: HashMap::from([("greeting".into(), "Hello".into())]),
+                    },
+                ),
+                (
+                    "fr".into(),
+                    crate::locale::LocaleTable {
+                        lang: "fr".into(),
+                        strings: HashMap::from([("greeting".into(), "Bonjour".into())]),
+                    },
+                ),
+            ]),
+        ));
+        assert_eq!(
+            game.interface_views().unwrap()[0]
+                .root
+                .find("label")
+                .unwrap()
+                .text,
+            "Bonjour"
+        );
+        game.locale.as_mut().unwrap().set_language("en").unwrap();
+        assert_eq!(
+            game.interface_views().unwrap()[0]
+                .root
+                .find("label")
+                .unwrap()
+                .text,
+            "Hello"
+        );
+        assert_eq!(game.interface_view_builds.load(Ordering::Relaxed), 1);
+        assert_eq!(serde_json::to_value(&game.state).unwrap(), before);
+    }
+
+    #[test]
+    fn cache_input_equality_is_bit_exact_for_nested_floats_and_canvas_clocks() {
+        let mut game = game();
+        game.state.vars.insert(
+            "nested".into(),
+            Value::List(vec![Value::Dict(BTreeMap::from([(
+                "number".into(),
+                Value::Float(0.0),
+            )]))]),
+        );
+        game.interface_views().unwrap();
+        game.state.vars.insert(
+            "nested".into(),
+            Value::List(vec![Value::Dict(BTreeMap::from([(
+                "number".into(),
+                Value::Float(-0.0),
+            )]))]),
+        );
+        game.interface_views().unwrap();
+        assert_eq!(game.interface_view_builds.load(Ordering::Relaxed), 2);
+        game.state.ui.screens[0]
+            .canvas_states
+            .get_mut("canvas")
+            .unwrap()
+            .elapsed = -0.0;
+        game.interface_views().unwrap();
+        assert_eq!(game.interface_view_builds.load(Ordering::Relaxed), 3);
+        game.state.ui.screens[0]
+            .canvas_states
+            .get_mut("canvas")
+            .unwrap()
+            .state = Value::Dict(BTreeMap::from([("x".into(), Value::Float(0.0))]));
+        game.interface_views().unwrap();
+        game.state.ui.screens[0]
+            .canvas_states
+            .get_mut("canvas")
+            .unwrap()
+            .state = Value::Dict(BTreeMap::from([("x".into(), Value::Float(-0.0))]));
+        game.interface_views().unwrap();
+        assert_eq!(game.interface_view_builds.load(Ordering::Relaxed), 5);
     }
 }

@@ -177,7 +177,7 @@ impl SourceWorkspace {
         let Some(contents) = read_optional(&self.root.join(RECOVERY))? else {
             return Ok(None);
         };
-        let recovery: Recovery = serde_json::from_str(&contents).map_err(|error| {
+        let mut recovery: Recovery = serde_json::from_str(&contents).map_err(|error| {
             format!("Unreadable recovery; the original cache was retained: {error}")
         })?;
         if recovery.version != 1
@@ -190,12 +190,16 @@ impl SourceWorkspace {
         self.check_recovery_baseline()?;
         // Recover incomplete logic, but never corrupt identities/pins/edges.
         let mut ids = std::collections::HashSet::new();
-        for graph in &recovery.graphs {
+        for graph in &mut recovery.graphs {
             if !ids.insert(graph.graph_id) {
                 return Err("Duplicate graph identity in recovery; cache retained".into());
             }
             let mut checked = graph.clone();
             checked.reconcile_import(graph)?;
+            // Old autosaves bypass GraphDocument::from_json. Upgrade only
+            // additive assignment outputs in memory, retaining the original
+            // recovery file and every authored pin, wire and position.
+            graph.normalize_assignment_value_outputs().map_err(|error| error.to_string())?;
         }
         Ok(Some(recovery.graphs))
     }

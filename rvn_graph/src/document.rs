@@ -424,11 +424,18 @@ impl GraphDocument {
         };
         definition.name = new.clone();
         for node in self.nodes.values_mut() {
-            if matches!(node.kind, NodeKind::VariableGet | NodeKind::SetVariable)
+            if matches!(node.kind, NodeKind::VariableGet | NodeKind::SetVariable | NodeKind::LocalVariable)
                 && node.properties.get("name") == Some(&PropertyValue::String(old.into()))
             {
                 node.properties
                     .insert("name".into(), PropertyValue::String(new.clone()));
+                for pin in &node.pins {
+                    if let Some(pin) = self.pins.get_mut(pin) {
+                        if pin.key == "name" {
+                            pin.default_value = Some(PropertyValue::String(new.clone()));
+                        }
+                    }
+                }
             }
         }
         self.variables.insert(new, definition);
@@ -725,6 +732,15 @@ impl GraphDocument {
             let value_type = crate::type_inference::property_type(&value);
             return self.set_blueprint_pin_default(pin, value, value_type);
         }
+        if self.nodes[&node].kind == NodeKind::Choice && key.ends_with("_condition") {
+            if !matches!(value, PropertyValue::Bool(_)) {
+                return Err(GraphEditError::InvalidPropertyType { node, key: key.into() });
+            }
+            self.nodes.get_mut(&node).unwrap().properties.insert(
+                crate::choice::default_marker(key), PropertyValue::Bool(true));
+            self.nodes.get_mut(&node).unwrap().properties.insert(
+                key.into(), PropertyValue::String(String::new()));
+        }
         self.pins.get_mut(&pin).unwrap().default_value = Some(value);
         self.nodes
             .get_mut(&node)
@@ -985,6 +1001,8 @@ impl GraphDocument {
                     .unwrap()
                     .properties
                     .remove(&format!("option_{index}_condition"));
+                self.nodes.get_mut(&node).unwrap().properties
+                    .remove(&crate::choice::default_marker(&format!("option_{index}_condition")));
             }
             let removed: BTreeSet<_> = (labels.len()..previous_len)
                 .flat_map(|index| {
@@ -1081,6 +1099,7 @@ impl GraphDocument {
     /// donnée au lieu de cacher une valeur dans le pin consommateur.
     pub fn materialize_visible_defaults(&mut self) -> Result<usize, GraphEditError> {
         let mut created = self.normalize_legacy_operators();
+        created += self.materialize_choice_conditions()?;
         let candidates: Vec<_> = self
             .pins
             .values()
@@ -1114,7 +1133,7 @@ impl GraphDocument {
             // Le nom affiché par un SET est son identité, pas une valeur de
             // graphe. UE l'intègre au nœud SET et ne crée jamais une fausse
             // constante texte reliée à une broche `name`.
-            .filter(|pin| self.nodes[&pin.node].kind != NodeKind::SetVariable)
+            .filter(|pin| !matches!(self.nodes[&pin.node].kind, NodeKind::SetVariable | NodeKind::LocalVariable))
             // Le patron est volontairement édité dans le nœud Format Text,
             // comme dans UE5. Il ne doit pas être extrait dans une constante.
             .filter(|pin| {
@@ -1141,6 +1160,15 @@ impl GraphDocument {
             .collect();
         let mut owner_slots = BTreeMap::<NodeId, usize>::new();
         for (input, owner, key, value_type, value) in candidates {
+            if self.nodes[&owner].kind == NodeKind::Choice && key.ends_with("_condition")
+                && (value == PropertyValue::Bool(true)
+                    || self.nodes[&owner].properties.get(&crate::choice::default_marker(&key))
+                        == Some(&PropertyValue::Bool(true)))
+            {
+                // The inline availability checkbox is real authoring state,
+                // not a constant to extract into another node on reopen.
+                continue;
+            }
             if self.nodes[&owner].kind == NodeKind::Choice
                 && key.ends_with("_condition")
                 && value == PropertyValue::Bool(false)
@@ -1648,6 +1676,7 @@ impl GraphDocument {
                 | NodeKind::LogicNot
                 | NodeKind::If
                 | NodeKind::While
+                | NodeKind::Choice
                 | NodeKind::ConvertIntToFloat
                 | NodeKind::ConvertNumberToText
                 | NodeKind::ConvertTextToInt
@@ -1800,11 +1829,30 @@ impl GraphDocument {
         Self::from_json_with_report(source).map(|(graph, _)| graph)
     }
 
+    /// Add the value returned by a local assignment to old presentation caches.
+    /// Existing IDs, wires, positions and defaults are left intact. The new
+    /// output reads the assigned variable; it never re-evaluates its input.
+    /// This is additive and idempotent, including schema-current caches made
+    /// before LocalVariable exposed the same value output as SetVariable.
+    pub fn normalize_assignment_value_outputs(&mut self) -> Result<usize, GraphEditError> {
+        let missing: Vec<_> = self.nodes.values()
+            .filter(|node| node.kind == NodeKind::LocalVariable)
+            .filter(|node| self.pin_by_key(node.id, "value_out").is_none())
+            .map(|node| (node.id, self.pin_by_key(node.id, "value")
+                .map(|pin| pin.value_type.clone()).unwrap_or(ValueType::Any)))
+            .collect();
+        for (node, value_type) in &missing {
+            self.add_pin(*node, "value_out", "", PinDirection::Output,
+                value_type.clone(), PinCardinality::Many)?;
+        }
+        Ok(missing.len())
+    }
+
     pub fn from_json_with_report(
         source: &str,
     ) -> Result<(Self, crate::MigrationReport), GraphLoadError> {
         let value = serde_json::from_str(source).map_err(GraphLoadError::Json)?;
-        let (value, report) = crate::migrate_graph_value(value).map_err(|found| {
+        let (value, mut report) = crate::migrate_graph_value(value).map_err(|found| {
             GraphLoadError::UnsupportedSchema {
                 found,
                 supported: GRAPH_SCHEMA_VERSION,
@@ -1896,6 +1944,9 @@ impl GraphDocument {
                 .expect("existing MusicStop node");
             graph.pins.get_mut(&id).unwrap().default_value =
                 Some(PropertyValue::String("none".into()));
+        }
+        if graph.normalize_assignment_value_outputs().map_err(GraphLoadError::Migration)? > 0 {
+            report.steps.push("assignment_value_outputs");
         }
         if report.from < 3 {
             graph

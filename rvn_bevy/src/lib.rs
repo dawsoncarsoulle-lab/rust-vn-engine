@@ -17,6 +17,8 @@
 //! project‑specific paths in the binary.
 
 mod bevy_renderer;
+#[cfg(test)]
+mod choice_cleanup_tests;
 mod components;
 mod project_paths;
 #[cfg(not(target_arch = "wasm32"))]
@@ -422,6 +424,15 @@ pub fn run_game<P: AsRef<Path>>(project_dir: P) -> Result<(), String> {
     })
 }
 
+fn choice_button_update_systems() -> bevy::ecs::schedule::SystemConfigs {
+    // Dialogue queues recursive choice removal. Apply that deferred cleanup
+    // before refreshing buttons, so a choice -> dialogue transition cannot
+    // queue a second despawn for the same entities.
+    update_choice_buttons
+        .after(dialogue_system)
+        .after(choice_system)
+}
+
 fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
     let RuntimeLaunch {
         #[cfg(target_arch = "wasm32")]
@@ -584,7 +595,7 @@ fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
             imagemap_dimensions_system,
             imagemap_hover_system,
             imagemap_cleanup_system.run_if(not(in_state(VnState::Waiting))),
-            update_choice_buttons,
+            choice_button_update_systems(),
             fade_system.run_if(in_state(VnState::Animating)),
             audio_fade_system,
             persistent_unlock_system,

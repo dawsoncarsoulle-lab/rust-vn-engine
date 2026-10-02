@@ -45,6 +45,7 @@ pub fn reimport_script(
                 // not changed (for example an init default or type changed).
                 previous.variables = graph.variables.clone();
                 previous.characters = graph.characters.clone();
+                previous.normalize_assignment_value_outputs().map_err(err)?;
                 let conflicts: BTreeMap<_, _> = graph
                     .nodes
                     .values()
@@ -100,6 +101,7 @@ pub fn reimport_script(
                         }
                     }
                 }
+                previous.materialize_choice_conditions().map_err(err)?;
                 previous.materialize_implicit_conversions().map_err(err)?;
                 previous.schema_version = GRAPH_SCHEMA_VERSION;
                 // Type-only conversions may be presentation in dialogue RVN.
@@ -848,6 +850,46 @@ struct Builder {
     graph: GraphDocument,
     lane: f64,
 }
+
+impl GraphDocument {
+    /// Convert old per-answer RVN guards to ordinary Boolean producer wires.
+    /// The update is additive: existing node/pin/edge identities and positions
+    /// stay intact. Older truthy non-Boolean RVN guards are retained verbatim
+    /// rather than silently coercing them or changing their source AST.
+    pub fn materialize_choice_conditions(&mut self) -> Result<usize, GraphEditError> {
+        let guards: Vec<_> = self.nodes.values().filter(|node| node.kind == NodeKind::Choice)
+            .flat_map(|node| node.properties.iter().filter_map(|(key, value)| {
+                let PropertyValue::String(source) = value else { return None; };
+                if !key.starts_with("option_") || !key.ends_with("_condition")
+                    || source.trim().is_empty() { return None; }
+                let pin = self.pin_by_key(node.id, key)?;
+                if self.edges.values().any(|edge| edge.input == pin.id) { return None; }
+                Some((node.id, key.clone(), source.clone()))
+            })).collect();
+        if guards.is_empty() { return Ok(0); }
+        let mut builder = Builder { graph: self.clone(), lane: 0.0 };
+        let mut created = 0;
+        for (node, key, source) in guards {
+            let parsed = rvn_parser::parse(&format!("set __choice_guard = {source}\n"))
+                .map_err(|_| GraphEditError::InvalidPropertyType { node, key: key.clone() })?;
+            let [Statement::SetVar { value, .. }] = parsed.as_slice() else {
+                return Err(GraphEditError::InvalidPropertyType { node, key });
+            };
+            let before = builder.graph.clone();
+            if builder.choice_condition(node, &key, value).is_ok() {
+                builder.graph.set_property(node, key, PropertyValue::String(String::new()))?;
+                created += 1;
+            } else {
+                // Valid old RVN may use truthy numbers/strings. A new Boolean
+                // socket must not pretend those expressions are Boolean.
+                builder.graph = before;
+            }
+        }
+        *self = builder.graph;
+        Ok(created)
+    }
+}
+
 impl Builder {
     fn node(&mut self, kind: NodeKind, pos: [f64; 2]) -> Result<NodeId, String> {
         self.graph.add_catalog_node(kind, pos).map_err(err)
@@ -1154,6 +1196,15 @@ impl Builder {
         let p = self.graph.nodes[&n].position;
         let expr = self.expression(value, [p[0] - 260.0, p[1] + 160.0])?;
         self.connect_expression(expr, n, key)
+    }
+    fn choice_condition(&mut self, n: NodeId, key: &str, value: &Expr) -> Result<(), String> {
+        let position = self.graph.nodes[&n].position;
+        let index = crate::choice_option_index(key).unwrap_or(0);
+        // Even `if true` is a real authored expression. Keep it connected so
+        // source round-trip distinguishes it from an absent (always) guard.
+        let source = self.expression(value,
+            [position[0] - 260.0, position[1] + 80.0 + index as f64 * 180.0])?;
+        self.connect_expression(source, n, key)
     }
     fn transition(&mut self, n: NodeId, value: &Transition) -> Result<(), String> {
         self.text(n, "transition", &value.to_string())
@@ -1490,11 +1541,12 @@ impl Builder {
                             .add_choice_option(n, text_source(&option.label))
                             .map_err(err)?;
                         if let Some(condition) = &option.condition {
-                            self.property(
-                                n,
-                                &format!("option_{}_condition", pins.index),
-                                PropertyValue::String(expression_source(condition)),
-                            )?;
+                            let key = format!("option_{}_condition", pins.index);
+                            let before = self.graph.clone();
+                            if self.choice_condition(n, &key, condition).is_err() {
+                                self.graph = before;
+                                self.property(n, &key, PropertyValue::String(expression_source(condition)))?;
+                            }
                         }
                         self.lane += 960.0;
                         x = x.max(self.sequence(

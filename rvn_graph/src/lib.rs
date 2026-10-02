@@ -1,6 +1,7 @@
 mod authoring_collections;
 mod blueprint_policy;
 mod catalog;
+mod choice;
 mod codegen;
 mod component;
 mod document;
@@ -28,6 +29,7 @@ pub use validation::*;
 
 pub const GRAPH_SCHEMA_VERSION: u32 = 5;
 pub use catalog::*;
+pub use choice::choice_option_index;
 pub use codegen::*;
 pub use import::*;
 pub use project::*;

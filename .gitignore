@@ -20,6 +20,7 @@ __pycache__/
 # Atlas delivery sessions are local evidence, not distributable project data.
 # Keep reusable test sources; retain the portable .rvn-authoring.json layout.
 examples/atlas-des-brumes/DELIVERY.json
+examples/atlas-des-brumes/exports/
 examples/atlas-des-brumes/qa/*
 !examples/atlas-des-brumes/qa/Cargo.toml
 !examples/atlas-des-brumes/qa/Cargo.lock

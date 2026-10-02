@@ -92,6 +92,7 @@ pub(crate) fn pin_definitions(kind: NodeKind) -> Vec<PinDefinition> {
             ),
             input("value", "Valeur", ValueType::Any),
             output("exec_out", "", ValueType::Execution),
+            output("value_out", "", ValueType::Any),
         ],
         Kind::UiOpen => vec![
             input("exec_in", "", ValueType::Execution),

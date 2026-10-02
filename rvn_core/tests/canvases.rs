@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 struct Headless {
     views: Vec<ScreenView>,
     unsupported: bool,
+    fail_next_update: bool,
 }
 impl Renderer for Headless {
     fn supports_programmable_ui(&self) -> bool {
@@ -19,6 +20,9 @@ impl Renderer for Headless {
     }
     fn update_interfaces(&mut self, views: &[ScreenView]) -> Result<(), String> {
         self.views = views.to_vec();
+        if std::mem::take(&mut self.fail_next_update) {
+            return Err("Simulated renderer failure after a partial update".into());
+        }
         Ok(())
     }
     fn set_background(&mut self, _: &str, _: &Transition) {}
@@ -239,6 +243,80 @@ ui.open("custom",[],true,0)
     let before = game.state.clone();
     assert!(game.interface_event(pointer("one", 10)).is_err());
     assert_eq!(snapshot(&game.state), snapshot(&before));
+}
+
+#[test]
+fn cached_views_preserve_renderer_failure_recovery_and_rollback_after_a_successful_retry() {
+    let mut game = engine(PROGRAM);
+    let before = snapshot(&game.state);
+    let rendered = game.interface_views().unwrap();
+    let can_rollback = game.can_rollback();
+    game.renderer.fail_next_update = true;
+    assert!(game.interface_event(pointer("one", 99)).is_err());
+    assert_eq!(snapshot(&game.state), before);
+    assert_eq!(game.renderer.views, rendered);
+    assert_eq!(game.interface_views().unwrap(), rendered);
+    assert_eq!(game.can_rollback(), can_rollback);
+    game.interface_event(pointer("one", 99)).unwrap();
+    assert_ne!(game.interface_views().unwrap(), rendered);
+    assert!(game.rollback());
+    assert_eq!(snapshot(&game.state), before);
+    assert_eq!(game.interface_views().unwrap(), rendered);
+    assert_eq!(game.renderer.views, rendered);
+}
+
+#[test]
+fn structural_focus_delivers_handlers_but_invalid_final_drawing_stays_atomic() {
+    let source = r#"
+function paint(state,props,frame){return [canvas_rect([0,0,10,10],[1,0,0,1],radius)]}
+screen custom(){return component("one","canvas",{
+    "draw":"paint","state":{"x":0},"events":{"pointer_down":"focus","focus":"focused"}},[])}
+handler focus(event){set radius=new_radius ui.focus("custom","one")}
+handler focused(event){set focus_calls=focus_calls+1 set roll=random(1,10)}
+init{set radius=0 set new_radius=-1 set focus_calls=0}
+label start
+ui.open("custom",[],true,0)
+"Waiting"
+"#;
+    let mut game = engine(source);
+    let before = snapshot(&game.state);
+    let rendered = game.renderer.views.clone();
+    assert!(game.interface_event(pointer("one", 0)).is_err());
+    assert_eq!(snapshot(&game.state), before);
+    assert_eq!(game.renderer.views, rendered);
+    game.state.vars.insert("new_radius".into(), Value::Int(1));
+    game.interface_event(pointer("one", 0)).unwrap();
+    assert_eq!(game.state.vars["focus_calls"], Value::Int(1));
+    assert_eq!(game.state.ui.screens[0].focus.as_deref(), Some("one"));
+    assert!(game.state.vars.contains_key("roll"));
+    assert_ne!(game.interface_views().unwrap(), rendered);
+}
+
+#[test]
+fn structural_tick_checks_refresh_after_callbacks_remove_a_target_or_add_a_modal() {
+    let source = PROGRAM
+        .replace("init {set reported_time=0}", "init {set reported_time=0 set calls=0}")
+        .replace(
+            "ui.set_state(event[\"screen\"],event[\"element\"],dict_set(event[\"state\"],\"ticks\",event[\"state\"][\"ticks\"]+1))",
+            "set calls=calls+1 ui.close(\"custom\")",
+        );
+    let mut game = engine(&source);
+    game.interface_tick(0.1).unwrap();
+    assert_eq!(game.state.vars["calls"], Value::Int(1));
+    assert!(game.state.ui.screens.is_empty());
+    assert!(game.interface_views().unwrap().is_empty());
+
+    let source = source
+        .replace("ui.close(\"custom\")", "ui.open(\"overlay\",[],true,10)")
+        .replace(
+            "init {set reported_time=0 set calls=0}",
+            "screen overlay(){return component(\"overlay\",\"text\",{\"text\":\"Pause\"},[])}\ninit {set reported_time=0 set calls=0}",
+        );
+    let mut game = engine(&source);
+    game.interface_tick(0.1).unwrap();
+    assert_eq!(game.state.vars["calls"], Value::Int(1));
+    assert_eq!(state(&game, "one").elapsed, 0.1);
+    assert_eq!(state(&game, "two").elapsed, 0.0);
 }
 
 #[test]

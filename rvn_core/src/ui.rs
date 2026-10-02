@@ -98,17 +98,7 @@ pub fn evaluate_canvas(
         return Err(invalid("A canvas drawing requires a canvas component"));
     }
     validate_canvas_state(state)?;
-    if !frame.width.is_finite()
-        || !frame.height.is_finite()
-        || !(0.0..=16_384.0).contains(&frame.width)
-        || !(0.0..=16_384.0).contains(&frame.height)
-        || !frame.time.is_finite()
-        || !(0.0..=1.0e12).contains(&frame.time)
-    {
-        return Err(invalid(
-            "Invalid canvas frame dimensions or simulation time",
-        ));
-    }
+    validate_canvas_frame(frame)?;
     let Some(name) = component.draw.as_deref() else {
         return Ok(CanvasDrawing::default());
     };
@@ -132,6 +122,21 @@ pub fn evaluate_canvas(
         ));
     }
     Ok(drawing)
+}
+
+fn validate_canvas_frame(frame: CanvasFrame) -> Result<(), EvalError> {
+    if !frame.width.is_finite()
+        || !frame.height.is_finite()
+        || !(0.0..=16_384.0).contains(&frame.width)
+        || !(0.0..=16_384.0).contains(&frame.height)
+        || !frame.time.is_finite()
+        || !(0.0..=1.0e12).contains(&frame.time)
+    {
+        return Err(invalid(
+            "Invalid canvas frame dimensions or simulation time",
+        ));
+    }
+    Ok(())
 }
 
 /// Constructors return ordinary RVN dictionaries. Source/Blueprint conversion
@@ -339,6 +344,28 @@ impl UiLibrary {
         functions: &FunctionLibrary,
         globals: &HashMap<String, Value>,
     ) -> Result<Vec<ScreenView>, EvalError> {
+        self.resolve_views(state, functions, globals, true)
+    }
+
+    /// Resolve controls, layout and canvas frame/state metadata without running
+    /// drawing callbacks. Simulation and target discovery need this structure,
+    /// not a new copy of the same geometry for every check.
+    pub(crate) fn structural_views(
+        &self,
+        state: &UiState,
+        functions: &FunctionLibrary,
+        globals: &HashMap<String, Value>,
+    ) -> Result<Vec<ScreenView>, EvalError> {
+        self.resolve_views(state, functions, globals, false)
+    }
+
+    fn resolve_views(
+        &self,
+        state: &UiState,
+        functions: &FunctionLibrary,
+        globals: &HashMap<String, Value>,
+        draw: bool,
+    ) -> Result<Vec<ScreenView>, EvalError> {
         if state.screens.len() > 32 {
             return Err(invalid("32 interfaces simultanées maximum"));
         }
@@ -490,9 +517,16 @@ impl UiLibrary {
                     time,
                 };
                 component.canvas_frame = Some(frame);
-                match evaluate_canvas(functions, component, &state, frame, globals, &mut budget) {
-                    Ok(drawing) => component.drawing = Some(drawing),
-                    Err(error) => canvas_error = Some(error),
+                if draw {
+                    match evaluate_canvas(functions, component, &state, frame, globals, &mut budget)
+                    {
+                        Ok(drawing) => component.drawing = Some(drawing),
+                        Err(error) => canvas_error = Some(error),
+                    }
+                } else if let Err(error) =
+                    validate_canvas_state(&state).and_then(|_| validate_canvas_frame(frame))
+                {
+                    canvas_error = Some(error);
                 };
             });
             if let Some(error) = canvas_error {
@@ -525,7 +559,18 @@ impl UiLibrary {
         functions: &FunctionLibrary,
         globals: &HashMap<String, Value>,
     ) -> Result<(), EvalError> {
-        let views = self.views(state, functions, globals)?;
+        let views = self.structural_views(state, functions, globals)?;
+        self.reconcile_canvas_states_from_views(state, &views)
+    }
+
+    /// Reuse an already validated description of this trial state. Missing
+    /// canvases used their authored initial state and time zero in that view,
+    /// exactly the state hydrated here; removed IDs only need to be forgotten.
+    pub(crate) fn reconcile_canvas_states_from_views(
+        &self,
+        state: &mut UiState,
+        views: &[ScreenView],
+    ) -> Result<(), EvalError> {
         for view in views {
             let instance = state
                 .screens
@@ -671,7 +716,7 @@ impl UiLibrary {
             }
             UiCommand::Focus { name, element } => {
                 let view = self
-                    .views(state, functions, globals)?
+                    .structural_views(state, functions, globals)?
                     .into_iter()
                     .find(|view| view.name == name)
                     .ok_or_else(|| invalid(format!("écran fermé : {name}")))?;

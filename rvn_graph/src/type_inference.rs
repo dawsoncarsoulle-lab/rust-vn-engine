@@ -76,7 +76,9 @@ impl GraphDocument {
             .collect()
     }
 
-    pub(crate) fn variable_node_name(&self, node: NodeId) -> Option<String> {
+    /// Resolve the assignment/read identity using the same precedence as RVN:
+    /// the authored name, an existing static identity wire, then its default.
+    pub fn variable_node_name(&self, node: NodeId) -> Option<String> {
         let owner = self.nodes.get(&node)?;
         if !matches!(
             owner.kind,
@@ -312,7 +314,7 @@ impl<'a> Inference<'a> {
                 .and_then(|name| self.graph.variables.get(&name))
                 .map(|variable| variable.value_type.clone())
                 .unwrap_or(ValueType::Any),
-            NodeKind::SetVariable if pin.key == "value_out" => {
+            NodeKind::SetVariable | NodeKind::LocalVariable if pin.key == "value_out" => {
                 let declared = self.graph.pin_constraint_type(id).unwrap_or(ValueType::Any);
                 if declared == ValueType::Any {
                     self.input_value(node.id, "value", depth)

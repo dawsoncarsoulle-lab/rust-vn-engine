@@ -847,7 +847,15 @@ impl Emitter<'_> {
                     validate_expression(condition)?;
                     source.push_str(" if ");
                     source.push_str(condition);
+                } else if self.graph.pin_by_key(node, &condition_key)
+                    .and_then(|pin| self.graph.choice_condition_default(pin.id)) == Some(false)
+                {
+                    source.push_str(" if false");
                 }
+            } else if self.graph.pin_by_key(node, &condition_key)
+                .and_then(|pin| self.graph.choice_condition_default(pin.id)) == Some(false)
+            {
+                source.push_str(" if false");
             }
             source.push_str(" => {\n");
             self.emit_sequence(
@@ -1116,7 +1124,7 @@ impl Emitter<'_> {
             // SET exposes the already assigned value, not the expression that
             // produced it. Re-evaluating a function/random expression here
             // would give consumers a different value and repeat side effects.
-            NodeKind::SetVariable => {
+            NodeKind::SetVariable | NodeKind::LocalVariable => {
                 let name = match node.properties.get("name") {
                     Some(PropertyValue::String(name)) => name.clone(),
                     _ => self.pin_string(node.id, "name")?,
@@ -1425,12 +1433,12 @@ impl Emitter<'_> {
             .get(&edge.output)
             .ok_or(TranspileError::PinNotFound(edge.output))?;
         let source = self.graph.nodes.get(&source_pin.node).unwrap();
-        if matches!(source.kind, NodeKind::VariableGet | NodeKind::SetVariable) {
+        if matches!(source.kind, NodeKind::VariableGet | NodeKind::SetVariable | NodeKind::LocalVariable) {
             // A SET value output is a typed variable value too. Read the
             // assigned value at runtime, rather than treating it as a literal.
             let name = match source.properties.get("name") {
                 Some(PropertyValue::String(name)) => name.clone(),
-                _ if source.kind == NodeKind::SetVariable => self.pin_string(source.id, "name")?,
+                _ if matches!(source.kind, NodeKind::SetVariable | NodeKind::LocalVariable) => self.pin_string(source.id, "name")?,
                 _ => property_string(source.id, &source.properties, "name")?,
             };
             return Ok(format!("[{}]", validate_variable_name(&name)?));
