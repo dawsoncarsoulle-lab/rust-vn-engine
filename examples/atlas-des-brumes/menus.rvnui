@@ -1,0 +1,7653 @@
+{
+  "version": 2,
+  "reference": [
+    1920.0,
+    1080.0
+  ],
+  "pages": [
+    {
+      "id": "title",
+      "name": "Menu principal",
+      "background": [
+        0.045,
+        0.048,
+        0.058,
+        1.0
+      ],
+      "elements": [
+        {
+          "id": "heading",
+          "name": "heading",
+          "kind": "Text",
+          "rect": [
+            100.0,
+            80.0,
+            1200.0,
+            90.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Menu principal",
+          "asset": null,
+          "font": null,
+          "font_size": 52.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "text",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_0",
+          "name": "button_0",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            240.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Continuer",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "Continue",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_1",
+          "name": "button_1",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            330.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Nouvelle partie",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 1,
+          "action": "NewGame",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_2",
+          "name": "button_2",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            420.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Charger",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 2,
+          "action": "Load",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_3",
+          "name": "button_3",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            510.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Réglages",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 3,
+          "action": "Settings",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_4",
+          "name": "button_4",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            600.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Galerie",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 4,
+          "action": "Gallery",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_5",
+          "name": "button_5",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            690.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Quitter",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 5,
+          "action": "Quit",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        }
+      ],
+      "graphs": [],
+      "role": "Title"
+    },
+    {
+      "id": "pause",
+      "name": "Pause",
+      "background": [
+        0.045,
+        0.048,
+        0.058,
+        1.0
+      ],
+      "elements": [
+        {
+          "id": "heading",
+          "name": "heading",
+          "kind": "Text",
+          "rect": [
+            100.0,
+            80.0,
+            1200.0,
+            90.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Pause",
+          "asset": null,
+          "font": null,
+          "font_size": 52.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "text",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_0",
+          "name": "button_0",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            240.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Reprendre",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "Resume",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_1",
+          "name": "button_1",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            330.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Sauvegarder",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 1,
+          "action": "Save",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_2",
+          "name": "button_2",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            420.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Charger",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 2,
+          "action": "Load",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_3",
+          "name": "button_3",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            510.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Réglages",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 3,
+          "action": "Settings",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_4",
+          "name": "button_4",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            600.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Historique",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 4,
+          "action": "History",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_5",
+          "name": "button_5",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            690.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Quitter",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 5,
+          "action": "Quit",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        }
+      ],
+      "graphs": [],
+      "role": "Pause"
+    },
+    {
+      "id": "save",
+      "name": "Sauvegarder",
+      "background": [
+        0.045,
+        0.048,
+        0.058,
+        1.0
+      ],
+      "elements": [
+        {
+          "id": "heading",
+          "name": "heading",
+          "kind": "Text",
+          "rect": [
+            100.0,
+            80.0,
+            1200.0,
+            90.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Sauvegarder",
+          "asset": null,
+          "font": null,
+          "font_size": 52.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "text",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_0",
+          "name": "button_0",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            240.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Retour",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "Back",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "content",
+          "name": "content",
+          "kind": "SaveList",
+          "rect": [
+            580.0,
+            200.0,
+            1220.0,
+            780.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Élément",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "panel",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        }
+      ],
+      "graphs": [],
+      "role": "Save"
+    },
+    {
+      "id": "load",
+      "name": "Charger",
+      "background": [
+        0.045,
+        0.048,
+        0.058,
+        1.0
+      ],
+      "elements": [
+        {
+          "id": "heading",
+          "name": "heading",
+          "kind": "Text",
+          "rect": [
+            100.0,
+            80.0,
+            1200.0,
+            90.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Charger",
+          "asset": null,
+          "font": null,
+          "font_size": 52.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "text",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_0",
+          "name": "button_0",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            240.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Retour",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "Back",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "content",
+          "name": "content",
+          "kind": "SaveList",
+          "rect": [
+            580.0,
+            200.0,
+            1220.0,
+            780.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Élément",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "panel",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        }
+      ],
+      "graphs": [],
+      "role": "Load"
+    },
+    {
+      "id": "settings",
+      "name": "Réglages",
+      "background": [
+        0.045,
+        0.048,
+        0.058,
+        1.0
+      ],
+      "elements": [
+        {
+          "id": "heading",
+          "name": "heading",
+          "kind": "Text",
+          "rect": [
+            100.0,
+            80.0,
+            1200.0,
+            90.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Réglages",
+          "asset": null,
+          "font": null,
+          "font_size": 52.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "text",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_0",
+          "name": "button_0",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            240.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Retour",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "Back",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "music_volume",
+          "name": "music_volume",
+          "kind": "Slider",
+          "rect": [
+            640.0,
+            220.0,
+            900.0,
+            70.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Musique",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": "music_volume",
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "sfx_volume",
+          "name": "sfx_volume",
+          "kind": "Slider",
+          "rect": [
+            640.0,
+            320.0,
+            900.0,
+            70.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Sons",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": "sfx_volume",
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "text_speed",
+          "name": "text_speed",
+          "kind": "Slider",
+          "rect": [
+            640.0,
+            420.0,
+            900.0,
+            70.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Vitesse du texte",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": "text_speed",
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "typewriter",
+          "name": "typewriter",
+          "kind": "CheckBox",
+          "rect": [
+            640.0,
+            520.0,
+            900.0,
+            70.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Écriture progressive",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": "typewriter",
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "fullscreen",
+          "name": "fullscreen",
+          "kind": "CheckBox",
+          "rect": [
+            640.0,
+            620.0,
+            900.0,
+            70.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Plein écran",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": "fullscreen",
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "language",
+          "name": "language",
+          "kind": "Select",
+          "rect": [
+            640.0,
+            720.0,
+            900.0,
+            70.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Langue",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": "language",
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        }
+      ],
+      "graphs": [],
+      "role": "Settings"
+    },
+    {
+      "id": "gallery",
+      "name": "Galerie",
+      "background": [
+        0.045,
+        0.048,
+        0.058,
+        1.0
+      ],
+      "elements": [
+        {
+          "id": "heading",
+          "name": "heading",
+          "kind": "Text",
+          "rect": [
+            100.0,
+            80.0,
+            1200.0,
+            90.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Galerie",
+          "asset": null,
+          "font": null,
+          "font_size": 52.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "text",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_0",
+          "name": "button_0",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            240.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Retour",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "Back",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "content",
+          "name": "content",
+          "kind": "Gallery",
+          "rect": [
+            580.0,
+            200.0,
+            1220.0,
+            780.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Élément",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "panel",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        }
+      ],
+      "graphs": [],
+      "role": "Gallery"
+    },
+    {
+      "id": "history",
+      "name": "Historique",
+      "background": [
+        0.045,
+        0.048,
+        0.058,
+        1.0
+      ],
+      "elements": [
+        {
+          "id": "heading",
+          "name": "heading",
+          "kind": "Text",
+          "rect": [
+            100.0,
+            80.0,
+            1200.0,
+            90.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Historique",
+          "asset": null,
+          "font": null,
+          "font_size": 52.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "text",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_0",
+          "name": "button_0",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            240.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Retour",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "Back",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "content",
+          "name": "content",
+          "kind": "History",
+          "rect": [
+            580.0,
+            200.0,
+            1220.0,
+            780.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Élément",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "panel",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        }
+      ],
+      "graphs": [],
+      "role": "History"
+    },
+    {
+      "id": "confirm",
+      "name": "Remplacer la partie en cours ?",
+      "background": [
+        0.045,
+        0.048,
+        0.058,
+        1.0
+      ],
+      "elements": [
+        {
+          "id": "heading",
+          "name": "heading",
+          "kind": "Text",
+          "rect": [
+            100.0,
+            80.0,
+            1200.0,
+            90.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Remplacer la partie en cours ?",
+          "asset": null,
+          "font": null,
+          "font_size": 52.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "None",
+          "binding": "confirmation.message",
+          "visibility_binding": null,
+          "children": [],
+          "style": "text",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_0",
+          "name": "button_0",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            240.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Confirmer",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 0,
+          "action": "Confirm",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        },
+        {
+          "id": "button_1",
+          "name": "button_1",
+          "kind": "Button",
+          "rect": [
+            100.0,
+            330.0,
+            420.0,
+            64.0
+          ],
+          "anchors": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "text": "Annuler",
+          "asset": null,
+          "font": null,
+          "font_size": 28.0,
+          "normal": [
+            0.13,
+            0.14,
+            0.17,
+            1.0
+          ],
+          "hover": [
+            0.0,
+            0.4,
+            0.72,
+            1.0
+          ],
+          "pressed": [
+            0.0,
+            0.27,
+            0.5,
+            1.0
+          ],
+          "disabled": [
+            0.12,
+            0.12,
+            0.12,
+            0.6
+          ],
+          "foreground": [
+            0.95,
+            0.95,
+            0.95,
+            1.0
+          ],
+          "visible": true,
+          "enabled": true,
+          "locked": false,
+          "focus_order": 1,
+          "action": "Back",
+          "binding": null,
+          "visibility_binding": null,
+          "children": [],
+          "style": "button",
+          "overrides": {
+            "normal": null,
+            "hover": null,
+            "pressed": null,
+            "disabled": null,
+            "foreground": null,
+            "font": null,
+            "font_size": null,
+            "radius": null,
+            "border_width": null,
+            "border_color": null,
+            "focus": null,
+            "selected": null,
+            "image": null,
+            "layout": null,
+            "opacity": null,
+            "shadow": null,
+            "scrollbar": {
+              "track": null,
+              "thumb": null,
+              "hover": null,
+              "pressed": null,
+              "width": null,
+              "radius": null
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          },
+          "component": null,
+          "inherit_text": false,
+          "inherit_action": false,
+          "inherit_binding": false,
+          "layout_options": {
+            "padding": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "gap": 12.0,
+            "columns": 2,
+            "image_fit": "Contain",
+            "slice": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "text_align": "Left",
+            "text_wrap": true,
+            "auto_height": false
+          },
+          "list": {
+            "template": null,
+            "columns": 1,
+            "rows": 5,
+            "slots": 5,
+            "order": "Rows"
+          },
+          "appearance": {
+            "radius": 0.0,
+            "border_width": 0.0,
+            "border_color": [
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "focus": null,
+            "selected": null,
+            "opacity": 1.0,
+            "shadow": {
+              "offset": [
+                6.0,
+                6.0
+              ],
+              "blur": 8.0,
+              "color": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "scrollbar": {
+              "track": [
+                0.05,
+                0.06,
+                0.07,
+                0.65
+              ],
+              "thumb": [
+                0.55,
+                0.6,
+                0.65,
+                0.85
+              ],
+              "hover": [
+                0.7,
+                0.75,
+                0.8,
+                1.0
+              ],
+              "pressed": [
+                0.85,
+                0.9,
+                0.95,
+                1.0
+              ],
+              "width": 12.0,
+              "radius": 4.0
+            },
+            "text_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            },
+            "image_states": {
+              "hover": null,
+              "pressed": null,
+              "disabled": null,
+              "focus": null,
+              "selected": null
+            }
+          }
+        }
+      ],
+      "graphs": [],
+      "role": "Confirm"
+    }
+  ],
+  "styles": {
+    "button": {
+      "normal": [
+        0.13,
+        0.14,
+        0.17,
+        1.0
+      ],
+      "hover": [
+        0.06,
+        0.42,
+        0.72,
+        1.0
+      ],
+      "pressed": [
+        0.048,
+        0.336,
+        0.57600003,
+        0.8
+      ],
+      "disabled": null,
+      "foreground": [
+        0.95,
+        0.95,
+        0.97,
+        1.0
+      ],
+      "font": null,
+      "font_size": null,
+      "radius": 6.0,
+      "border_width": null,
+      "border_color": null,
+      "focus": [
+        0.06,
+        0.42,
+        0.72,
+        1.0
+      ],
+      "selected": [
+        0.06,
+        0.42,
+        0.72,
+        1.0
+      ],
+      "image": null,
+      "layout": null,
+      "opacity": null,
+      "shadow": null,
+      "scrollbar": {
+        "track": null,
+        "thumb": null,
+        "hover": null,
+        "pressed": null,
+        "width": null,
+        "radius": null
+      },
+      "text_states": {
+        "hover": null,
+        "pressed": null,
+        "disabled": null,
+        "focus": null,
+        "selected": null
+      },
+      "image_states": {
+        "hover": null,
+        "pressed": null,
+        "disabled": null,
+        "focus": null,
+        "selected": null
+      }
+    },
+    "panel": {
+      "normal": [
+        0.13,
+        0.14,
+        0.17,
+        1.0
+      ],
+      "hover": null,
+      "pressed": null,
+      "disabled": null,
+      "foreground": [
+        0.95,
+        0.95,
+        0.97,
+        1.0
+      ],
+      "font": null,
+      "font_size": null,
+      "radius": null,
+      "border_width": null,
+      "border_color": null,
+      "focus": null,
+      "selected": null,
+      "image": null,
+      "layout": null,
+      "opacity": null,
+      "shadow": null,
+      "scrollbar": {
+        "track": null,
+        "thumb": null,
+        "hover": null,
+        "pressed": null,
+        "width": null,
+        "radius": null
+      },
+      "text_states": {
+        "hover": null,
+        "pressed": null,
+        "disabled": null,
+        "focus": null,
+        "selected": null
+      },
+      "image_states": {
+        "hover": null,
+        "pressed": null,
+        "disabled": null,
+        "focus": null,
+        "selected": null
+      }
+    },
+    "text": {
+      "normal": null,
+      "hover": null,
+      "pressed": null,
+      "disabled": null,
+      "foreground": [
+        0.95,
+        0.95,
+        0.97,
+        1.0
+      ],
+      "font": null,
+      "font_size": null,
+      "radius": null,
+      "border_width": null,
+      "border_color": null,
+      "focus": null,
+      "selected": null,
+      "image": null,
+      "layout": null,
+      "opacity": null,
+      "shadow": null,
+      "scrollbar": {
+        "track": null,
+        "thumb": null,
+        "hover": null,
+        "pressed": null,
+        "width": null,
+        "radius": null
+      },
+      "text_states": {
+        "hover": null,
+        "pressed": null,
+        "disabled": null,
+        "focus": null,
+        "selected": null
+      },
+      "image_states": {
+        "hover": null,
+        "pressed": null,
+        "disabled": null,
+        "focus": null,
+        "selected": null
+      }
+    }
+  },
+  "components": {},
+  "theme": "Sobre"
+}

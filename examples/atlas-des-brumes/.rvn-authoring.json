@@ -10862,7 +10862,8 @@
             2,
             3,
             4,
-            5
+            5,
+            43
           ]
         },
         "3": {
@@ -11629,6 +11630,16 @@
           "value_type": "int",
           "cardinality": "many",
           "default_value": null
+        },
+        "43": {
+          "id": 43,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -12051,7 +12062,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 23,
-      "next_pin_id": 43,
+      "next_pin_id": 44,
       "next_edge_id": 22
     },
     {
@@ -13151,7 +13162,8 @@
             2,
             3,
             4,
-            5
+            5,
+            116
           ]
         },
         "3": {
@@ -13190,7 +13202,8 @@
             7,
             8,
             9,
-            10
+            10,
+            117
           ]
         },
         "5": {
@@ -15290,6 +15303,26 @@
           "value_type": "string",
           "cardinality": "many",
           "default_value": null
+        },
+        "116": {
+          "id": 116,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "string",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "117": {
+          "id": 117,
+          "node": 4,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "string",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -15888,7 +15921,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 55,
-      "next_pin_id": 116,
+      "next_pin_id": 118,
       "next_edge_id": 54
     },
     {
@@ -16967,7 +17000,8 @@
             2,
             3,
             4,
-            5
+            5,
+            239
           ]
         },
         "3": {
@@ -21235,6 +21269,16 @@
           "value_type": "int",
           "cardinality": "many",
           "default_value": null
+        },
+        "239": {
+          "id": 239,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -21897,7 +21941,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 71,
-      "next_pin_id": 239,
+      "next_pin_id": 240,
       "next_edge_id": 70
     },
     {
@@ -21948,7 +21992,8 @@
             2,
             3,
             4,
-            5
+            5,
+            1091
           ]
         },
         "3": {
@@ -21995,7 +22040,8 @@
             11,
             12,
             13,
-            14
+            14,
+            1092
           ]
         },
         "5": {
@@ -22042,7 +22088,8 @@
             20,
             21,
             22,
-            23
+            23,
+            1093
           ]
         },
         "7": {
@@ -42366,6 +42413,42 @@
           "value_type": "int",
           "cardinality": "many",
           "default_value": null
+        },
+        "1091": {
+          "id": 1091,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": {
+            "list": "any"
+          },
+          "cardinality": "many",
+          "default_value": null
+        },
+        "1092": {
+          "id": 1092,
+          "node": 4,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": {
+            "list": "any"
+          },
+          "cardinality": "many",
+          "default_value": null
+        },
+        "1093": {
+          "id": 1093,
+          "node": 6,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": {
+            "list": "any"
+          },
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -44730,7 +44813,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 407,
-      "next_pin_id": 1091,
+      "next_pin_id": 1094,
       "next_edge_id": 406
     },
     {
@@ -48965,7 +49048,8 @@
             2,
             3,
             4,
-            5
+            5,
+            453
           ]
         },
         "3": {
@@ -49037,7 +49121,8 @@
             11,
             12,
             13,
-            14
+            14,
+            454
           ]
         },
         "7": {
@@ -49109,7 +49194,8 @@
             20,
             21,
             22,
-            23
+            23,
+            455
           ]
         },
         "11": {
@@ -49181,7 +49267,8 @@
             29,
             30,
             31,
-            32
+            32,
+            456
           ]
         },
         "15": {
@@ -49230,7 +49317,8 @@
             36,
             37,
             38,
-            39
+            39,
+            457
           ]
         },
         "17": {
@@ -49318,7 +49406,8 @@
             49,
             50,
             51,
-            52
+            52,
+            458
           ]
         },
         "22": {
@@ -49390,7 +49479,8 @@
             58,
             59,
             60,
-            61
+            61,
+            459
           ]
         },
         "26": {
@@ -49495,7 +49585,8 @@
             71,
             72,
             73,
-            74
+            74,
+            460
           ]
         },
         "32": {
@@ -49600,7 +49691,8 @@
             84,
             85,
             86,
-            87
+            87,
+            461
           ]
         },
         "38": {
@@ -49705,7 +49797,8 @@
             97,
             98,
             99,
-            100
+            100,
+            462
           ]
         },
         "44": {
@@ -49777,7 +49870,8 @@
             106,
             107,
             108,
-            109
+            109,
+            463
           ]
         },
         "48": {
@@ -49824,7 +49918,8 @@
             115,
             116,
             117,
-            118
+            118,
+            464
           ]
         },
         "50": {
@@ -50038,7 +50133,8 @@
             152,
             153,
             154,
-            155
+            155,
+            465
           ]
         },
         "60": {
@@ -51220,7 +51316,8 @@
             326,
             327,
             328,
-            329
+            329,
+            466
           ]
         },
         "119": {
@@ -57275,6 +57372,150 @@
           "value_type": "string",
           "cardinality": "many",
           "default_value": null
+        },
+        "453": {
+          "id": 453,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "454": {
+          "id": 454,
+          "node": 6,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "455": {
+          "id": 455,
+          "node": 10,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "456": {
+          "id": 456,
+          "node": 14,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "457": {
+          "id": 457,
+          "node": 16,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "458": {
+          "id": 458,
+          "node": 21,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "459": {
+          "id": 459,
+          "node": 25,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "460": {
+          "id": 460,
+          "node": 31,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "461": {
+          "id": 461,
+          "node": 37,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "462": {
+          "id": 462,
+          "node": 43,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "bool",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "463": {
+          "id": 463,
+          "node": 47,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": {
+            "list": "any"
+          },
+          "cardinality": "many",
+          "default_value": null
+        },
+        "464": {
+          "id": 464,
+          "node": 49,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": {
+            "list": "any"
+          },
+          "cardinality": "many",
+          "default_value": null
+        },
+        "465": {
+          "id": 465,
+          "node": 59,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "float",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "466": {
+          "id": 466,
+          "node": 118,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -58562,7 +58803,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 176,
-      "next_pin_id": 453,
+      "next_pin_id": 467,
       "next_edge_id": 175
     },
     {
@@ -63527,7 +63768,8 @@
             2,
             3,
             4,
-            5
+            5,
+            727
           ]
         },
         "3": {
@@ -63599,7 +63841,8 @@
             11,
             12,
             13,
-            14
+            14,
+            728
           ]
         },
         "7": {
@@ -63671,7 +63914,8 @@
             20,
             21,
             22,
-            23
+            23,
+            729
           ]
         },
         "11": {
@@ -64096,7 +64340,8 @@
             90,
             91,
             92,
-            93
+            93,
+            730
           ]
         },
         "29": {
@@ -64184,7 +64429,8 @@
             103,
             104,
             105,
-            106
+            106,
+            731
           ]
         },
         "34": {
@@ -64256,7 +64502,8 @@
             112,
             113,
             114,
-            115
+            115,
+            732
           ]
         },
         "38": {
@@ -64427,7 +64674,8 @@
             133,
             134,
             135,
-            136
+            136,
+            733
           ]
         },
         "48": {
@@ -64598,7 +64846,8 @@
             154,
             155,
             156,
-            157
+            157,
+            734
           ]
         },
         "58": {
@@ -64670,7 +64919,8 @@
             163,
             164,
             165,
-            166
+            166,
+            735
           ]
         },
         "62": {
@@ -65147,7 +65397,8 @@
             230,
             231,
             232,
-            233
+            233,
+            736
           ]
         },
         "87": {
@@ -66475,7 +66726,8 @@
             396,
             397,
             398,
-            399
+            399,
+            737
           ]
         },
         "160": {
@@ -67097,7 +67349,8 @@
             486,
             487,
             488,
-            489
+            489,
+            738
           ]
         },
         "188": {
@@ -67303,7 +67556,8 @@
             513,
             514,
             515,
-            516
+            516,
+            739
           ]
         },
         "200": {
@@ -67375,7 +67629,8 @@
             522,
             523,
             524,
-            525
+            525,
+            740
           ]
         },
         "204": {
@@ -67607,7 +67862,8 @@
             550,
             551,
             552,
-            553
+            553,
+            741
           ]
         },
         "217": {
@@ -77006,6 +77262,158 @@
           "value_type": "int",
           "cardinality": "many",
           "default_value": null
+        },
+        "727": {
+          "id": 727,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "728": {
+          "id": 728,
+          "node": 6,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "729": {
+          "id": 729,
+          "node": 10,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "730": {
+          "id": 730,
+          "node": 28,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "731": {
+          "id": 731,
+          "node": 33,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "732": {
+          "id": 732,
+          "node": 37,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "733": {
+          "id": 733,
+          "node": 47,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "734": {
+          "id": 734,
+          "node": 57,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "bool",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "735": {
+          "id": 735,
+          "node": 61,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": {
+            "list": "any"
+          },
+          "cardinality": "many",
+          "default_value": null
+        },
+        "736": {
+          "id": 736,
+          "node": 86,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "737": {
+          "id": 737,
+          "node": 159,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "738": {
+          "id": 738,
+          "node": 187,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "739": {
+          "id": 739,
+          "node": 199,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "740": {
+          "id": 740,
+          "node": 203,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "741": {
+          "id": 741,
+          "node": 216,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -78923,7 +79331,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 304,
-      "next_pin_id": 727,
+      "next_pin_id": 742,
       "next_edge_id": 303
     },
     {
@@ -78974,7 +79382,8 @@
             2,
             3,
             4,
-            5
+            5,
+            167
           ]
         },
         "3": {
@@ -79414,7 +79823,8 @@
             57,
             58,
             59,
-            60
+            60,
+            168
           ]
         },
         "28": {
@@ -79508,7 +79918,8 @@
             67,
             68,
             69,
-            70
+            70,
+            169
           ]
         },
         "32": {
@@ -79613,7 +80024,8 @@
             80,
             81,
             82,
-            83
+            83,
+            170
           ]
         },
         "38": {
@@ -79928,7 +80340,8 @@
             119,
             120,
             121,
-            122
+            122,
+            171
           ]
         },
         "56": {
@@ -82056,6 +82469,56 @@
           "value_type": "string",
           "cardinality": "many",
           "default_value": null
+        },
+        "167": {
+          "id": 167,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "168": {
+          "id": 168,
+          "node": 27,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "169": {
+          "id": 169,
+          "node": 31,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "170": {
+          "id": 170,
+          "node": 37,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "171": {
+          "id": 171,
+          "node": 55,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -82800,7 +83263,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 81,
-      "next_pin_id": 167,
+      "next_pin_id": 172,
       "next_edge_id": 80
     },
     {
@@ -82852,7 +83315,8 @@
             2,
             3,
             4,
-            5
+            5,
+            527
           ]
         },
         "3": {
@@ -82924,7 +83388,8 @@
             11,
             12,
             13,
-            14
+            14,
+            528
           ]
         },
         "7": {
@@ -84008,7 +84473,8 @@
             168,
             169,
             170,
-            171
+            171,
+            529
           ]
         },
         "57": {
@@ -84129,7 +84595,8 @@
             185,
             186,
             187,
-            188
+            188,
+            530
           ]
         },
         "64": {
@@ -84361,7 +84828,8 @@
             220,
             221,
             222,
-            223
+            223,
+            531
           ]
         },
         "76": {
@@ -85222,7 +85690,8 @@
             322,
             323,
             324,
-            325
+            325,
+            532
           ]
         },
         "121": {
@@ -85675,7 +86144,8 @@
             385,
             386,
             387,
-            388
+            388,
+            533
           ]
         },
         "145": {
@@ -92616,6 +93086,80 @@
           "value_type": "string",
           "cardinality": "many",
           "default_value": null
+        },
+        "527": {
+          "id": 527,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "528": {
+          "id": 528,
+          "node": 6,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "529": {
+          "id": 529,
+          "node": 56,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "530": {
+          "id": 530,
+          "node": 63,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": {
+            "list": "any"
+          },
+          "cardinality": "many",
+          "default_value": null
+        },
+        "531": {
+          "id": 531,
+          "node": 75,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "532": {
+          "id": 532,
+          "node": 120,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": {
+            "list": "int"
+          },
+          "cardinality": "many",
+          "default_value": null
+        },
+        "533": {
+          "id": 533,
+          "node": 144,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -94046,7 +94590,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 211,
-      "next_pin_id": 527,
+      "next_pin_id": 534,
       "next_edge_id": 210
     },
     {
@@ -94386,7 +94930,8 @@
             88,
             89,
             90,
-            91
+            91,
+            298
           ]
         },
         "20": {
@@ -94491,7 +95036,8 @@
             101,
             102,
             103,
-            104
+            104,
+            299
           ]
         },
         "26": {
@@ -94639,7 +95185,8 @@
             120,
             121,
             122,
-            123
+            123,
+            300
           ]
         },
         "34": {
@@ -94929,7 +95476,8 @@
             176,
             177,
             178,
-            179
+            179,
+            301
           ]
         },
         "48": {
@@ -98428,6 +98976,46 @@
           "value_type": "string",
           "cardinality": "many",
           "default_value": null
+        },
+        "298": {
+          "id": 298,
+          "node": 19,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "float",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "299": {
+          "id": 299,
+          "node": 25,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "300": {
+          "id": 300,
+          "node": 33,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "301": {
+          "id": 301,
+          "node": 47,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -99173,7 +99761,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 82,
-      "next_pin_id": 298,
+      "next_pin_id": 302,
       "next_edge_id": 93
     },
     {
@@ -99221,7 +99809,8 @@
             2,
             3,
             4,
-            5
+            5,
+            708
           ]
         },
         "3": {
@@ -99268,7 +99857,8 @@
             7,
             8,
             9,
-            10
+            10,
+            709
           ]
         },
         "5": {
@@ -99315,7 +99905,8 @@
             12,
             13,
             14,
-            15
+            15,
+            710
           ]
         },
         "7": {
@@ -99447,7 +100038,8 @@
             27,
             28,
             29,
-            30
+            30,
+            711
           ]
         },
         "14": {
@@ -105909,10 +106501,7 @@
           "direction": "input",
           "value_type": "bool",
           "cardinality": "one",
-          "default_value": {
-            "type": "bool",
-            "value": false
-          }
+          "default_value": null
         },
         "237": {
           "id": 237,
@@ -105952,10 +106541,7 @@
           "direction": "input",
           "value_type": "bool",
           "cardinality": "one",
-          "default_value": {
-            "type": "bool",
-            "value": false
-          }
+          "default_value": null
         },
         "241": {
           "id": 241,
@@ -105965,10 +106551,7 @@
           "direction": "input",
           "value_type": "bool",
           "cardinality": "one",
-          "default_value": {
-            "type": "bool",
-            "value": false
-          }
+          "default_value": null
         },
         "242": {
           "id": 242,
@@ -110084,10 +110667,7 @@
           "direction": "input",
           "value_type": "bool",
           "cardinality": "one",
-          "default_value": {
-            "type": "bool",
-            "value": false
-          }
+          "default_value": null
         },
         "580": {
           "id": 580,
@@ -110570,10 +111150,7 @@
           "direction": "input",
           "value_type": "bool",
           "cardinality": "one",
-          "default_value": {
-            "type": "bool",
-            "value": false
-          }
+          "default_value": null
         },
         "626": {
           "id": 626,
@@ -111470,6 +112047,46 @@
           "label": "",
           "direction": "output",
           "value_type": "string",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "708": {
+          "id": 708,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "709": {
+          "id": 709,
+          "node": 4,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "710": {
+          "id": 710,
+          "node": 6,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "bool",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "711": {
+          "id": 711,
+          "node": 13,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
           "cardinality": "many",
           "default_value": null
         }
@@ -112677,7 +113294,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 178,
-      "next_pin_id": 708,
+      "next_pin_id": 712,
       "next_edge_id": 177
     },
     {
@@ -112727,7 +113344,8 @@
             2,
             3,
             4,
-            5
+            5,
+            194
           ]
         },
         "3": {
@@ -112807,7 +113425,8 @@
             11,
             12,
             13,
-            14
+            14,
+            195
           ]
         },
         "7": {
@@ -116344,6 +116963,26 @@
           "value_type": "string",
           "cardinality": "many",
           "default_value": null
+        },
+        "194": {
+          "id": 194,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "195": {
+          "id": 195,
+          "node": 6,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -117091,7 +117730,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 88,
-      "next_pin_id": 194,
+      "next_pin_id": 196,
       "next_edge_id": 87
     },
     {
@@ -120680,7 +121319,8 @@
             2,
             3,
             4,
-            5
+            5,
+            115
           ]
         },
         "3": {
@@ -122761,6 +123401,16 @@
           "value_type": "string",
           "cardinality": "many",
           "default_value": null
+        },
+        "115": {
+          "id": 115,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "float",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -123330,7 +123980,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 54,
-      "next_pin_id": 115,
+      "next_pin_id": 116,
       "next_edge_id": 53
     },
     {
@@ -123380,7 +124030,8 @@
             2,
             3,
             4,
-            5
+            5,
+            134
           ]
         },
         "3": {
@@ -123600,7 +124251,8 @@
             31,
             32,
             33,
-            34
+            34,
+            135
           ]
         },
         "16": {
@@ -123719,7 +124371,8 @@
             45,
             46,
             47,
-            48
+            48,
+            136
           ]
         },
         "22": {
@@ -125847,6 +126500,36 @@
           "value_type": "string",
           "cardinality": "many",
           "default_value": null
+        },
+        "134": {
+          "id": 134,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "135": {
+          "id": 135,
+          "node": 15,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "136": {
+          "id": 136,
+          "node": 21,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -126487,7 +127170,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 65,
-      "next_pin_id": 134,
+      "next_pin_id": 137,
       "next_edge_id": 64
     },
     {
@@ -126803,7 +127486,8 @@
             36,
             37,
             38,
-            39
+            39,
+            304
           ]
         },
         "19": {
@@ -126922,7 +127606,8 @@
             50,
             51,
             52,
-            53
+            53,
+            305
           ]
         },
         "25": {
@@ -132140,6 +132825,26 @@
           "value_type": "int",
           "cardinality": "many",
           "default_value": null
+        },
+        "304": {
+          "id": 304,
+          "node": 18,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "305": {
+          "id": 305,
+          "node": 24,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -133167,7 +133872,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 144,
-      "next_pin_id": 304,
+      "next_pin_id": 306,
       "next_edge_id": 143
     },
     {
@@ -133217,7 +133922,8 @@
             2,
             3,
             4,
-            5
+            5,
+            119
           ]
         },
         "3": {
@@ -135336,6 +136042,16 @@
           "value_type": "string",
           "cardinality": "many",
           "default_value": null
+        },
+        "119": {
+          "id": 119,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -135895,7 +136611,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 52,
-      "next_pin_id": 119,
+      "next_pin_id": 120,
       "next_edge_id": 51
     },
     {
@@ -140894,7 +141610,8 @@
             2,
             3,
             4,
-            5
+            5,
+            117
           ]
         },
         "3": {
@@ -143050,6 +143767,16 @@
           "value_type": "string",
           "cardinality": "many",
           "default_value": null
+        },
+        "117": {
+          "id": 117,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -143634,7 +144361,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 57,
-      "next_pin_id": 117,
+      "next_pin_id": 118,
       "next_edge_id": 56
     },
     {
@@ -143684,7 +144411,8 @@
             2,
             3,
             4,
-            5
+            5,
+            662
           ]
         },
         "3": {
@@ -144577,7 +145305,8 @@
             114,
             115,
             116,
-            117
+            117,
+            663
           ]
         },
         "53": {
@@ -144684,7 +145413,8 @@
             129,
             130,
             131,
-            132
+            132,
+            664
           ]
         },
         "59": {
@@ -144756,7 +145486,8 @@
             138,
             139,
             140,
-            141
+            141,
+            665
           ]
         },
         "63": {
@@ -145855,7 +146586,8 @@
             275,
             276,
             277,
-            278
+            278,
+            666
           ]
         },
         "123": {
@@ -155988,6 +156720,56 @@
           "value_type": "string",
           "cardinality": "many",
           "default_value": null
+        },
+        "662": {
+          "id": 662,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "663": {
+          "id": 663,
+          "node": 52,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "664": {
+          "id": 664,
+          "node": 58,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "665": {
+          "id": 665,
+          "node": 62,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "666": {
+          "id": 666,
+          "node": 122,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -157849,7 +158631,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 306,
-      "next_pin_id": 662,
+      "next_pin_id": 667,
       "next_edge_id": 305
     },
     {
@@ -157901,7 +158683,8 @@
             2,
             3,
             4,
-            5
+            5,
+            299
           ]
         },
         "3": {
@@ -159000,7 +159783,8 @@
             162,
             163,
             164,
-            165
+            165,
+            300
           ]
         },
         "54": {
@@ -159121,7 +159905,8 @@
             179,
             180,
             181,
-            182
+            182,
+            301
           ]
         },
         "61": {
@@ -159353,7 +160138,8 @@
             214,
             215,
             216,
-            217
+            217,
+            302
           ]
         },
         "73": {
@@ -163400,6 +164186,48 @@
           "value_type": "string",
           "cardinality": "many",
           "default_value": null
+        },
+        "299": {
+          "id": 299,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "300": {
+          "id": 300,
+          "node": 53,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "301": {
+          "id": 301,
+          "node": 60,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": {
+            "list": "any"
+          },
+          "cardinality": "many",
+          "default_value": null
+        },
+        "302": {
+          "id": 302,
+          "node": 72,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -164316,7 +165144,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 115,
-      "next_pin_id": 299,
+      "next_pin_id": 303,
       "next_edge_id": 114
     },
     {
@@ -178053,7 +178881,8 @@
             2,
             3,
             4,
-            5
+            5,
+            730
           ]
         },
         "3": {
@@ -178100,7 +178929,8 @@
             11,
             12,
             13,
-            14
+            14,
+            731
           ]
         },
         "5": {
@@ -178147,7 +178977,8 @@
             20,
             21,
             22,
-            23
+            23,
+            732
           ]
         },
         "7": {
@@ -178194,7 +179025,8 @@
             29,
             30,
             31,
-            32
+            32,
+            733
           ]
         },
         "9": {
@@ -178874,7 +179706,8 @@
             151,
             152,
             153,
-            154
+            154,
+            734
           ]
         },
         "41": {
@@ -178921,7 +179754,8 @@
             156,
             157,
             158,
-            159
+            159,
+            735
           ]
         },
         "43": {
@@ -179009,7 +179843,8 @@
             169,
             170,
             171,
-            172
+            172,
+            736
           ]
         },
         "48": {
@@ -179114,7 +179949,8 @@
             182,
             183,
             184,
-            185
+            185,
+            737
           ]
         },
         "54": {
@@ -180058,7 +180894,8 @@
             293,
             294,
             295,
-            296
+            296,
+            738
           ]
         },
         "106": {
@@ -180163,7 +181000,8 @@
             306,
             307,
             308,
-            309
+            309,
+            739
           ]
         },
         "112": {
@@ -180251,7 +181089,8 @@
             319,
             320,
             321,
-            322
+            322,
+            740
           ]
         },
         "117": {
@@ -191575,6 +192414,124 @@
           "value_type": "string",
           "cardinality": "many",
           "default_value": null
+        },
+        "730": {
+          "id": 730,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": {
+            "list": "any"
+          },
+          "cardinality": "many",
+          "default_value": null
+        },
+        "731": {
+          "id": 731,
+          "node": 4,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": {
+            "list": "any"
+          },
+          "cardinality": "many",
+          "default_value": null
+        },
+        "732": {
+          "id": 732,
+          "node": 6,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": {
+            "list": "any"
+          },
+          "cardinality": "many",
+          "default_value": null
+        },
+        "733": {
+          "id": 733,
+          "node": 8,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "734": {
+          "id": 734,
+          "node": 40,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "735": {
+          "id": 735,
+          "node": 42,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "736": {
+          "id": 736,
+          "node": 47,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "737": {
+          "id": 737,
+          "node": 53,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": {
+            "list": "any"
+          },
+          "cardinality": "many",
+          "default_value": null
+        },
+        "738": {
+          "id": 738,
+          "node": 105,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "739": {
+          "id": 739,
+          "node": 111,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "740": {
+          "id": 740,
+          "node": 116,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -193533,7 +194490,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 311,
-      "next_pin_id": 730,
+      "next_pin_id": 741,
       "next_edge_id": 310
     },
     {
@@ -193584,7 +194541,8 @@
             2,
             3,
             4,
-            5
+            5,
+            82
           ]
         },
         "3": {
@@ -193656,7 +194614,8 @@
             11,
             12,
             13,
-            14
+            14,
+            83
           ]
         },
         "7": {
@@ -195073,6 +196032,26 @@
           "value_type": "string",
           "cardinality": "many",
           "default_value": null
+        },
+        "82": {
+          "id": 82,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "83": {
+          "id": 83,
+          "node": 6,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -195583,7 +196562,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 39,
-      "next_pin_id": 82,
+      "next_pin_id": 84,
       "next_edge_id": 38
     },
     {
@@ -195633,7 +196612,8 @@
             2,
             3,
             4,
-            5
+            5,
+            483
           ]
         },
         "3": {
@@ -195705,7 +196685,8 @@
             11,
             12,
             13,
-            14
+            14,
+            484
           ]
         },
         "7": {
@@ -195777,7 +196758,8 @@
             20,
             21,
             22,
-            23
+            23,
+            485
           ]
         },
         "11": {
@@ -195899,7 +196881,8 @@
             38,
             39,
             40,
-            41
+            41,
+            486
           ]
         },
         "18": {
@@ -197086,7 +198069,8 @@
             190,
             191,
             192,
-            193
+            193,
+            487
           ]
         },
         "80": {
@@ -197579,7 +198563,8 @@
             252,
             253,
             254,
-            255
+            255,
+            488
           ]
         },
         "106": {
@@ -204532,6 +205517,66 @@
           "value_type": "int",
           "cardinality": "many",
           "default_value": null
+        },
+        "483": {
+          "id": 483,
+          "node": 2,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "484": {
+          "id": 484,
+          "node": 6,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "485": {
+          "id": 485,
+          "node": 10,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "bool",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "486": {
+          "id": 486,
+          "node": 17,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "487": {
+          "id": 487,
+          "node": 79,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "488": {
+          "id": 488,
+          "node": 105,
+          "key": "value_out",
+          "label": "",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -205926,7 +206971,7 @@
         "lantern": "Lanterne"
       },
       "next_node_id": 211,
-      "next_pin_id": 483,
+      "next_pin_id": 489,
       "next_edge_id": 210
     },
     {
@@ -211110,10 +212155,7 @@
           "direction": "input",
           "value_type": "bool",
           "cardinality": "one",
-          "default_value": {
-            "type": "bool",
-            "value": false
-          }
+          "default_value": null
         },
         "59": {
           "id": 59,
@@ -211243,10 +212285,7 @@
           "direction": "input",
           "value_type": "bool",
           "cardinality": "one",
-          "default_value": {
-            "type": "bool",
-            "value": false
-          }
+          "default_value": null
         },
         "72": {
           "id": 72,
@@ -211376,10 +212415,7 @@
           "direction": "input",
           "value_type": "bool",
           "cardinality": "one",
-          "default_value": {
-            "type": "bool",
-            "value": false
-          }
+          "default_value": null
         },
         "85": {
           "id": 85,
@@ -211509,10 +212545,7 @@
           "direction": "input",
           "value_type": "bool",
           "cardinality": "one",
-          "default_value": {
-            "type": "bool",
-            "value": false
-          }
+          "default_value": null
         },
         "98": {
           "id": 98,
@@ -211642,10 +212675,7 @@
           "direction": "input",
           "value_type": "bool",
           "cardinality": "one",
-          "default_value": {
-            "type": "bool",
-            "value": false
-          }
+          "default_value": null
         },
         "111": {
           "id": 111,
@@ -211775,10 +212805,7 @@
           "direction": "input",
           "value_type": "bool",
           "cardinality": "one",
-          "default_value": {
-            "type": "bool",
-            "value": false
-          }
+          "default_value": null
         },
         "124": {
           "id": 124,
@@ -211948,10 +212975,7 @@
           "direction": "input",
           "value_type": "bool",
           "cardinality": "one",
-          "default_value": {
-            "type": "bool",
-            "value": false
-          }
+          "default_value": null
         },
         "141": {
           "id": 141,
@@ -212081,10 +213105,7 @@
           "direction": "input",
           "value_type": "bool",
           "cardinality": "one",
-          "default_value": {
-            "type": "bool",
-            "value": false
-          }
+          "default_value": null
         },
         "154": {
           "id": 154,
@@ -212214,10 +213235,7 @@
           "direction": "input",
           "value_type": "bool",
           "cardinality": "one",
-          "default_value": {
-            "type": "bool",
-            "value": false
-          }
+          "default_value": null
         },
         "167": {
           "id": 167,
@@ -212347,10 +213365,7 @@
           "direction": "input",
           "value_type": "bool",
           "cardinality": "one",
-          "default_value": {
-            "type": "bool",
-            "value": false
-          }
+          "default_value": null
         },
         "180": {
           "id": 180,
@@ -212480,10 +213495,7 @@
           "direction": "input",
           "value_type": "bool",
           "cardinality": "one",
-          "default_value": {
-            "type": "bool",
-            "value": false
-          }
+          "default_value": null
         },
         "193": {
           "id": 193,
@@ -215168,7 +216180,7 @@
             },
             "option_1_condition": {
               "type": "string",
-              "value": "(atlas_gold >= 15)"
+              "value": ""
             },
             "option_2_condition": {
               "type": "string",
@@ -215748,6 +216760,57 @@
           },
           "pins": [
             227
+          ]
+        },
+        "82": {
+          "id": 82,
+          "kind": "math_greater_equal",
+          "position": [
+            4540.0,
+            6020.0
+          ],
+          "title_override": null,
+          "properties": {},
+          "pins": [
+            228,
+            229,
+            230
+          ]
+        },
+        "83": {
+          "id": 83,
+          "kind": "variable_get",
+          "position": [
+            4280.0,
+            6140.0
+          ],
+          "title_override": null,
+          "properties": {
+            "name": {
+              "type": "string",
+              "value": "atlas_gold"
+            }
+          },
+          "pins": [
+            231
+          ]
+        },
+        "84": {
+          "id": 84,
+          "kind": "literal",
+          "position": [
+            4280.0,
+            6320.0
+          ],
+          "title_override": null,
+          "properties": {
+            "value": {
+              "type": "int",
+              "value": 15
+            }
+          },
+          "pins": [
+            232
           ]
         }
       },
@@ -218175,6 +219238,56 @@
           "value_type": "label",
           "cardinality": "many",
           "default_value": null
+        },
+        "228": {
+          "id": 228,
+          "node": 82,
+          "key": "left",
+          "label": "A",
+          "direction": "input",
+          "value_type": "any",
+          "cardinality": "one",
+          "default_value": null
+        },
+        "229": {
+          "id": 229,
+          "node": 82,
+          "key": "right",
+          "label": "B",
+          "direction": "input",
+          "value_type": "any",
+          "cardinality": "one",
+          "default_value": null
+        },
+        "230": {
+          "id": 230,
+          "node": 82,
+          "key": "value",
+          "label": "Résultat",
+          "direction": "output",
+          "value_type": "bool",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "231": {
+          "id": 231,
+          "node": 83,
+          "key": "value",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "232": {
+          "id": 232,
+          "node": 84,
+          "key": "value",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -218577,6 +219690,21 @@
           "id": 80,
           "output": 227,
           "input": 210
+        },
+        "81": {
+          "id": 81,
+          "output": 231,
+          "input": 228
+        },
+        "82": {
+          "id": 82,
+          "output": 232,
+          "input": 229
+        },
+        "83": {
+          "id": 83,
+          "output": 230,
+          "input": 175
         }
       },
       "variables": {
@@ -218867,9 +219995,9 @@
         "keeper": "Maëlys",
         "lantern": "Lanterne"
       },
-      "next_node_id": 82,
-      "next_pin_id": 228,
-      "next_edge_id": 81
+      "next_node_id": 85,
+      "next_pin_id": 233,
+      "next_edge_id": 84
     },
     {
       "schema_version": 5,
@@ -219167,11 +220295,11 @@
           "properties": {
             "option_0_condition": {
               "type": "string",
-              "value": "(atlas_equipped == \"boussole\")"
+              "value": ""
             },
             "option_1_condition": {
               "type": "string",
-              "value": "(atlas_quantities[8] > 0)"
+              "value": ""
             },
             "option_2_condition": {
               "type": "string",
@@ -220340,6 +221468,141 @@
           },
           "pins": [
             208
+          ]
+        },
+        "79": {
+          "id": 79,
+          "kind": "math_equal",
+          "position": [
+            9340.0,
+            1040.0
+          ],
+          "title_override": null,
+          "properties": {},
+          "pins": [
+            209,
+            210,
+            211
+          ]
+        },
+        "80": {
+          "id": 80,
+          "kind": "variable_get",
+          "position": [
+            9080.0,
+            1160.0
+          ],
+          "title_override": null,
+          "properties": {
+            "name": {
+              "type": "string",
+              "value": "atlas_equipped"
+            }
+          },
+          "pins": [
+            212
+          ]
+        },
+        "81": {
+          "id": 81,
+          "kind": "literal",
+          "position": [
+            9080.0,
+            1340.0
+          ],
+          "title_override": null,
+          "properties": {
+            "value": {
+              "type": "string",
+              "value": "boussole"
+            }
+          },
+          "pins": [
+            213
+          ]
+        },
+        "82": {
+          "id": 82,
+          "kind": "math_greater",
+          "position": [
+            9340.0,
+            1220.0
+          ],
+          "title_override": null,
+          "properties": {},
+          "pins": [
+            214,
+            215,
+            216
+          ]
+        },
+        "83": {
+          "id": 83,
+          "kind": "index",
+          "position": [
+            9080.0,
+            1340.0
+          ],
+          "title_override": null,
+          "properties": {},
+          "pins": [
+            217,
+            218,
+            219
+          ]
+        },
+        "84": {
+          "id": 84,
+          "kind": "variable_get",
+          "position": [
+            8820.0,
+            1460.0
+          ],
+          "title_override": null,
+          "properties": {
+            "name": {
+              "type": "string",
+              "value": "atlas_quantities"
+            }
+          },
+          "pins": [
+            220
+          ]
+        },
+        "85": {
+          "id": 85,
+          "kind": "literal",
+          "position": [
+            8820.0,
+            1640.0
+          ],
+          "title_override": null,
+          "properties": {
+            "value": {
+              "type": "int",
+              "value": 8
+            }
+          },
+          "pins": [
+            221
+          ]
+        },
+        "86": {
+          "id": 86,
+          "kind": "literal",
+          "position": [
+            9080.0,
+            1520.0
+          ],
+          "title_override": null,
+          "properties": {
+            "value": {
+              "type": "int",
+              "value": 0
+            }
+          },
+          "pins": [
+            222
           ]
         }
       },
@@ -222571,6 +223834,148 @@
           "value_type": "label",
           "cardinality": "many",
           "default_value": null
+        },
+        "209": {
+          "id": 209,
+          "node": 79,
+          "key": "left",
+          "label": "A",
+          "direction": "input",
+          "value_type": "any",
+          "cardinality": "one",
+          "default_value": null
+        },
+        "210": {
+          "id": 210,
+          "node": 79,
+          "key": "right",
+          "label": "B",
+          "direction": "input",
+          "value_type": "any",
+          "cardinality": "one",
+          "default_value": null
+        },
+        "211": {
+          "id": 211,
+          "node": 79,
+          "key": "value",
+          "label": "Résultat",
+          "direction": "output",
+          "value_type": "bool",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "212": {
+          "id": 212,
+          "node": 80,
+          "key": "value",
+          "label": "",
+          "direction": "output",
+          "value_type": "string",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "213": {
+          "id": 213,
+          "node": 81,
+          "key": "value",
+          "label": "",
+          "direction": "output",
+          "value_type": "string",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "214": {
+          "id": 214,
+          "node": 82,
+          "key": "left",
+          "label": "A",
+          "direction": "input",
+          "value_type": "any",
+          "cardinality": "one",
+          "default_value": null
+        },
+        "215": {
+          "id": 215,
+          "node": 82,
+          "key": "right",
+          "label": "B",
+          "direction": "input",
+          "value_type": "any",
+          "cardinality": "one",
+          "default_value": null
+        },
+        "216": {
+          "id": 216,
+          "node": 82,
+          "key": "value",
+          "label": "Résultat",
+          "direction": "output",
+          "value_type": "bool",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "217": {
+          "id": 217,
+          "node": 83,
+          "key": "target",
+          "label": "Liste / texte",
+          "direction": "input",
+          "value_type": "any",
+          "cardinality": "one",
+          "default_value": null
+        },
+        "218": {
+          "id": 218,
+          "node": 83,
+          "key": "index",
+          "label": "Index / clé",
+          "direction": "input",
+          "value_type": "index_key",
+          "cardinality": "one",
+          "default_value": null
+        },
+        "219": {
+          "id": 219,
+          "node": 83,
+          "key": "value",
+          "label": "Valeur",
+          "direction": "output",
+          "value_type": "any",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "220": {
+          "id": 220,
+          "node": 84,
+          "key": "value",
+          "label": "",
+          "direction": "output",
+          "value_type": {
+            "list": "int"
+          },
+          "cardinality": "many",
+          "default_value": null
+        },
+        "221": {
+          "id": 221,
+          "node": 85,
+          "key": "value",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "222": {
+          "id": 222,
+          "node": 86,
+          "key": "value",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -222958,6 +224363,46 @@
           "id": 77,
           "output": 208,
           "input": 202
+        },
+        "78": {
+          "id": 78,
+          "output": 212,
+          "input": 209
+        },
+        "79": {
+          "id": 79,
+          "output": 213,
+          "input": 210
+        },
+        "80": {
+          "id": 80,
+          "output": 211,
+          "input": 48
+        },
+        "81": {
+          "id": 81,
+          "output": 220,
+          "input": 217
+        },
+        "82": {
+          "id": 82,
+          "output": 221,
+          "input": 218
+        },
+        "83": {
+          "id": 83,
+          "output": 219,
+          "input": 214
+        },
+        "84": {
+          "id": 84,
+          "output": 222,
+          "input": 215
+        },
+        "85": {
+          "id": 85,
+          "output": 216,
+          "input": 66
         }
       },
       "variables": {
@@ -223248,9 +224693,9 @@
         "keeper": "Maëlys",
         "lantern": "Lanterne"
       },
-      "next_node_id": 79,
-      "next_pin_id": 209,
-      "next_edge_id": 78
+      "next_node_id": 87,
+      "next_pin_id": 223,
+      "next_edge_id": 86
     },
     {
       "schema_version": 5,
@@ -231365,11 +232810,11 @@
           "properties": {
             "option_0_condition": {
               "type": "string",
-              "value": "(atlas_keeper_trust >= 2)"
+              "value": ""
             },
             "option_1_condition": {
               "type": "string",
-              "value": "atlas_melody_played"
+              "value": ""
             },
             "option_2_condition": {
               "type": "string",
@@ -231714,6 +233159,75 @@
           },
           "pins": [
             77
+          ]
+        },
+        "35": {
+          "id": 35,
+          "kind": "math_greater_equal",
+          "position": [
+            7420.0,
+            1040.0
+          ],
+          "title_override": null,
+          "properties": {},
+          "pins": [
+            78,
+            79,
+            80
+          ]
+        },
+        "36": {
+          "id": 36,
+          "kind": "variable_get",
+          "position": [
+            7160.0,
+            1160.0
+          ],
+          "title_override": null,
+          "properties": {
+            "name": {
+              "type": "string",
+              "value": "atlas_keeper_trust"
+            }
+          },
+          "pins": [
+            81
+          ]
+        },
+        "37": {
+          "id": 37,
+          "kind": "literal",
+          "position": [
+            7160.0,
+            1340.0
+          ],
+          "title_override": null,
+          "properties": {
+            "value": {
+              "type": "int",
+              "value": 2
+            }
+          },
+          "pins": [
+            82
+          ]
+        },
+        "38": {
+          "id": 38,
+          "kind": "variable_get",
+          "position": [
+            7420.0,
+            1220.0
+          ],
+          "title_override": null,
+          "properties": {
+            "name": {
+              "type": "string",
+              "value": "atlas_melody_played"
+            }
+          },
+          "pins": [
+            83
           ]
         }
       },
@@ -232518,6 +234032,66 @@
           "value_type": "label",
           "cardinality": "many",
           "default_value": null
+        },
+        "78": {
+          "id": 78,
+          "node": 35,
+          "key": "left",
+          "label": "A",
+          "direction": "input",
+          "value_type": "any",
+          "cardinality": "one",
+          "default_value": null
+        },
+        "79": {
+          "id": 79,
+          "node": 35,
+          "key": "right",
+          "label": "B",
+          "direction": "input",
+          "value_type": "any",
+          "cardinality": "one",
+          "default_value": null
+        },
+        "80": {
+          "id": 80,
+          "node": 35,
+          "key": "value",
+          "label": "Résultat",
+          "direction": "output",
+          "value_type": "bool",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "81": {
+          "id": 81,
+          "node": 36,
+          "key": "value",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "82": {
+          "id": 82,
+          "node": 37,
+          "key": "value",
+          "label": "",
+          "direction": "output",
+          "value_type": "int",
+          "cardinality": "many",
+          "default_value": null
+        },
+        "83": {
+          "id": 83,
+          "node": 38,
+          "key": "value",
+          "label": "",
+          "direction": "output",
+          "value_type": "bool",
+          "cardinality": "many",
+          "default_value": null
         }
       },
       "edges": {
@@ -232685,6 +234259,26 @@
           "id": 33,
           "output": 77,
           "input": 70
+        },
+        "34": {
+          "id": 34,
+          "output": 81,
+          "input": 78
+        },
+        "35": {
+          "id": 35,
+          "output": 82,
+          "input": 79
+        },
+        "36": {
+          "id": 36,
+          "output": 80,
+          "input": 40
+        },
+        "37": {
+          "id": 37,
+          "output": 83,
+          "input": 44
         }
       },
       "variables": {
@@ -232975,9 +234569,9 @@
         "keeper": "Maëlys",
         "lantern": "Lanterne"
       },
-      "next_node_id": 35,
-      "next_pin_id": 78,
-      "next_edge_id": 34
+      "next_node_id": 39,
+      "next_pin_id": 84,
+      "next_edge_id": 38
     },
     {
       "schema_version": 5,
