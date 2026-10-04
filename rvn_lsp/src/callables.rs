@@ -102,7 +102,7 @@ pub fn scan(text: &str) -> Vec<Site> {
         if *name == "ui" && matches!(after, Some(Token::Dot)) {
             if matches!(
                 tokens.get(i + 2).map(|(token, _)| token),
-                Some(Token::Ident("open" | "close" | "focus" | "set_state"))
+                Some(Token::Ident("open" | "open_story" | "close" | "focus" | "set_state"))
             ) && matches!(
                 tokens.get(i + 3).map(|(token, _)| token),
                 Some(Token::ParenOpen)
@@ -114,7 +114,7 @@ pub fn scan(text: &str) -> Vec<Site> {
                     if rvn_parser::is_binding_name(name) {
                         let arity = if matches!(
                             tokens.get(i + 2).map(|(token, _)| token),
-                            Some(Token::Ident("open"))
+                            Some(Token::Ident("open" | "open_story"))
                         ) {
                             arguments(&tokens, i + 3)
                                 .and_then(|args| args.get(1).copied())

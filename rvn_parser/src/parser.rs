@@ -684,7 +684,7 @@ impl<'a> Parser<'a> {
             && !(self.handler_depth > 0
                 && (matches!(
                     self.peek(),
-                    Some(Token::Ident("ui" | "motion" | "video" | "accessibility"))
+                    Some(Token::Ident("ui" | "motion" | "video" | "accessibility" | "menu"))
                 ) || (matches!(self.peek(), Some(Token::Ident("character")))
                     && matches!(
                         self.tokens.get(self.pos + 2).map(|token| &token.0),
@@ -1191,6 +1191,7 @@ impl<'a> Parser<'a> {
         self.expect("(")?;
 
         if target == "ui"
+            || target == "menu"
             || target == "motion"
             || target == "video"
             || target == "accessibility"
@@ -1207,6 +1208,12 @@ impl<'a> Parser<'a> {
                 }
             }
             self.expect(")")?;
+            if target == "menu" {
+                return match (method.as_str(), args.as_slice()) {
+                    ("execute", [request]) => Ok(Statement::MenuExecute { request: request.clone() }),
+                    _ => Err(self.err_msg(self.current_location(), format!("menu.{method}"), "menu.execute(demande typée)")),
+                };
+            }
             if target == "accessibility" {
                 return match (method.as_str(),args.as_slice()) {
                     ("configure",[settings])=>Ok(Statement::AccessibilityConfigure{settings:settings.clone()}),
@@ -1255,14 +1262,15 @@ impl<'a> Parser<'a> {
                 };
             }
             return match (method.as_str(), args.as_slice()) {
-                ("open", [name, arguments, modal, layer]) => Ok(Statement::UiOpen {
+                ("open" | "open_story", [name, arguments, modal, layer]) => Ok(Statement::UiOpen {
                     name: name.clone(), arguments: arguments.clone(), modal: modal.clone(), layer: layer.clone(),
+                    story: method == "open_story",
                 }),
                 ("close", [name]) => Ok(Statement::UiClose { name: name.clone() }),
                 ("focus", [name, element]) => Ok(Statement::UiFocus { name: name.clone(), element: element.clone() }),
                 ("set_state", [name, element, state]) => Ok(Statement::UiSetState { name:name.clone(),element:element.clone(),state:state.clone() }),
                 _ => Err(self.err_msg(self.current_location(), format!("ui.{method}"),
-                    "ui.open(nom, liste d’arguments, modal, couche), ui.close(nom), ui.focus(nom, élément) ou ui.set_state(nom, élément, état)")),
+                    "ui.open/open_story(nom, liste d’arguments, modal, couche), ui.close(nom), ui.focus(nom, élément) ou ui.set_state(nom, élément, état)")),
             };
         }
 

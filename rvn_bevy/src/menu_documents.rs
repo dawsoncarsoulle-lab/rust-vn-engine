@@ -38,6 +38,8 @@ mod dynamic_rows;
 mod image_states;
 #[path = "menu_local_controls.rs"]
 mod local_controls;
+#[path = "legacy_menu_navigation.rs"]
+pub(crate) mod legacy_navigation;
 #[path = "menu_layout.rs"]
 mod menu_layout;
 #[path = "menu_narrative.rs"]
@@ -84,19 +86,21 @@ impl Plugin for MenuDocumentsPlugin {
             .add_systems(Update, crate::save_thumbnails::load.before(render))
             .init_resource::<dropdown::Dropdown>()
             .init_resource::<animations::RuntimeAnimations>()
+            .init_resource::<legacy_navigation::Navigation>()
             .init_resource::<crate::systems::save_menu::SaveConfirmation>()
             .add_systems(Startup, load_menu_font)
             .add_systems(
                 Update,
                 (
                     gamepad_input,
-                    load,
+                    load.before(crate::source_menus::SourceMenuSyncSet),
                     local_controls::update,
                     sliders,
-                    render,
+                    render.after(crate::source_menus::SourceMenuSyncSet),
                     dropdown::update,
+                    legacy_navigation::project.in_set(legacy_navigation::ProjectionSet),
                     keyboard,
-                    focus_visuals,
+                    legacy_navigation::back_key,
                     scrollbars::drag,
                     scroll_lists,
                     paginate,
@@ -104,11 +108,18 @@ impl Plugin for MenuDocumentsPlugin {
                 )
                     .chain()
                     .before(crate::systems::input_system)
+                    .before(crate::systems::menu_input_system)
                     .before(crate::systems::title_interaction_system)
                     .before(crate::systems::menu_interaction_system)
                     .before(crate::systems::save_menu_interaction_system)
-                    .before(crate::systems::settings_menu_interaction_system),
+                    .before(crate::systems::settings_menu_interaction_system)
+                    .before(crate::systems::gallery_interaction_system)
+                    .before(crate::systems::history_input_system),
             )
+            // Update presenters/actions may replace or close the focused
+            // entity. Project outlines after their deferred buffers have
+            // been applied, rather than queueing inserts against old roots.
+            .add_systems(PostUpdate, focus_visuals.before(bevy::ui::UiSystem::Layout))
             .add_systems(
                 Update,
                 narrative::render_narrative
@@ -151,6 +162,13 @@ impl Plugin for MenuDocumentsPlugin {
                 .after(bevy::ui::UiSystem::Layout)
                 .before(bevy::transform::TransformSystem::TransformPropagate),
         );
+        app.add_systems(Update, legacy_navigation::finish_settings_back
+            .after(crate::systems::settings_menu_interaction_system)
+            .before(crate::systems::despawn_settings_menu_overlay));
+        app.configure_sets(Update, legacy_navigation::ProjectionSet
+            .after(crate::systems::spawn_save_menu_overlay)
+            .after(crate::systems::spawn_settings_menu_overlay)
+            .after(crate::systems::spawn_gallery_overlay));
         app.add_systems(
             PostUpdate,
             shadows::follow.after(bevy::transform::TransformSystem::TransformPropagate),
@@ -199,6 +217,7 @@ pub(crate) struct Menus {
     animation_requests: Vec<(String, String, rvn_ui::AnimationClip)>,
 }
 impl Menus {
+    pub(crate) fn current_page(&self)->Option<&str> {self.page.as_deref()}
     pub(crate) fn keyboard_focus(&self) -> Option<Entity> {
         self.focus
     }
@@ -385,7 +404,7 @@ fn load_menu_font(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
     ));
 }
 #[derive(Component)]
-struct MenuProxy;
+pub(crate) struct MenuProxy;
 #[derive(Component, Clone)]
 pub(crate) struct MenuElement {
     page: String,
@@ -519,7 +538,24 @@ fn keyboard(
     render_state: Res<VnRenderState>,
     confirmation: Res<crate::systems::save_menu::SaveConfirmation>,
     dropdown: Res<dropdown::Dropdown>,
+    state: Option<Res<State<VnState>>>,
+    legacy: Query<&legacy_navigation::Focusable>,
+    mut key_events: EventReader<bevy::input::keyboard::KeyboardInput>,
+    mut modifiers: Local<[bool; 4]>,
 ) {
+    // Keep the modifier state at Tab's keydown. A complete OS chord can be
+    // pressed and released before this frame's ButtonInput final state.
+    // Drain even with no presenter so releases cannot linger after a modal.
+    let raw: Vec<_> = key_events.read().cloned().collect();
+    let has_shift = raw.iter().any(|event|
+        matches!(event.key_code, KeyCode::ShiftLeft | KeyCode::ShiftRight));
+    let pressed = crate::programmable_ui::key_chords(raw.into_iter(), &mut *modifiers);
+    let final_shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    let tab_shift = pressed.iter().find(|(key, _, _)| key.key_code == KeyCode::Tab)
+        .map(|(_, _, shift)| *shift || (!has_shift && final_shift))
+        .unwrap_or(final_shift);
+    *modifiers = [keys.pressed(KeyCode::ControlLeft), keys.pressed(KeyCode::ControlRight),
+        keys.pressed(KeyCode::ShiftLeft), keys.pressed(KeyCode::ShiftRight)];
     if dropdown.open || confirmation.active() {
         return;
     }
@@ -528,7 +564,7 @@ fn keyboard(
             *i = Interaction::Hovered;
         }
     }
-    if menus.active_page.is_none() && !render_state.choice_options.is_empty() {
+    if menus.active_page.is_none() && state.as_ref().is_none_or(|state| *state.get()==VnState::Waiting) && !render_state.choice_options.is_empty() {
         menus.focus = None;
         menus.focus_key = None;
         return;
@@ -561,8 +597,7 @@ fn keyboard(
     }
     let backward = keys.just_pressed(KeyCode::ArrowUp)
         || pad(GamepadButtonType::DPadUp)
-        || (keys.just_pressed(KeyCode::Tab)
-            && (keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight)));
+        || (keys.just_pressed(KeyCode::Tab) && tab_shift);
     if keys.just_pressed(KeyCode::Tab)
         || ((menus.active_page.is_some() || menus.focus.is_some() || menus.gamepad_navigation)
             && (backward || keys.just_pressed(KeyCode::ArrowDown)))
@@ -581,7 +616,7 @@ fn keyboard(
         }
         menus.focus = Some(items[index].1);
         menus.focus_key = Some(items[index].2.clone());
-        if let Some((page, id)) = items[index].2.split_once('/') {
+        if let Some((page, id)) = items[index].2.split_once('/').filter(|_|legacy.get(items[index].1).is_err()) {
             // Quick-action and dialogue pages coexist with gameplay and do
             // not occupy active_page. Their focus graphs still belong to them.
             if menus
@@ -827,6 +862,7 @@ fn render(
     assets: Res<AssetServer>,
     roots: Query<Entity, With<MenuRoot>>,
     mut old: Query<&mut Style, (OldMenus, Without<MenuRoot>)>,
+    source: Option<Res<crate::source_menus::SourceMenus>>,
 ) {
     let base = if ctx.save.active {
         if ctx.save.mode == SaveMenuMode::Save {
@@ -840,7 +876,7 @@ fn render(
         match ctx.state.get() {
             VnState::TitleScreen => "title",
             VnState::Menu => "pause",
-            VnState::Gallery if ctx.gallery.selected_cg.is_none() => "gallery",
+            VnState::Gallery if ctx.gallery.selected_cg.is_none() || source.as_deref().is_some_and(|source|source.active(rvn_ui::PageRole::Gallery)) => "gallery",
             VnState::History => "history",
             _ => "",
         }
@@ -867,11 +903,19 @@ fn render(
             && ctx.menu.return_to != Some(VnState::TitleScreen))
         .into(),
     );
+    menus.session.variables.insert("state.can_rollback".into(),crate::systems::input::can_rollback(&ctx.engine.0).into());
     let page = menus
         .doc
         .as_ref()
         .and_then(|d| d.pages.iter().find(|p| p.id == page_id))
         .cloned();
+    let presentation_role=if menus.page.is_some() {page.as_ref().and_then(|page|page.role)} else {rvn_ui::PageRole::from_id(base)};
+    if presentation_role.is_some_and(|role|source.as_deref().is_some_and(|source|source.active(role))) {
+        for mut style in &mut old {style.display=Display::None;}
+        for root in &roots {commands.entity(root).despawn_recursive();}
+        menus.key.clear(); menus.active_page=None; menus.focus=None; menus.focus_key=None;
+        return;
+    }
     let active = page.is_some() && !base.is_empty();
     let settings_values: std::collections::BTreeMap<String, serde_json::Value> = [
         ("music_volume", serde_json::json!(ctx.values.music_volume)),
@@ -995,6 +1039,7 @@ fn render(
             .map(|l| l.current_lang())
             .unwrap_or("")
     );
+    let key=format!("{key}:rollback={}",crate::systems::input::can_rollback(&ctx.engine.0));
     if menus.key == key {
         return;
     }
@@ -1137,6 +1182,7 @@ fn spawn_element(
         true
     };
     let enabled = e.enabled
+        && (e.action != Action::Rollback || crate::systems::input::can_rollback(&ctx.engine.0))
         && page_action_enabled
         && !(e.action == Action::Continue && ctx.persistent.data.last_resume_target.is_none());
     let entity = commands
@@ -2130,23 +2176,23 @@ fn list_button(
     button
 }
 #[derive(SystemParam)]
-struct ActionContext<'w> {
-    state: Res<'w, State<VnState>>,
-    save: ResMut<'w, SaveMenuState>,
-    settings: ResMut<'w, SettingsMenuState>,
-    next: ResMut<'w, NextState<VnState>>,
-    menu: ResMut<'w, MenuState>,
-    engine: ResMut<'w, VnEngine>,
-    history: ResMut<'w, DialogueHistory>,
-    imagemap: ResMut<'w, ImagemapState>,
-    render: ResMut<'w, VnRenderState>,
-    typing: ResMut<'w, TypewriterState>,
-    skip: ResMut<'w, SkipMode>,
-    events: EventWriter<'w, crate::vn_command::VnCommand>,
-    player_events: EventWriter<'w, crate::vn_command::PlayerInput>,
-    confirmation: ResMut<'w, crate::systems::save_menu::SaveConfirmation>,
-    paths: Res<'w, ProjectPaths>,
-    persistent: ResMut<'w, PersistentDataResource>,
+pub(crate) struct ActionContext<'w> {
+    pub(crate) state: Res<'w, State<VnState>>,
+    pub(crate) save: ResMut<'w, SaveMenuState>,
+    pub(crate) settings: ResMut<'w, SettingsMenuState>,
+    pub(crate) next: ResMut<'w, NextState<VnState>>,
+    pub(crate) menu: ResMut<'w, MenuState>,
+    pub(crate) engine: ResMut<'w, VnEngine>,
+    pub(crate) history: ResMut<'w, DialogueHistory>,
+    pub(crate) imagemap: ResMut<'w, ImagemapState>,
+    pub(crate) render: ResMut<'w, VnRenderState>,
+    pub(crate) typing: ResMut<'w, TypewriterState>,
+    pub(crate) skip: ResMut<'w, SkipMode>,
+    pub(crate) events: EventWriter<'w, crate::vn_command::VnCommand>,
+    pub(crate) player_events: EventWriter<'w, crate::vn_command::PlayerInput>,
+    pub(crate) confirmation: ResMut<'w, crate::systems::save_menu::SaveConfirmation>,
+    pub(crate) paths: Res<'w, ProjectPaths>,
+    pub(crate) persistent: ResMut<'w, PersistentDataResource>,
 }
 fn interact(
     mut commands: Commands,
@@ -2272,8 +2318,49 @@ fn interact(
                         ..default()
                     });
                 }
-                Effect::Action(Action::None) => {}
-                Effect::Action(Action::SavePage(target)) => {
+                Effect::Action(action) => { if let Err(error)=dispatch_action(&mut commands, &mut menus, &mut ctx, &e, action) { error!("Menus : {error}"); } },
+                effect => {
+                    menus.session.apply_presentation(&e.page, &effect);
+                    menus.key.clear();
+                }
+            }
+        }
+    }
+}
+pub(crate) fn dispatch_source_action(commands: &mut Commands, menus: &mut Menus, ctx: &mut ActionContext, screen: &str, action: Action) -> Result<(),String> {
+    let role = menus.doc.as_ref().and_then(|doc| doc.source_screens.iter().find(|(_, name)| name.as_str() == screen))
+        .and_then(|(role, _)| rvn_ui::PageRole::from_id(role));
+    let page = menus.doc.as_ref().and_then(|doc| doc.pages.iter().find(|page| page.role == role && role.is_some()))
+        .map(|page| page.id.clone()).unwrap_or_else(|| role.map(|role| role.id().into()).unwrap_or_default());
+    let element = MenuElement { page, id: String::new(), action: Action::None,
+        normal: Color::NONE, hover: Color::NONE, pressed: Color::NONE };
+    dispatch_action(commands, menus, ctx, &element, action)
+}
+pub(crate) fn source_confirmation(commands: &mut Commands, menus: &mut Menus, ctx: &mut ActionContext, approved: bool) -> Result<(),String> {
+    let operation=ctx.confirmation.pending.take();
+    if let Some(operation)=operation {
+        if operation.0==0 {
+            let previous=ctx.confirmation.quick_return.take().unwrap_or(VnState::Waiting);
+            ctx.next.set(previous);
+            if approved { ctx.confirmation.approved=Some(operation); ctx.player_events.send(crate::vn_command::PlayerInput::QuickLoad); }
+        } else if approved {
+            ctx.confirmation.approved=Some(operation);
+            commands.spawn((MenuProxy,SaveSlotButton(operation.0),crate::systems::save_menu::SaveSlotMode(operation.1),
+                ButtonBundle{style:Style{display:Display::None,..default()},interaction:Interaction::Pressed,..default()}));
+        }
+    } else if let Some((_,page,origin))=ctx.confirmation.action_pending.clone() {
+        if approved {
+            let element=MenuElement{page,id:String::new(),action:Action::None,normal:Color::NONE,hover:Color::NONE,pressed:Color::NONE};
+            dispatch_action(commands,menus,ctx,&element,Action::Confirm)?;
+        } else { menus.pending=None; ctx.next.set(origin); }
+        ctx.confirmation.action_pending=None;
+    }
+    Ok(())
+}
+fn dispatch_action(commands: &mut Commands, menus: &mut Menus, ctx: &mut ActionContext, e: &MenuElement, action: Action) -> Result<(),String> {
+    match action {
+                Action::None => {}
+                Action::SavePage(target) => {
                     if let Some(index) = menus
                         .doc
                         .as_ref()
@@ -2290,7 +2377,7 @@ fn interact(
                         }
                     }
                 }
-                Effect::Action(Action::OpenPage(id)) => {
+                Action::OpenPage(id) => {
                     let previous = menus.page.clone().unwrap_or_default();
                     menus.history.push(previous);
                     menus.page = Some(id);
@@ -2300,7 +2387,7 @@ fn interact(
                     }
                     menus.key.clear();
                 }
-                Effect::Action(Action::Back) if menus.page.is_some() => {
+                Action::Back if menus.page.is_some() => {
                     menus.pending = None;
                     menus.page = menus.history.pop().filter(|id| !id.is_empty());
                     if menus.page.is_none() {
@@ -2310,7 +2397,7 @@ fn interact(
                     }
                     menus.key.clear();
                 }
-                Effect::Action(mut a) => {
+                mut a => {
                     use crate::vn_command::PlayerInput;
                     let quick = match a {
                         Action::QuickSave => Some(PlayerInput::QuickSave),
@@ -2323,19 +2410,19 @@ fn interact(
                         if *ctx.state.get() == VnState::Waiting {
                             ctx.player_events.send(input);
                         }
-                        continue;
+                        return Ok(());
                     }
                     if a == Action::ToggleSkip {
                         if *ctx.state.get() == VnState::Waiting {
                             ctx.skip.active = !ctx.skip.active;
                         }
-                        continue;
+                        return Ok(());
                     }
                     if *ctx.state.get() == VnState::Waiting {
                         match a {
                             Action::History => {
                                 ctx.player_events.send(PlayerInput::OpenHistory);
-                                continue;
+                                return Ok(());
                             }
                             Action::Save | Action::Load => {
                                 ctx.save.open(
@@ -2347,20 +2434,20 @@ fn interact(
                                     crate::systems::save_menu::SaveMenuOrigin::InGame,
                                 );
                                 ctx.next.set(VnState::Menu);
-                                continue;
+                                return Ok(());
                             }
                             Action::Settings => {
                                 ctx.settings.active = true;
                                 ctx.next.set(VnState::Menu);
-                                continue;
+                                return Ok(());
                             }
                             _ => {}
                         }
                     }
                     let approved = a == Action::Confirm;
                     if approved {
-                        let Some(pending) = menus.pending.take() else {
-                            continue;
+                        let Some(pending) = menus.pending.clone() else {
+                            return Ok(());
                         };
                         a = pending;
                     }
@@ -2377,7 +2464,7 @@ fn interact(
                         if *ctx.state.get() == VnState::Waiting {
                             ctx.next.set(VnState::Menu);
                         }
-                        continue;
+                        return Ok(());
                     }
                     if a == Action::Continue {
                         let result = rvn_core::save::SaveManager::new(
@@ -2392,7 +2479,7 @@ fn interact(
                                 match ctx.engine.0.load_data(data) {
                                     Ok(rvn_core::engine::LoadCompatibility::LegacyUnchecked) => warn!("Ancienne sauvegarde : compatibilité après modification de l’histoire non vérifiable"),
                                     Ok(_) => {},
-                                    Err(error) => { error!("Reprise refusée : {error}"); continue; }
+                                    Err(error) => return Err(format!("Reprise refusée : {error}")),
                                 }
                                 crate::systems::save_menu::apply_loaded_game(
                                     &mut ctx.engine,
@@ -2414,14 +2501,15 @@ fn interact(
                                 ctx.save.active = false;
                                 ctx.settings.active = false;
                                 ctx.skip.active = false;
+                                menus.pending = None;
                                 menus.page = None;
                                 menus.history.clear();
                                 menus.key.clear();
                                 ctx.next.set(VnState::Waiting);
                             }
-                            Err(e) => error!("Reprise impossible : {e}"),
+                            Err(e) => return Err(format!("Reprise impossible : {e}")),
                         }
-                        continue;
+                        return Ok(());
                     }
                     if matches!(a, Action::NewGame | Action::StartScene(_)) {
                         let label = if let Action::StartScene(label) = a {
@@ -2434,15 +2522,13 @@ fn interact(
                             .0
                             .fresh(crate::bevy_renderer::BevyRenderer::new(), 64)
                         else {
-                            error!("Impossible de créer la nouvelle partie");
-                            continue;
+                            return Err("Impossible de créer la nouvelle partie".into());
                         };
                         if let Some(label) = label {
                             let Some(pc) = fresh.script.iter().position(
                                 |s| matches!(s,rvn_parser::Statement::Label{name} if name==&label),
                             ) else {
-                                error!("Label absent : {label}");
-                                continue;
+                                return Err(format!("Label absent : {label}"));
                             };
                             fresh.state.pc = pc;
                         }
@@ -2472,12 +2558,14 @@ fn interact(
                         *ctx.typing = TypewriterState::default();
                         ctx.skip.active = false;
                         ctx.menu.return_to = None;
+                        menus.pending = None;
                         menus.page = None;
                         menus.history.clear();
                         menus.key.clear();
                         ctx.next.set(VnState::Stepping);
-                        continue;
+                        return Ok(());
                     }
+                    if approved { menus.pending = None; }
                     menus.page = None;
                     menus.history.clear();
                     menus.key.clear();
@@ -2490,7 +2578,7 @@ fn interact(
                     {
                         let from_title = ctx.menu.return_to == Some(VnState::TitleScreen);
                         if a == Action::Save && from_title {
-                            continue;
+                            return Ok(());
                         }
                         ctx.next.set(VnState::Menu);
                         match a {
@@ -2498,7 +2586,7 @@ fn interact(
                                 ctx.save.active = false;
                                 ctx.settings.active = true;
                             }
-                            Action::Save if from_title => continue,
+                            Action::Save if from_title => return Ok(()),
                             _ => {
                                 ctx.settings.active = false;
                                 ctx.save.open(
@@ -2515,7 +2603,7 @@ fn interact(
                                 );
                             }
                         }
-                        continue;
+                        return Ok(());
                     }
                     let proxy = commands
                         .spawn((
@@ -2591,16 +2679,38 @@ fn interact(
                         }
                     }
                 }
-                effect => {
-                    menus.session.apply_presentation(&e.page, &effect);
-                    menus.key.clear();
-                }
-            }
-        }
+
     }
+    Ok(())
 }
 fn cleanup_proxies(mut commands: Commands, query: Query<Entity, With<MenuProxy>>) {
     for e in &query {
         commands.entity(e).despawn_recursive();
+    }
+}
+
+#[cfg(test)]
+mod confirmation_action_tests {
+    use super::*;
+    #[test]
+    fn failed_new_game_confirmation_keeps_operation_and_transition_until_retry_succeeds() {
+        let mut harness=crate::source_menus::confirmation_tests::application(crate::systems::save_menu::SaveMenuMode::Load);
+        {
+            let world=harness.app.world_mut();
+            let mut gate=world.resource_mut::<crate::systems::save_menu::SaveConfirmation>();
+            gate.pending=None;gate.action_pending=Some((Action::NewGame,"pause".into(),VnState::Menu));
+            let mut menus=world.resource_mut::<Menus>();menus.pending=Some(Action::NewGame);menus.start_label=Some("temporarily_missing".into());
+        }
+        harness.refresh();
+        let before=harness.app.world().resource::<VnEngine>().0.state.clone();let disk=harness.disk();let gate=harness.gate();let token=harness.token();
+        harness.click();
+        harness.assert_state(&before);assert_eq!(harness.disk(),disk);assert_eq!(harness.gate(),gate);assert_eq!(harness.token(),token);
+        assert_eq!(harness.app.world().resource::<Menus>().pending,Some(Action::NewGame));
+        assert!(matches!(harness.app.world().resource::<NextState<VnState>>(),NextState::Unchanged));assert!(!harness.app.world().resource::<ScriptErrorMessage>().0.is_empty());
+        harness.app.world_mut().resource_mut::<Menus>().start_label=Some("start".into());
+        harness.click();
+        assert!(harness.token().is_none());assert!(!harness.app.world().resource::<crate::systems::save_menu::SaveConfirmation>().active());assert!(harness.app.world().resource::<Menus>().pending.is_none());
+        assert!(matches!(harness.app.world().resource::<NextState<VnState>>(),NextState::Pending(VnState::Stepping)));
+        assert_eq!(harness.app.world().resource::<VnEngine>().0.state.vars["qa_events"],rvn_parser::Value::Int(0));assert!(harness.app.world().resource::<ScriptErrorMessage>().0.is_empty());assert_eq!(harness.disk(),disk);
     }
 }

@@ -109,3 +109,21 @@ fn narrative_renderers_tolerate_missing_or_ambiguous_window() {
     app.world_mut().despawn(first);
     app.update();
 }
+
+#[test]
+fn default_choice_presenter_leaves_authored_menu_geometry_and_document_untouched() {
+    let mut app = fixture();
+    app.init_resource::<ChoiceFocus>();
+    let document=app.world().resource::<Menus>().document().unwrap().clone();
+    let authored_style=Style {
+        position_type:PositionType::Absolute,
+        left:Val::Px(123.0),top:Val::Px(456.0),width:Val::Px(321.0),height:Val::Px(65.0),
+        ..default()
+    };
+    let authored=app.world_mut().spawn((ChoiceButton(1),Button,authored_style.clone())).id();
+    app.add_systems(Update,crate::systems::choice::update_choice_buttons);
+    app.update();
+    assert_eq!(app.world().get::<Style>(authored),Some(&authored_style));
+    assert_eq!(app.world().resource::<Menus>().document(),Some(&document));
+    assert_eq!(app.world().get::<ChoiceButton>(authored).unwrap().0,1);
+}

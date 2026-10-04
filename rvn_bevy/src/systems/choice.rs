@@ -81,7 +81,10 @@ pub fn update_choice_buttons(
         .unwrap_or_default();
 
     for (i, label) in render_state.choice_options.iter().enumerate() {
-        let bottom = base_bottom + i as f32 * (btn_h + gap);
+        // Bottom anchoring grows upwards: keep script index 0 at the top,
+        // without reversing the labels, destination indices or number keys.
+        let row_from_bottom = render_state.choice_options.len() - 1 - i;
+        let bottom = base_bottom + row_from_bottom as f32 * (btn_h + gap);
         let focused = choice_focus.0 == Some(i);
         let bg_color = if focused { bg_focus } else { bg_normal };
 
@@ -155,6 +158,94 @@ pub fn choice_interaction_system(
         if *interaction == Interaction::Pressed {
             choice_focus.clear();
             player_events.send(PlayerInput::Choose(choice_button.0));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn layout_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()));
+        app.init_asset::<Image>()
+            .init_asset::<Font>()
+            .init_asset::<bevy::render::render_resource::Shader>()
+            .init_resource::<bevy::render::camera::ManualTextureViews>()
+            .add_event::<bevy::window::WindowResized>()
+            .add_event::<bevy::window::WindowCreated>()
+            .add_event::<bevy::window::WindowScaleFactorChanged>()
+            .add_plugins(bevy::ui::UiPlugin);
+        // UiPlugin initializes its private layout storage. Run the actual
+        // camera/layout/transform pipeline, without a GPU, native window or
+        // unrelated focus/text rasterization systems.
+        let mut schedules = app.world_mut().resource_mut::<bevy::ecs::schedule::Schedules>();
+        schedules.remove(PreUpdate);
+        schedules.remove(PostUpdate);
+        drop(schedules);
+        app.add_systems(
+            PostUpdate,
+            (
+                bevy::render::camera::camera_system::<OrthographicProjection>,
+                bevy::ui::ui_layout_system,
+                bevy::transform::systems::sync_simple_transforms,
+                bevy::transform::systems::propagate_transforms,
+            ).chain(),
+        )
+            .init_resource::<Theme>()
+            .init_resource::<ChoiceFocus>()
+            .init_resource::<crate::menu_documents::Menus>()
+            .insert_resource(VnRenderState {
+                choice_options: vec!["First destination".into(),"Second destination".into(),"Third destination".into()],
+                ..default()
+            })
+            .add_event::<PlayerInput>()
+            .add_systems(Update,(update_choice_buttons,choice_interaction_system).chain());
+        app.world_mut().spawn((Window {
+            resolution: bevy::window::WindowResolution::new(1600.0,900.0),
+            ..default()
+        },bevy::window::PrimaryWindow));
+        app.world_mut().spawn(Camera2dBundle::default());
+        app.world_mut().spawn((ChoiceContainer,NodeBundle {
+            style: Style {width:Val::Percent(100.0),height:Val::Percent(100.0),..default()},
+            ..default()
+        }));
+        app
+    }
+    #[test]
+    fn default_choices_follow_script_order_in_real_layout_and_click_destinations() {
+        let mut app = layout_app();
+        app.update();
+        let mut rows = app.world_mut().query::<(Entity,&ChoiceButton,&Node,&GlobalTransform)>();
+        let mut geometry:Vec<_>=rows.iter(app.world()).map(|(entity,index,node,transform)|
+            (index.0,entity,node.size(),transform.translation())).collect();
+        geometry.sort_by_key(|row|row.0);
+        assert_eq!(geometry.len(),3);
+        for pair in geometry.windows(2) {
+            assert!(pair[0].3.y+pair[0].2.y*0.5 < pair[1].3.y-pair[1].2.y*0.5,
+                "Earlier script choice must be fully above the next choice: {geometry:?}");
+        }
+        for (index,entity,_,_) in &geometry {
+            let labels:Vec<_>=app.world().get::<Children>(*entity).unwrap().iter()
+                .filter_map(|child|app.world().get::<Text>(*child))
+                .map(|text|text.sections.iter().map(|section|section.value.as_str()).collect::<String>()).collect();
+            assert_eq!(labels[0],format!("{}. ",index+1));
+            assert_eq!(labels[1],app.world().resource::<VnRenderState>().choice_options[*index]);
+        }
+        // Use the real interaction dispatcher after each rebuild. Geometry
+        // changes cannot swap an option's engine destination or number label.
+        for index in 0..3 {
+            // Settle the previous focus repaint before pressing the next row.
+            app.update();
+            let mut rows=app.world_mut().query::<(Entity,&ChoiceButton)>();
+            let entity=rows.iter(app.world()).find(|(_,button)|button.0==index).unwrap().0;
+            *app.world_mut().get_mut::<Interaction>(entity).unwrap()=Interaction::Pressed;
+            app.update();
+            let mut events=app.world_mut().resource_mut::<Events<PlayerInput>>();
+            let choices:Vec<_>=events.drain().filter_map(|event|match event {
+                PlayerInput::Choose(index)=>Some(index),_=>None,
+            }).collect();
+            assert_eq!(choices,vec![index]);
         }
     }
 }

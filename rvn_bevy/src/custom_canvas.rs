@@ -426,12 +426,13 @@ fn tick(
     mut output: EventWriter<VnCommand>,
     mut error: ResMut<ScriptErrorMessage>,
     mut next: ResMut<NextState<VnState>>,
+    source: Option<Res<crate::source_menus::SourceMenus>>,
 ) {
     if accessibility.blocked
-        || !matches!(
+        || (!source.as_deref().is_some_and(|source|source.any()) && !matches!(
             state.get(),
             VnState::Waiting | VnState::Stepping | VnState::Animating
-        )
+        ))
     {
         return;
     }
@@ -652,12 +653,13 @@ fn pick(world: &World, point: Vec2) -> Option<(Entity, Capture, Vec2)> {
     None
 }
 fn dispatch(world: &mut World, event: UiInput) -> bool {
+    if world.resource::<VnEngine>().0.renderer.menu_pending {return false;}
+    let source_event=world.resource::<VnEngine>().0.state.ui.screens.iter().any(|screen|screen.name==event.screen && screen.host_role.is_some());
     if let Err(problem) = world.resource_mut::<VnEngine>().0.interface_event(event) {
         world.resource_mut::<ScriptErrorMessage>().0 =
             rvn_core::error::ScriptError::from_runtime(&problem).to_string();
-        world
-            .resource_mut::<NextState<VnState>>()
-            .set(VnState::Error);
+        if source_event||problem.is_menu_request_rejection() {warn!("Game menu canvas event: {}",world.resource::<ScriptErrorMessage>().0);}
+        else {world.resource_mut::<NextState<VnState>>().set(VnState::Error);}
         return false;
     }
     for event in world.resource_mut::<VnEngine>().0.renderer.take_pending() {
@@ -868,7 +870,7 @@ fn input(world: &mut World) {
     let blocked = world
         .resource::<crate::accessibility::Accessibility>()
         .blocked;
-    let playing = matches!(
+    let playing = world.get_resource::<crate::source_menus::SourceMenus>().is_some_and(|source|source.any()) || matches!(
         world.resource::<State<VnState>>().get(),
         VnState::Waiting | VnState::Stepping | VnState::Animating
     );

@@ -127,7 +127,13 @@ pub(super) fn update(
     mut hovering: Local<std::collections::BTreeSet<String>>,
     mut next: ResMut<NextState<VnState>>,
     mut player: EventWriter<crate::vn_command::PlayerInput>,
+    source: Option<Res<crate::source_menus::SourceMenus>>,
 ) {
+    if source.as_deref().is_some_and(|source|source.active(rvn_ui::PageRole::Confirm)) {
+        for root in &roots {commands.entity(root).despawn_recursive();}
+        *previous=None; *focus=None; opened.take(); hovering.clear();
+        return;
+    }
     let operation = confirmation.pending;
     let action = confirmation.action_pending.clone();
     if !confirmation.active() {

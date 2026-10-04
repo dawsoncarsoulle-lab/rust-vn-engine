@@ -156,6 +156,9 @@ pub enum Token<'a> {
     #[regex(r"[0-9]+\.[0-9]+", |lex| lex.slice().parse::<f32>().ok())]
     Float(f32),
 
-    #[regex(r"\n+")]
+    // Recognize Windows line endings without rewriting source bytes: authoring
+    // spans must still index the original UTF-8 text, including both CRLF bytes.
+    // A bare CR remains invalid outside a string, as it was before.
+    #[regex(r"(\r\n|\n)+")]
     Newline,
 }

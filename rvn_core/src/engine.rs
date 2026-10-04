@@ -352,6 +352,9 @@ pub struct Engine<R: Renderer> {
     /// Transient input generation; saved/restored component IDs do not revive
     /// a pointer capture from the previous state.
     interface_epoch: u64,
+    /// Root source statements end before the lowered narrative branch blocks.
+    /// An Init from an authored branch is not a global initializer.
+    init_scan_end: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -382,6 +385,7 @@ impl<R: Renderer> Engine<R> {
         let mut counter = 0;
         let mut returns = Vec::new();
         flatten_with_returns(&mut script, &mut extra, &mut counter, &mut returns);
+        let init_scan_end = script.len();
 
         script.push(Statement::Jump {
             target: "__script_end".to_string(),
@@ -392,7 +396,7 @@ impl<R: Renderer> Engine<R> {
             name: "__script_end".to_string(),
         });
 
-        Self::from_prepared_script(script, renderer, rollback_depth, branch_returns)
+        Self::from_prepared_script(script, renderer, rollback_depth, branch_returns, init_scan_end)
     }
 
     /// Start a clean game from this engine's already lowered script. Passing
@@ -404,6 +408,7 @@ impl<R: Renderer> Engine<R> {
             renderer,
             rollback_depth,
             self.branch_returns.clone(),
+            self.init_scan_end,
         )?;
         engine.interface_epoch = self.interface_epoch.wrapping_add(1);
         Ok(engine)
@@ -414,6 +419,7 @@ impl<R: Renderer> Engine<R> {
         renderer: R,
         rollback_depth: usize,
         branch_returns: std::collections::HashSet<usize>,
+        init_scan_end: usize,
     ) -> Result<Self, RuntimeError> {
         let label_table = script
             .iter()
@@ -446,6 +452,7 @@ impl<R: Renderer> Engine<R> {
             state: GameState {
                 accessibility: Default::default(),
                 speech_requests: Vec::new(),
+                menu_requests: Vec::new(),
                 videos: Default::default(),
                 layered: Default::default(),
                 motions: Default::default(),
@@ -474,6 +481,7 @@ impl<R: Renderer> Engine<R> {
             active_timer: None,
             video_epoch: 0,
             interface_epoch: 0,
+            init_scan_end,
         };
 
         engine.run_init_blocks()?;
@@ -484,17 +492,11 @@ impl<R: Renderer> Engine<R> {
 
     fn run_init_blocks(&mut self) -> Result<(), RuntimeError> {
         let mut init_blocks = Vec::new();
-        for (i, stmt) in self.script.iter().enumerate() {
+        // `use` expands inline, including a chapter's narrative statements.
+        // Collect every top-level Init before gameplay, in resolved source order.
+        for (i, stmt) in self.script.iter().take(self.init_scan_end).enumerate() {
             if let Statement::Init { body } = stmt {
                 init_blocks.push((i, body.clone()));
-            } else if !matches!(
-                stmt,
-                Statement::Label { .. }
-                    | Statement::Function { .. }
-                    | Statement::Screen { .. }
-                    | Statement::Handler { .. }
-            ) {
-                break;
             }
         }
         for (idx, body) in init_blocks {
@@ -799,7 +801,8 @@ impl<R: Renderer> Engine<R> {
             }
             Statement::Choice { options } => {
                 let mut resolved = Vec::new();
-                for opt in options {
+                for index in self.visible_choice_indices(options)? {
+                    let opt = &options[index];
                     resolved.push(
                         self.interpolate_display(&opt.label)
                             .map_err(|e| self.eval_err(e, "Choice (label interpolation)"))?,
@@ -844,7 +847,8 @@ impl<R: Renderer> Engine<R> {
         options: &[rvn_parser::ChoiceOption],
     ) -> Result<Vec<String>, RuntimeError> {
         let mut labels = Vec::new();
-        for opt in options {
+        for index in self.visible_choice_indices(options)? {
+            let opt = &options[index];
             let template_key = text_to_locale_key(&opt.label);
             let translated = self.translate(&template_key).to_string();
             let final_label = if translated == template_key {
@@ -861,6 +865,28 @@ impl<R: Renderer> Engine<R> {
             labels.push(final_label);
         }
         Ok(labels)
+    }
+
+    fn visible_choice_indices(&self, options: &[rvn_parser::ChoiceOption]) -> Result<Vec<usize>, RuntimeError> {
+        let vars = self.vars_for_eval();
+        options.iter().enumerate().filter_map(|(index, option)| {
+            let visible = match &option.condition {
+                Some(condition) => self.functions.eval_bool_with_random(condition, &vars, &mut self.state.display_random.clone())
+                    .map_err(|error| self.eval_err(error, "Choice (condition)")),
+                None => Ok(true),
+            };
+            match visible { Ok(true) => Some(Ok(index)), Ok(false) => None, Err(error) => Some(Err(error)) }
+        }).collect()
+    }
+
+    /// Authored destinations for the currently visible options. Public choice
+    /// submission still takes a visible index; receipts use this identity to
+    /// reject a changed list even when all displayed labels are identical.
+    pub fn active_choice_indices(&self) -> Result<Vec<usize>, RuntimeError> {
+        match self.script.get(self.state.pc) {
+            Some(Statement::Choice { options }) => self.visible_choice_indices(options),
+            _ => Ok(Vec::new()),
+        }
     }
 
     fn record_interaction_snapshot(&mut self, stmt: &Statement) -> Result<(), RuntimeError> {
@@ -903,54 +929,15 @@ impl<R: Renderer> Engine<R> {
                 self.state.pc += 1;
             }
             Statement::Choice { options } => {
-                // Filter out options whose condition evaluates to false.
-                let vars = self.vars_for_eval();
-                let mut active = Vec::new();
-                for option in &options {
-                    let visible = match &option.condition {
-                        Some(condition) => self
-                            .functions
-                            .eval_bool_with_random(
-                                condition,
-                                &vars,
-                                &mut self.state.display_random.clone(),
-                            )
-                            .map_err(|error| self.eval_err(error, "Choice (condition)"))?,
-                        None => true,
-                    };
-                    if visible {
-                        active.push(option);
-                    }
-                }
-                drop(vars);
-                // If no options are active, skip the choice entirely.
+                let active = self.visible_choice_indices(&options)?;
                 if active.is_empty() {
                     self.state.pc += 1;
                     return Ok(());
                 }
-                // Evaluate the choice labels before displaying them.  If localisation
-                // provides a translation for the template key use it, otherwise
-                // perform interpolation on the original label.
-                let mut labels = Vec::new();
-                for opt in &active {
-                    let template_key = text_to_locale_key(&opt.label);
-                    let translated = self.translate(&template_key).to_string();
-                    let final_label = if translated == template_key {
-                        self.interpolate_display(&opt.label)
-                            .map_err(|e| self.eval_err(e, "Choice (label interpolation)"))?
-                    } else {
-                        match rvn_parser::parse_interpolated_str(&translated) {
-                            Ok(t) => self
-                                .interpolate_display(&t)
-                                .map_err(|e| self.eval_err(e, "Choice (label traduction)"))?,
-                            Err(_) => translated,
-                        }
-                    };
-                    labels.push(final_label);
-                }
+                let labels = self.resolve_choice_labels(&options)?;
                 let selected = self.renderer.show_choice(&labels);
                 let idx = selected.min(active.len().saturating_sub(1));
-                let body = active[idx].body.clone();
+                let body = options[active[idx]].body.clone();
                 if !body.is_empty() {
                     self.exec_silent(body[0].clone())?;
                 } else {
@@ -1007,6 +994,8 @@ impl<R: Renderer> Engine<R> {
                     "LocalVar",
                 ))
             }
+            Statement::MenuExecute { .. } => return Err(self.eval_err(
+                EvalError::InvalidFunction("Game-menu requests require a trusted interface event".into()), "Menu execute")),
             statement @ (Statement::UiOpen { .. }
             | Statement::UiClose { .. }
             | Statement::UiFocus { .. }
@@ -1470,10 +1459,15 @@ impl<R: Renderer> Engine<R> {
             }
 
             let stmt = self.script[self.state.pc].clone();
+            if matches!(&stmt, Statement::Choice { options } if !options.is_empty())
+                && self.state.display_random_pc != Some(self.state.pc) {
+                self.state.display_random = crate::random::RandomState::seeded(self.state.random.next_u64());
+                self.state.display_random_pc = Some(self.state.pc);
+            }
             match &stmt {
                 // Ces cas devraient être signalés par `rvn check`, mais le moteur
                 // reste robuste et ne bloque pas l'UI si le script les contient.
-                Statement::Choice { options } if options.is_empty() => {
+                Statement::Choice { options } if self.visible_choice_indices(options)?.is_empty() => {
                     self.consume_step(&mut remaining)?;
                     self.state.pc += 1;
                     continue;
@@ -1613,15 +1607,16 @@ impl<R: Renderer> Engine<R> {
         let Statement::Choice { options } = stmt else {
             return Ok(());
         };
+        let active = self.visible_choice_indices(&options)?;
         self.state.display_random_pc = None;
 
-        if options.is_empty() {
+        if active.is_empty() {
             self.state.pc += 1;
             return Ok(());
         }
 
-        let idx = selected.min(options.len().saturating_sub(1));
-        let body = options[idx].body.clone();
+        let visible = selected.min(active.len().saturating_sub(1));
+        let body = options[active[visible]].body.clone();
         if !body.is_empty() {
             self.exec_silent(body[0].clone())?;
         } else {
@@ -2035,6 +2030,80 @@ impl<R: Renderer> Engine<R> {
         self.describe_interfaces(&self.state)
     }
 
+    pub fn source_menu_arity(&self, name: &str) -> Option<usize> { self.ui_library.screen_arity(name) }
+    pub fn source_menu_labels(&self) -> Vec<String> { self.label_table.keys().cloned().collect() }
+    /// Recovery removes only host instances of the failed presenter role.
+    /// Its failed lifecycle transaction was already rolled back by the caller.
+    pub fn abandon_source_menu(&mut self, role: rvn_ui::PageRole) -> Result<(), RuntimeError> {
+        if !self.state.ui.screens.iter().any(|screen|screen.host_role==Some(role)) {return Ok(());}
+        let mut next=self.state.clone();
+        next.ui.screens.retain(|screen|screen.host_role!=Some(role));
+        self.commit_ui_state(next)
+    }
+    /// Compensate a failed external menu operation before any new input runs.
+    pub fn cancel_source_menu_transaction(&mut self, previous: GameState) -> Result<(), RuntimeError> {
+        self.commit_ui_state(previous)
+    }
+    pub fn finish_source_menu_transaction(&mut self, previous: GameState) {
+        if previous.pc == self.state.pc && previous.story_identity == self.state.story_identity
+            && (previous.vars != self.state.vars || previous.random != self.state.random
+                || previous.ui.story_only() != self.state.ui.story_only()) {
+            self.history.push(previous, None);
+        }
+    }
+
+    /// Host presenters reuse source evaluation and bounded lifecycle handlers.
+    /// Updating their context preserves local controls, focus and canvas state.
+    pub fn synchronize_source_menu(&mut self, role: rvn_ui::PageRole, name: Option<&str>, context: Value,
+        modal: bool, layer: i32) -> Result<bool, RuntimeError> {
+        if name.is_none() && !self.state.ui.screens.iter().any(|screen| screen.host_role==Some(role)) { return Ok(false); }
+        if let Some(name)=name {
+            if let Some(screen)=self.state.ui.screens.iter().find(|screen| screen.name==name && screen.host_role==Some(role) && screen.host_root) {
+                let arguments=if self.ui_library.screen_arity(name)==Some(1) { vec![context.clone()] } else {vec![]};
+                if screen.arguments==arguments && screen.modal==modal && screen.layer==layer { return Ok(true); }
+            }
+        }
+        let mut next = self.state.clone();
+        if let Some(name) = name {
+            let arity = self.ui_library.screen_arity(name).ok_or_else(|| self.eval_err(
+                EvalError::InvalidFunction(format!("Source menu screen is absent: {name}")), "Source menu"))?;
+            if arity > 1 { return Err(self.eval_err(EvalError::InvalidFunction(
+                format!("Source menu {name} needs zero arguments or one context argument")), "Source menu")); }
+            if next.ui.screens.iter().any(|screen| screen.name == name && screen.host_role != Some(role)) {
+                return Err(self.eval_err(EvalError::InvalidFunction(
+                    format!("Source menu {name} is already owned by another screen or menu role")), "Source menu"));
+            }
+        }
+        let root_unchanged = next.ui.screens.iter().any(|screen| screen.host_role == Some(role)
+            && screen.host_root && name == Some(screen.name.as_str()));
+        let closing: Vec<_> = next.ui.screens.iter().filter(|screen| screen.host_role == Some(role)
+            && !root_unchanged).map(|screen| screen.name.clone()).collect();
+        let mut changed = false;
+        for name in closing {
+            self.apply_ui_commands(&mut next, vec![crate::eval::UiCommand::Close { name }])?;
+            changed = true;
+        }
+        if let Some(name) = name {
+            let arguments = if self.ui_library.screen_arity(name) == Some(1) { vec![context] } else { vec![] };
+            if let Some(screen) = next.ui.screens.iter_mut().find(|screen| screen.name == name) {
+                if screen.arguments != arguments || screen.modal != modal || screen.layer != layer {
+                    screen.arguments = arguments; screen.modal = modal; screen.layer = layer; changed = true;
+                }
+            } else {
+                self.apply_ui_commands(&mut next, vec![crate::eval::UiCommand::Open {
+                    name: name.into(), arguments, modal, layer, host_role: Some(role),
+                    inherit_host: true,
+                }])?;
+                if let Some(screen) = next.ui.screens.iter_mut().find(|screen| screen.name == name) {
+                    screen.host_root = true;
+                }
+                changed = true;
+            }
+        }
+        if changed { self.commit_ui_state(next)?; }
+        Ok(name.is_some())
+    }
+
     fn describe_interfaces(
         &self,
         state: &GameState,
@@ -2397,6 +2466,19 @@ impl<R: Renderer> Engine<R> {
                 ));
             }
             match &command {
+                crate::eval::UiCommand::Menu { request, source } => {
+                    if !next.menu_requests.is_empty() {
+                        return Err(self.eval_err(EvalError::InvalidMenuRequest("Only one game-menu request is allowed per event".into()), "Menu transaction"));
+                    }
+                    let screen = source.as_ref().ok_or_else(|| self.eval_err(
+                        EvalError::InvalidMenuRequest("Menu request lacks trusted screen origin".into()), "Menu transaction"))?;
+                    let instance = next.ui.screens.iter().find(|instance| instance.name == *screen).ok_or_else(|| self.eval_err(
+                        EvalError::InvalidMenuRequest("Menu request came from an inactive screen".into()), "Menu transaction"))?;
+                    next.menu_requests.push(rvn_ui::source_menus::MenuEffect {
+                        screen: screen.clone(), screen_order: instance.order, host_role: instance.host_role, request: request.clone(),
+                    });
+                    continue;
+                }
                 crate::eval::UiCommand::AccessibilityConfigure { settings } => {
                     if !self.renderer.supports_accessibility() {
                         return Err(self.eval_err(
@@ -2649,6 +2731,9 @@ impl<R: Renderer> Engine<R> {
                 }
                 _ => {}
             }
+            let closing_role = if let crate::eval::UiCommand::Close { name } = &command {
+                next.ui.screens.iter().find(|screen| &screen.name == name).and_then(|screen| screen.host_role)
+            } else { None };
             let event = self
                 .ui_library
                 .command(
@@ -2660,8 +2745,7 @@ impl<R: Renderer> Engine<R> {
                 )
                 .map_err(|error| self.eval_err(error, "Interface"))?;
             if let Some((event, component)) = event {
-                queue.extend(
-                    self.ui_library
+                let mut lifecycle_commands = self.ui_library
                         .event_budgeted(
                             &mut next.ui,
                             &mut next.vars,
@@ -2671,14 +2755,26 @@ impl<R: Renderer> Engine<R> {
                             &mut next.random,
                             budget,
                         )
-                        .map_err(|error| self.eval_err(error, "Interface event"))?,
-                );
+                        .map_err(|error| self.eval_err(error, "Interface event"))?;
+                if let Some(role) = closing_role {
+                    for command in &mut lifecycle_commands {
+                        if let crate::eval::UiCommand::Open { host_role, inherit_host: true, .. } = command { *host_role = Some(role); }
+                    }
+                }
+                queue.extend(lifecycle_commands);
             }
         }
         Ok(())
     }
 
     fn commit_ui_state(&mut self, mut next: GameState) -> Result<(), RuntimeError> {
+        for effect in &next.menu_requests {
+            if !next.ui.screens.iter().any(|screen| screen.name == effect.screen && screen.order == effect.screen_order && screen.host_role == effect.host_role) {
+                return Err(self.eval_err(EvalError::InvalidMenuRequest("Menu request screen was closed or replaced during its event".into()), "Menu authority"));
+            }
+            self.renderer.validate_menu_request(effect, &next).map_err(|message|
+                self.eval_err(EvalError::InvalidMenuRequest(message), "Menu authority"))?;
+        }
         let views = self.describe_interfaces(&next)?;
         self.ui_library
             .reconcile_canvas_states_from_views(&mut next.ui, &views)
@@ -2788,6 +2884,16 @@ impl<R: Renderer> Engine<R> {
                 return Err(self.eval_err(EvalError::InvalidFunction(problem), "Speech synthesis"));
             }
         }
+        for effect in std::mem::take(&mut next.menu_requests) {
+            if let Err(message) = self.renderer.menu_request(&effect, &self.state, &next) {
+                let _ = self.renderer.update_interfaces(&previous_views);
+                let _ = self.renderer.update_layered_characters(&previous_layered);
+                let _ = self.renderer.update_motions(&previous_motions);
+                let _ = self.renderer.update_videos(&previous_videos);
+                let _ = self.renderer.update_accessibility(&self.state.accessibility);
+                return Err(self.eval_err(EvalError::InvalidMenuRequest(message), "Menu authority"));
+            }
+        }
         self.state = next;
         self.video_epoch = epoch;
         Ok(())
@@ -2873,18 +2979,17 @@ impl<R: Renderer> Engine<R> {
         self.commit_ui_state(next)?;
         // Focus and unhandled key/click events do not consume rollback steps.
         // A focus handler can still change gameplay: preserve that transition.
-        let mut before_ui = previous.ui.clone();
-        let mut after_ui = self.state.ui.clone();
+        let mut before_ui = previous.ui.story_only();
+        let mut after_ui = self.state.ui.story_only();
         for screen in &mut before_ui.screens {
             screen.focus = None;
         }
         for screen in &mut after_ui.screens {
             screen.focus = None;
         }
-        if previous.vars != self.state.vars
+        if !self.renderer.menu_request_pending() && (previous.vars != self.state.vars
             || previous.random != self.state.random
-            || before_ui != after_ui
-        {
+            || before_ui != after_ui) {
             self.history.push(previous, None);
         }
         Ok(())
@@ -3182,6 +3287,8 @@ label start
         .unwrap();
         game.state.ui.next_order = 1;
         game.state.ui.screens.push(crate::ui::ScreenInstance {
+            host_root: false,
+            host_role: None,
             name: "custom".into(),
             arguments: Vec::new(),
             modal: false,

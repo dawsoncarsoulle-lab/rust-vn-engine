@@ -28,6 +28,7 @@ pub struct FunctionLibrary {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UiCommand {
+    Menu { request: rvn_ui::source_menus::MenuRequest, source: Option<String> },
     AccessibilityConfigure {
         settings: rvn_ui::accessibility::AccessibilitySettings,
     },
@@ -79,6 +80,8 @@ pub enum UiCommand {
         arguments: Vec<Value>,
         modal: bool,
         layer: i32,
+        host_role: Option<rvn_ui::PageRole>,
+        inherit_host: bool,
     },
     Close {
         name: String,
@@ -370,6 +373,7 @@ pub fn validate_handler(block: &[Statement]) -> EvalResult<()> {
     for statement in block {
         match statement {
             Statement::UiOpen { .. }
+            | Statement::MenuExecute { .. }
             | Statement::UiClose { .. }
             | Statement::UiFocus { .. }
             | Statement::UiSetState { .. }
@@ -480,6 +484,7 @@ impl<'a> Computation<'a> {
                     variables.insert(name.clone(), value);
                 }
                 Statement::UiOpen { .. }
+                | Statement::MenuExecute { .. }
                 | Statement::UiClose { .. }
                 | Statement::UiFocus { .. }
                 | Statement::UiSetState { .. }
@@ -578,6 +583,13 @@ impl<'a> Computation<'a> {
             )),
         };
         Ok(match statement {
+            Statement::MenuExecute { request } => UiCommand::Menu {
+                source: None,
+                request: rvn_ui::source_menus::MenuRequest::parse(
+                    crate::ui::value_to_json(&self.eval(request, vars, 0)?)
+                        .map_err(|error|EvalError::InvalidMenuRequest(error.to_string()))?)
+                    .map_err(EvalError::InvalidMenuRequest)?,
+            },
             Statement::AccessibilityConfigure { settings } => UiCommand::AccessibilityConfigure {
                 settings: rvn_ui::accessibility::AccessibilitySettings::parse(
                     crate::ui::value_to_json(&self.eval(settings, vars, 0)?)?,
@@ -659,6 +671,7 @@ impl<'a> Computation<'a> {
                 arguments,
                 modal,
                 layer,
+                story,
             } => {
                 let name = string(self.eval(name, vars, 0)?)?;
                 let Value::List(arguments) = self.eval(arguments, vars, 0)? else {
@@ -687,6 +700,8 @@ impl<'a> Computation<'a> {
                     arguments,
                     modal,
                     layer,
+                    host_role: None,
+                    inherit_host: !*story,
                 }
             }
             Statement::UiClose { name } => UiCommand::Close {
@@ -920,6 +935,11 @@ pub fn eval_expr(expr: &Expr, vars: &HashMap<String, Value>) -> EvalResult<Value
     FunctionLibrary::default().eval(expr, vars)
 }
 
+fn is_menu_request_constructor(name:&str)->bool {
+    matches!(name,"menu_action"|"menu_start_scene"|"menu_open_page"|"menu_save_page"|"menu_language"
+        |"menu_choose"|"menu_gallery_cg"|"menu_gallery_tab"|"menu_confirm"|"menu_cancel"
+        |"menu_slot"|"menu_protect"|"menu_number"|"menu_bool"|"menu_advance"|"menu_skip_typewriter")
+}
 fn eval_call(
     name: &str,
     evaluated: Vec<Value>,
@@ -928,12 +948,19 @@ fn eval_call(
 ) -> EvalResult<Value> {
     if let Some(arity) = rvn_parser::builtin_arity(name) {
         if !arity.contains(&evaluated.len()) {
-            return Err(EvalError::InvalidFunction(format!(
-                "{name} : nombre d’arguments invalide"
-            )));
+            let message=format!("{name} : nombre d’arguments invalide");
+            return Err(if is_menu_request_constructor(name){EvalError::InvalidMenuRequest(message)}else{EvalError::InvalidFunction(message)});
         }
     }
     match name {
+        "menu_action" | "menu_start_scene" | "menu_open_page" | "menu_save_page" | "menu_language"
+        | "menu_choose" | "menu_gallery_cg" | "menu_gallery_tab" | "menu_confirm" | "menu_cancel"
+        | "menu_slot" | "menu_protect" | "menu_number" | "menu_bool" | "menu_advance" | "menu_skip_typewriter" => {
+            let args = evaluated.iter().map(crate::ui::value_to_json).collect::<EvalResult<Vec<_>>>()
+                .map_err(|error|EvalError::InvalidMenuRequest(error.to_string()))?;
+            let value = rvn_ui::source_menus::construct(name, &args).map_err(EvalError::InvalidMenuRequest)?;
+            crate::ui::value_from_json(&value).map_err(|error|EvalError::InvalidMenuRequest(error.to_string()))
+        }
         "canvas_rect" | "canvas_ellipse" | "canvas_line" | "canvas_polygon" | "canvas_text"
         | "canvas_image" | "canvas_group" | "canvas_hit" => {
             crate::ui::canvas_construct(name, &evaluated)

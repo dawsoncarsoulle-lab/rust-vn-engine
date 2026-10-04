@@ -678,11 +678,15 @@ fn collect_block(
             Statement::FunctionReturn { value } => {
                 collect_expr_vars(value, &mut symbols.used_vars, &loc)
             }
+            Statement::MenuExecute { request } => {
+                collect_expr_vars(request, &mut symbols.used_vars, &loc)
+            }
             Statement::UiOpen {
                 name,
                 arguments,
                 modal,
                 layer,
+                ..
             } => {
                 for value in [name, arguments, modal, layer] {
                     collect_expr_vars(value, &mut symbols.used_vars, &loc);
@@ -2480,11 +2484,13 @@ fn collect_interface_metadata(statement: &Statement, symbols: &mut Symbols, loc:
         Statement::FunctionReturn { value }
         | Statement::SetVar { value, .. }
         | Statement::LocalVar { value, .. } => walk(value, symbols, loc),
+        Statement::MenuExecute { request } => walk(request, symbols, loc),
         Statement::UiOpen {
             name,
             arguments,
             modal,
             layer,
+                ..
         } => {
             for value in [name, arguments, modal, layer] {
                 walk(value, symbols, loc);
@@ -2613,12 +2619,21 @@ fn expr_to_display(expr: &Expr) -> String {
 }
 
 fn locate_stmt(source: &SourceFile, stmt: &Statement) -> Location {
+    if let Statement::MenuExecute { request } = stmt {
+        // Distinguish separate request handlers before falling back to the
+        // command token, whose spelling alone can occur elsewhere in the file.
+        if let Some(mut location)=find_location(&source.path,&source.source,&format!("menu.execute({}",expr_to_display(request))) {
+            location.span_len=Some("menu.execute(".len());
+            return location;
+        }
+    }
     let needles: Vec<String> = match stmt {
         Statement::Function { name, .. } => vec![format!("function {name}")],
         Statement::Screen { name, .. } => vec![format!("screen {name}")],
         Statement::Handler { name, .. } => vec![format!("handler {name}")],
         Statement::LocalVar { name, .. } => vec![format!("local {name}")],
-        Statement::UiOpen { .. } => vec!["ui.open(".into()],
+        Statement::MenuExecute { .. } => vec!["menu.execute(".into()],
+        Statement::UiOpen { story, .. } => vec![if *story { "ui.open_story(" } else { "ui.open(" }.into()],
         Statement::MotionPlay { .. } => vec!["motion.play(".into()],
         Statement::MotionStop { .. } => vec!["motion.stop(".into()],
         Statement::MotionWait { .. } => vec!["motion.wait(".into()],
@@ -2844,6 +2859,27 @@ mod tests {
         );
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(root_missing).unwrap();
+    }
+
+    #[test]
+    fn story_open_diagnostic_has_the_real_crlf_method_location() {
+        let root=fixture("screen inventory(data){return component(\"root\",\"text\",{},[])}\r\nhandler open_inventory(event){\r\n    ui.open_story(\"inventory\",[missing],true,60)\r\n}\r\nlabel start\r\nreturn\r\n");
+        let report=check_project(root.to_str().unwrap(),CheckOptions::default());
+        let diagnostic=report.diagnostics.iter().find(|diagnostic|diagnostic.kind=="unassigned-variable"&&diagnostic.message.contains("missing")).expect("Missing argument must be diagnosed");
+        assert_eq!(diagnostic.line,Some(3));assert_eq!(diagnostic.column,Some(5));assert_eq!(diagnostic.span_len,Some("ui.open_story(".len()));
+        assert!(diagnostic.source_line.as_ref().is_some_and(|line|line.contains("ui.open_story")));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn menu_execute_reads_handler_globals_and_reports_missing_request_variables() {
+        let root=fixture("init{set page_id=\"title\"}\r\nhandler open_page(event){\r\n    menu.execute(menu_open_page(page_id))\r\n}\r\nhandler broken(event){\r\n    menu.execute(menu_choose(missing_index))\r\n}\r\nlabel start\r\nreturn\r\n");
+        let report=check_project(root.to_str().unwrap(),CheckOptions::default());
+        let diagnostic=report.diagnostics.iter().find(|diagnostic|diagnostic.kind=="unassigned-variable"&&diagnostic.message.contains("missing_index")).expect("A missing request variable must be diagnosed");
+        assert_eq!(diagnostic.line,Some(6));assert_eq!(diagnostic.column,Some(5));assert_eq!(diagnostic.span_len,Some("menu.execute(".len()));
+        assert!(diagnostic.source_line.as_ref().is_some_and(|line|line.contains("missing_index")));
+        assert!(!report.diagnostics.iter().any(|diagnostic|diagnostic.kind=="unused-variable"&&diagnostic.message.contains("page_id")),"{:?}",report.diagnostics);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

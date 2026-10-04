@@ -20,6 +20,8 @@ const LIBS_WINDOWS: [&str; 5] = [
     "swscale-10.dll",
     "swresample-7.dll",
 ];
+const CLOCK_RUNTIME: &str = "libwinpthread-1.dll";
+const CLOCK_NOTICE: &str = "WINPTHREAD-NOTICES.txt";
 const SOURCES: [&str; 6] = [
     "ffmpeg-9.0.2.tar.xz",
     "ffmpeg-9.0.2.tar.xz.asc",
@@ -123,7 +125,11 @@ pub fn copy_from(
             "Video decoder configuration includes forbidden component {forbidden}"
         );
     }
-    let libs = if windows { &LIBS_WINDOWS } else { &LIBS_LINUX };
+    let mut libs = if windows { LIBS_WINDOWS.to_vec() } else { LIBS_LINUX.to_vec() };
+    let library_manifest = fs::read_to_string(bounded_file(sources, "LIBRARY-SHA256SUMS", 16 * 1024)?)?;
+    let clock_runtime = windows && library_manifest.lines().any(|line|
+        line.split_once("  ").is_some_and(|(_, name)| name == CLOCK_RUNTIME));
+    if clock_runtime { libs.push(CLOCK_RUNTIME); }
     // Validate every input before starting to write the destination.
     let binaries: Vec<_> = libs
         .iter()
@@ -133,6 +139,7 @@ pub fn copy_from(
     if windows {
         source_names.extend(WINDOWS_NOTICES);
     }
+    if clock_runtime { source_names.push(CLOCK_NOTICE); }
     let original: Vec<_> = source_names
         .iter()
         .map(|name| bounded_file(sources, name, 100 * 1024 * 1024))
@@ -141,6 +148,7 @@ pub fn copy_from(
     if windows {
         hashed_sources.extend(WINDOWS_NOTICES);
     }
+    if clock_runtime { hashed_sources.push(CLOCK_NOTICE); }
     verify_manifest(
         sources,
         &bounded_file(sources, "SHA256SUMS", 16 * 1024)?,
@@ -149,7 +157,7 @@ pub fn copy_from(
     verify_manifest(
         libraries,
         &bounded_file(sources, "LIBRARY-SHA256SUMS", 16 * 1024)?,
-        libs,
+        &libs,
     )?;
     let output = if windows {
         destination.to_owned()
@@ -169,7 +177,7 @@ pub fn copy_from(
         notices.join("build-ffmpeg-lgpl.sh"),
         include_str!("../../tools/build-ffmpeg-lgpl.sh"),
     )?;
-    fs::write(notices.join("README.txt"),"FFmpeg 9.0.2, dynamically linked, LGPL 2.1 or later.\nBuilt without GPL, nonfree or version3 FFmpeg components. VP8/Vorbis playback only.\nThe original corresponding source, license and complete configure log are included.\nTo rebuild, run: bash build-ffmpeg-lgpl.sh linux (or windows with MinGW installed).\nNo FFmpeg code has been modified. The same build script is included.\nYou may replace the shared libraries with ABI-compatible builds; do not remove these notices.\nThe Windows build also contains MinGW runtime code and libgcc under their separate notices, including GPLv3 with the GCC Runtime Library Exception 3.1; this exception does not relicense the game as GPL.\nFFmpeg is an independent project: https://ffmpeg.org/\n")?;
+    fs::write(notices.join("README.txt"),"FFmpeg 9.0.2, dynamically linked, LGPL 2.1 or later.\nBuilt without GPL, nonfree or version3 FFmpeg components. VP8/Vorbis playback only.\nThe original corresponding source, license and complete configure log are included.\nTo rebuild, run: bash build-ffmpeg-lgpl.sh linux (or windows with MinGW installed).\nNo FFmpeg code has been modified. The same build script is included.\nYou may replace the shared libraries with ABI-compatible builds; do not remove these notices.\nThe Windows build also contains MinGW runtime code and libgcc under their separate notices, including GPLv3 with the GCC Runtime Library Exception 3.1; this exception does not relicense the game as GPL.\nAn optional MinGW clock runtime is carried only when listed in the checked library manifest; its complete MIT/BSD notices accompany it.\nFFmpeg is an independent project: https://ffmpeg.org/\n")?;
     Ok(())
 }
 pub fn copy_for_runtime(runtime: &Path, destination: &Path) -> Result<()> {
@@ -323,6 +331,37 @@ mod tests {
         fs::write(&manifest, "").unwrap();
         assert!(verify_manifest(&root, &manifest, &["clip.dll"]).is_err());
         let _ = fs::remove_dir_all(root);
+    }
+    #[test]
+    fn optional_windows_clock_runtime_requires_its_checked_binary_and_complete_notice() {
+        use std::io::Write;
+        let root = std::env::temp_dir().join(format!("rvn-clock-runtime-{}-{}",
+            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fixture(&root, true);
+        let sources = root.join("video-notices");
+        let clock = b"test clock runtime";
+        fs::write(root.join(CLOCK_RUNTIME), clock).unwrap();
+        let mut libraries = fs::OpenOptions::new().append(true).open(sources.join("LIBRARY-SHA256SUMS")).unwrap();
+        writeln!(libraries, "{:x}  {CLOCK_RUNTIME}", Sha256::digest(clock)).unwrap();
+        drop(libraries);
+        let missing = root.join("export-missing-notice");
+        assert!(copy_from(&root, &sources, &missing, true).is_err());
+        assert!(!missing.exists());
+        let notice = b"test complete clock copyright and license fixture";
+        fs::write(sources.join(CLOCK_NOTICE), notice).unwrap();
+        let mut hashes = fs::OpenOptions::new().append(true).open(sources.join("SHA256SUMS")).unwrap();
+        writeln!(hashes, "{:x}  {CLOCK_NOTICE}", Sha256::digest(notice)).unwrap();
+        drop(hashes);
+        let exported = root.join("exported");
+        copy_from(&root, &sources, &exported, true).unwrap();
+        assert_eq!(fs::read(exported.join(CLOCK_RUNTIME)).unwrap(), clock);
+        assert_eq!(fs::read(exported.join("rust-vn-notices/ffmpeg").join(CLOCK_NOTICE)).unwrap(), notice);
+        fs::write(root.join(CLOCK_RUNTIME), "changed clock runtime").unwrap();
+        let invalid = root.join("export-invalid-clock");
+        assert!(copy_from(&root, &sources, &invalid, true).is_err());
+        assert!(!invalid.exists());
+        assert_eq!(fs::read(exported.join(CLOCK_RUNTIME)).unwrap(), clock);
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn incomplete_or_gpl_distribution_is_rejected_before_creating_an_export() {

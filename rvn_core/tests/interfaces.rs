@@ -81,6 +81,142 @@ fn input(element: &str, kind: ScreenEventKind, value: Option<Value>) -> UiInput 
 }
 
 #[test]
+fn imported_narrative_does_not_skip_caller_init_or_replay_it_on_step_load_and_rollback() {
+    use std::{fs, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
+    struct Fixture { root: PathBuf, temp: PathBuf }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            // Only the exclusively created test tree may be removed.
+            let root = fs::canonicalize(&self.root).unwrap();
+            assert_eq!(root.parent(), Some(self.temp.as_path()));
+            assert!(root.file_name().unwrap().to_string_lossy().starts_with("rvn-core-init-imports-"));
+            assert!(!fs::symlink_metadata(&self.root).unwrap().file_type().is_symlink());
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+    let temp = fs::canonicalize(std::env::temp_dir()).unwrap();
+    let root = temp.join(format!("rvn-core-init-imports-{}-{}", std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+    fs::create_dir(&root).unwrap();
+    let fixture = Fixture { root, temp };
+    fs::write(fixture.root.join("chapitre.rvn"), r#"
+init { set init_order = ["chapter"] set imported_score = 4 }
+function imported_caption() { return "Été à Montréal 🍃" }
+handler close_imported(event) {
+    set qa_closed = qa_closed + 1
+    ui.close("inventory")
+}
+screen inventory() {
+    return component("root", "column", {}, [
+        component("caption", "text", {"text":imported_caption()}, []),
+        component("score", "text", {"text":"Score " + imported_score}, []),
+        component("close", "button", {"text":"Fermer", "events":{"click":"close_imported"}}, [])
+    ])
+}
+label conclusion_voisine
+"Neighbor"
+return
+"#).unwrap();
+    fs::write(fixture.root.join("main.rvn"), r#"
+use "chapitre.rvn"
+use "./chapitre.rvn"
+init {
+    set qa_closed = 0
+    set init_order = list_append(init_order, "main")
+    set observed_imported_score = imported_score
+}
+if false { init { set leaked_initializer = 1 } }
+label start
+set imported_score = imported_score + 1
+ui.open_story("inventory", [], true, 20)
+"Waiting"
+"Closed [qa_closed] score [imported_score]"
+call conclusion_voisine
+"Done"
+"#).unwrap();
+
+    let parsed = rvn_parser::parse_file_with_uses(fixture.root.join("main.rvn")).unwrap();
+    assert_eq!(parsed.iter().filter(|stmt| matches!(stmt, rvn_parser::Statement::Init { .. })).count(), 2);
+    let caller_init = parsed.iter().rposition(|stmt| matches!(stmt, rvn_parser::Statement::Init { .. })).unwrap();
+    assert!(parsed[..caller_init].iter().any(|stmt| matches!(stmt, rvn_parser::Statement::Dialogue { .. })));
+    assert!(parsed[..caller_init].iter().any(|stmt| matches!(stmt, rvn_parser::Statement::Return)));
+    let mut game = Engine::new(parsed, Headless::default(), 16).unwrap();
+    let expected_order = Value::List(vec![Value::Str("chapter".into()), Value::Str("main".into())]);
+    assert_eq!(game.state.vars.get("qa_closed"), Some(&Value::Int(0)));
+    assert_eq!(game.state.vars["imported_score"], Value::Int(4));
+    assert_eq!(game.state.vars["observed_imported_score"], Value::Int(4));
+    assert_eq!(game.state.vars["init_order"], expected_order);
+    assert!(!game.state.vars.contains_key("leaked_initializer"));
+    assert!(game.history.is_empty());
+    let start = game.script.iter().position(|stmt|
+        matches!(stmt, rvn_parser::Statement::Label { name } if name == "start")).unwrap();
+    // Standalone runtime applies start_label only after Engine::new has run Init.
+    game.state.pc = start;
+    assert!(matches!(game.step_until_interaction().unwrap(), Some(rvn_core::Interaction::Dialogue { text, .. }) if text == "Waiting"));
+    let views = game.interface_views().unwrap();
+    assert_eq!(views[0].root.find("caption").unwrap().text, "Été à Montréal 🍃");
+    assert_eq!(views[0].root.find("score").unwrap().text, "Score 5");
+    assert_eq!(game.state.vars["init_order"], expected_order);
+    assert!(!game.state.vars.contains_key("leaked_initializer"));
+    let before_click = serde_json::to_value(&game.state).unwrap();
+    let history = game.history.len();
+    game.interface_event(UiInput { screen: "inventory".into(), element: "close".into(),
+        kind: ScreenEventKind::Click, value: None, key: None }).unwrap();
+    assert_eq!(game.state.vars["qa_closed"], Value::Int(1));
+    assert_eq!(game.state.vars["imported_score"], Value::Int(5));
+    assert_eq!(game.state.vars["init_order"], expected_order);
+    assert!(!game.state.vars.contains_key("leaked_initializer"));
+    assert!(game.interface_views().unwrap().is_empty());
+    assert_eq!(game.history.len(), history + 1);
+    let saved = rvn_core::save::SaveData::from_state(&game.state, 1, "start".into(), "main.rvn".into());
+    assert!(game.rollback());
+    assert_eq!(serde_json::to_value(&game.state).unwrap(), before_click);
+    assert_eq!(game.history.len(), history);
+    game.load_data(saved).unwrap();
+    assert_eq!(game.state.vars["qa_closed"], Value::Int(1));
+    assert_eq!(game.state.vars["imported_score"], Value::Int(5));
+    assert_eq!(game.state.vars["init_order"], expected_order);
+    assert!(!game.state.vars.contains_key("leaked_initializer"));
+    assert!(game.interface_views().unwrap().is_empty());
+    game.advance_dialogue().unwrap();
+    assert!(matches!(game.step_until_interaction().unwrap(), Some(rvn_core::Interaction::Dialogue { text, .. }) if text == "Closed 1 score 5"));
+    game.advance_dialogue().unwrap();
+    assert!(matches!(game.step_until_interaction().unwrap(), Some(rvn_core::Interaction::Dialogue { text, .. }) if text == "Neighbor"));
+    game.advance_dialogue().unwrap();
+    assert!(matches!(game.step_until_interaction().unwrap(), Some(rvn_core::Interaction::Dialogue { text, .. }) if text == "Done"));
+    assert_eq!(game.state.vars["qa_closed"], Value::Int(1));
+    assert_eq!(game.state.vars["init_order"], expected_order);
+    assert!(!game.state.vars.contains_key("leaked_initializer"));
+
+    let mut fresh = game.fresh(Headless::default(), 16).unwrap();
+    assert_eq!(fresh.script, game.script);
+    assert_eq!(fresh.state.vars["qa_closed"], Value::Int(0));
+    assert_eq!(fresh.state.vars["imported_score"], Value::Int(4));
+    assert_eq!(fresh.state.vars["init_order"], expected_order);
+    assert!(!fresh.state.vars.contains_key("leaked_initializer"));
+    // Encountering the already executed caller Init during ordinary stepping
+    // must skip its body instead of appending "main" a second time.
+    fresh.state.pc = caller_init;
+    assert!(matches!(fresh.step_until_interaction().unwrap(), Some(rvn_core::Interaction::Dialogue { text, .. }) if text == "Waiting"));
+    assert_eq!(fresh.state.vars["qa_closed"], Value::Int(0));
+    assert_eq!(fresh.state.vars["imported_score"], Value::Int(5));
+    assert_eq!(fresh.state.vars["init_order"], expected_order);
+    assert!(!fresh.state.vars.contains_key("leaked_initializer"));
+}
+
+#[test]
+fn function_initializers_remain_rejected_instead_of_becoming_startup_globals() {
+    let source = "function helper() { init { set leaked = 1 } return 0 }\nlabel start\n\"Waiting\"\n";
+    let error = parse(source).expect_err("Init must be rejected inside a function before Engine construction");
+    assert_eq!(error.kind, rvn_parser::ParseErrorKind::UnexpectedToken {
+        got: "Some(Init)".into(),
+        expected: "fonction de calcul : set, if, while, for ou return <valeur> (sans opération narrative)",
+    });
+    assert_eq!(error.location, rvn_parser::SourceLocation { line: 1, col: 21, len: 4 });
+    assert_eq!(error.source_line, source.lines().next().unwrap());
+}
+
+#[test]
 fn oversized_events_are_rejected_without_mutating_state_or_rollback() {
     let mut game = Engine::new(parse(PROGRAM).unwrap(), Headless::default(), 16).unwrap();
     game.step_until_interaction().unwrap();

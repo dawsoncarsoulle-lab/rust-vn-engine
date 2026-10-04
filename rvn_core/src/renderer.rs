@@ -5,6 +5,15 @@ use std::io;
 // ─── TRAIT ───────────────────────────────────────────────────────────────────
 
 pub trait Renderer {
+    fn validate_menu_request(&self, _effect: &rvn_ui::source_menus::MenuEffect, _candidate: &GameState) -> Result<(), String> {
+        Err("This renderer has no game-menu action authority".into())
+    }
+    /// Accept only already validated requests. Hosts queue them for their
+    /// existing game authority; this method must not perform file I/O.
+    fn menu_request(&mut self, _effect: &rvn_ui::source_menus::MenuEffect, _previous: &GameState, _candidate: &GameState) -> Result<(), String> {
+        Err("This renderer has no game-menu action authority".into())
+    }
+    fn menu_request_pending(&self) -> bool { false }
     /// Report successful legacy loads without pretending their story identity
     /// was verified. Default keeps existing third-party renderers compatible.
     fn loaded_compatibility(&mut self, _compatibility: crate::engine::LoadCompatibility) {}

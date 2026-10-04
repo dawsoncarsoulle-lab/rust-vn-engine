@@ -464,6 +464,7 @@ impl GraphDocument {
         // doivent être présentes dès sa création. L'éditeur peut ainsi proposer
         // un inspecteur typé sans connaître des valeurs implicites propres au codegen.
         let defaults = match kind {
+            NodeKind::UiOpen => vec![("story",PropertyValue::Bool(false))],
             NodeKind::Label => vec![(
                 "label",
                 PropertyValue::String(

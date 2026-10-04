@@ -30,8 +30,9 @@ pub(super) fn render_quick_actions(
     roots: Query<Entity, With<QuickActionsRoot>>,
     mut last: Local<String>,
     mut previous: Local<Option<String>>,
+    source: Option<Res<crate::source_menus::SourceMenus>>,
 ) {
-    let index = menus.doc.as_ref().and_then(|d| {
+    let index = (!source.as_deref().is_some_and(|source|source.active(rvn_ui::PageRole::QuickActions))).then(||menus.doc.as_ref()).flatten().and_then(|d| {
         d.pages
             .iter()
             .position(|p| p.role == Some(rvn_ui::PageRole::QuickActions))
@@ -66,6 +67,7 @@ pub(super) fn render_quick_actions(
             .map(|l| l.current_lang())
             .unwrap_or("")
     );
+    let key=format!("{key}:rollback={}",crate::systems::input::can_rollback(&ctx.engine.0));
     if *last == key {
         return;
     }
@@ -150,14 +152,15 @@ pub(super) fn render_choices(
     roots: Query<Entity, With<ChoicesRoot>>,
     mut last: Local<String>,
     mut previous: Local<Option<String>>,
+    source: Option<Res<crate::source_menus::SourceMenus>>,
 ) {
-    let index = menus.doc.as_ref().and_then(|d| {
+    let index = (!source.as_deref().is_some_and(|source|source.active(rvn_ui::PageRole::Choices))).then(||menus.doc.as_ref()).flatten().and_then(|d| {
         d.pages
             .iter()
             .position(|p| p.role == Some(rvn_ui::PageRole::Choices))
     });
     for mut visibility in &mut original {
-        *visibility = if index.is_some() {
+        *visibility = if index.is_some() || source.as_deref().is_some_and(|source|source.active(rvn_ui::PageRole::Choices)) {
             Visibility::Hidden
         } else {
             Visibility::Inherited
@@ -668,8 +671,9 @@ pub(super) fn render_narrative(
     mut texts: Query<(&NarrativeText, &mut Text), Without<CharacterNameText>>,
     mut last: Local<String>,
     mut previous: Local<Option<String>>,
+    source: Option<Res<crate::source_menus::SourceMenus>>,
 ) {
-    let role = menus.doc.as_ref().and_then(|d| {
+    let role = (!source.as_deref().is_some_and(|source|source.active(rvn_ui::PageRole::Dialogue))).then(||menus.doc.as_ref()).flatten().and_then(|d| {
         d.pages
             .iter()
             .position(|p| p.role == Some(rvn_ui::PageRole::Dialogue))
@@ -684,7 +688,7 @@ pub(super) fn render_narrative(
             .iter()
             .any(|(style, _)| style.display != Display::None);
     for (_, mut visibility) in &mut original {
-        *visibility = if active || !in_story {
+        *visibility = if active || source.as_deref().is_some_and(|source|source.active(rvn_ui::PageRole::Dialogue)) || !in_story {
             Visibility::Hidden
         } else {
             Visibility::Inherited

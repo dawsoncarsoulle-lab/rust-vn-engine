@@ -234,6 +234,7 @@ const BUILTIN_ROOTS: &[BuiltinDoc] = &[
     BuiltinDoc{name:"image_layers",summary:"image_layers(prefix, paths) discovers layers from project-relative image names: prefix__id, prefix__group__attribute, or prefix__variant__group__attribute. The explicit image-list order is drawing order; ambiguous matching names are errors."},
     BuiltinDoc{name:"video_clip",summary:"video_clip(source, properties) defines a WebM VP8/Vorbis clip, target, captions, mask, controls and events."},
     BuiltinDoc {name:"ui",summary:"Opens, closes and focuses reusable screens. Available in narrative code and non-blocking handlers, not calculation expressions."},
+    BuiltinDoc {name:"menu",summary:"Submits typed game requests from live screen handlers. Preview contexts never grant game or confirmation authority."},
     BuiltinDoc { name: "len", summary: "Number of list items, dictionary entries, or Unicode characters in text." },
     BuiltinDoc { name: "contains", summary: "Tests for a list value, dictionary key, or text substring." },
     BuiltinDoc { name: "list_append", summary: "list_append(list, value) returns a new list; the input is unchanged." },
@@ -1302,11 +1303,13 @@ fn collect_block(
             Statement::SetVar { value, .. }
             | Statement::LocalVar { value, .. }
             | Statement::FunctionReturn { value } => collect_expr(value, source, semantic),
+            Statement::MenuExecute { request } => collect_expr(request, source, semantic),
             Statement::UiOpen {
                 name,
                 arguments,
                 modal,
                 layer,
+                ..
             } => {
                 for value in [name, arguments, modal, layer] {
                     collect_expr(value, source, semantic);
@@ -1768,8 +1771,12 @@ fn method_docs(target: &str, index: &ProjectIndex) -> Option<&'static [MethodDoc
         ]),
         "ui"=>Some(&[
             MethodDoc{name:"open",summary:"Opens or replaces a named screen with parameters, modality and display layer.",snippet:"open(\"${1:screen}\", [${2:arguments}], ${3:true}, ${4:1})"},
+            MethodDoc{name:"open_story",summary:"Opens a saved narrative interface independent of a source-menu host. The interface participates in rollback and survives the host closing.",snippet:"open_story(\"${1:screen}\", [${2:arguments}], ${3:true}, ${4:1})"},
             MethodDoc{name:"close",summary:"Closes a screen and invokes its close handler once.",snippet:"close(\"${1:screen}\")"},
             MethodDoc{name:"focus",summary:"Focuses an available input or button. The game reveals it in scrolling containers.",snippet:"focus(\"${1:screen}\", \"${2:component}\")"},
+        ]),
+        "menu"=>Some(&[
+            MethodDoc{name:"execute",summary:"Submits one typed request. The real game validates the live screen, phase, slot protection and exact confirmation token before committing the handler.",snippet:"execute(${1:event[\"data\"][\"request\"]})"},
         ]),
         "music" => Some(&[
             MethodDoc {
@@ -2139,7 +2146,7 @@ mod tests {
     use super::*;
 
     fn uri(name: &str) -> Url {
-        Url::from_file_path(format!("/tmp/{name}.rvn")).unwrap()
+        Url::from_file_path(std::env::temp_dir().join(format!("{name}.rvn"))).unwrap()
     }
 
     #[test]
@@ -2161,6 +2168,55 @@ mod tests {
         assert!(index.rename_edit(&symbol, "inventory").is_none());
         let screen = index.symbol_at(&main, Position::new(3, 12)).unwrap();
         assert_eq!(index.references_for(&screen).len(), 2);
+    }
+
+    #[test]
+    fn menu_request_calls_keep_exact_utf16_references_and_rename_spans() {
+        let file=uri("menu-request-references");
+        let source="function resume_request(){return menu_action(\"resume\")}\r\nhandler clicked(event){\r\n    menu.execute(dict_get({\"💠\": resume_request()},\"💠\",menu_action(\"none\")))\r\n}\r\n// resume_request() is prose, not a reference.\r\nlabel start\r\nreturn\r\n";
+        let index=analyze_workspace(&[],&HashMap::from([(file.clone(),source.into())])).index;
+        assert!(index.diagnostics_for(&file).is_empty(),"{:?}",index.diagnostics_for(&file));
+        let line=source.lines().nth(2).unwrap();let byte=line.find("resume_request(").unwrap();
+        let start=line[..byte].encode_utf16().count() as u32;
+        let expected=Range::new(Position::new(2,start),Position::new(2,start+"resume_request".len() as u32));
+        let symbol=index.symbol_at(&file,Position::new(2,start+2)).unwrap();
+        assert_eq!(symbol.name,"resume_request");
+        let references=index.references_for(&symbol);assert_eq!(references.len(),2);
+        assert!(references.iter().any(|location|location.uri==file&&location.range==expected));
+        let edits=index.rename_edit(&symbol,"resume_command").unwrap().changes.unwrap();
+        assert_eq!(edits[&file].len(),2);
+        assert!(edits[&file].iter().any(|edit|edit.range==expected&&edit.new_text=="resume_command"));
+        assert!(edits[&file].iter().all(|edit|edit.range.start.line==0||edit.range.start.line==2));
+    }
+
+    #[test]
+    fn story_open_screen_references_are_renamed_and_bad_arity_is_located() {
+        let file=uri("story-open-references");
+        let source="screen inventory(data){return component(\"root\",\"text\",{},[])}\r\nhandler opened(event){\r\n    ui.open_story(\"inventory\",[1],true,60)\r\n}\r\nlabel start\r\nreturn\r\n";
+        let index=analyze_workspace(&[],&HashMap::from([(file.clone(),source.into())])).index;
+        assert!(index.diagnostics_for(&file).is_empty(),"{:?}",index.diagnostics_for(&file));
+        let expected=Range::new(Position::new(2,19),Position::new(2,28));
+        let symbol=index.symbol_at(&file,Position::new(2,21)).unwrap();
+        assert_eq!(symbol.name,"inventory");assert_eq!(index.references_for(&symbol).len(),2);
+        let edits=index.rename_edit(&symbol,"bag").unwrap().changes.unwrap();
+        assert!(edits[&file].iter().any(|edit|edit.range==expected&&edit.new_text=="bag"));
+        let invalid=source.replace("[1]","[]");let index=analyze_workspace(&[],&HashMap::from([(file.clone(),invalid)])).index;
+        let errors=index.diagnostics_for(&file);
+        let diagnostic=errors.iter().find(|error|diagnostic_code(error)==Some("screen-arity")).expect("An invalid open_story argument count must be diagnosed");
+        assert_eq!(diagnostic.range,expected);
+    }
+
+    #[test]
+    fn source_menu_methods_have_completion_and_live_request_call_diagnostics() {
+        let index=ProjectIndex::default();
+        assert!(index.completion_items("menu.",Position::new(0,5)).iter().any(|item|item.label=="execute"));
+        assert!(index.completion_items("ui.",Position::new(0,3)).iter().any(|item|item.label=="open_story"));
+        let file=uri("menu-request-diagnostics");
+        let source="handler clicked(event){\r\n    menu.execute(missing_request())\r\n}\r\nlabel start\r\nreturn\r\n";
+        let index=analyze_workspace(&[],&HashMap::from([(file.clone(),source.into())])).index;
+        let errors=index.diagnostics_for(&file);
+        let diagnostic=errors.iter().find(|error|diagnostic_code(error)==Some("unknown-function")).expect("A missing request function must be diagnosed");
+        assert_eq!(diagnostic.range,Range::new(Position::new(1,17),Position::new(1,32)));
     }
 
     #[test]

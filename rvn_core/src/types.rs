@@ -93,6 +93,9 @@ pub struct GameState {
     /// Transaction-local speech requests. They must not be replayed by load or rollback.
     #[serde(skip)]
     pub(crate) speech_requests: Vec<rvn_ui::accessibility::SpeechRequest>,
+    /// Event-local requests: never persisted or replayed by load/rollback.
+    #[serde(skip)]
+    pub(crate) menu_requests: Vec<rvn_ui::source_menus::MenuEffect>,
     #[serde(default)]
     pub videos: crate::video::VideoState,
     #[serde(default)]

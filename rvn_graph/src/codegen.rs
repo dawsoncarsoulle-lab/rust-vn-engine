@@ -662,6 +662,11 @@ impl Emitter<'_> {
                     ));
                     None
                 }
+                NodeKind::MenuExecute => {
+                    push_indent(source, indent);
+                    source.push_str(&format!("menu.execute({})\n", self.expression_from_input(node_id, "request")?));
+                    self.successor(node_id, "exec_out")?
+                }
                 NodeKind::UiOpen
                 | NodeKind::UiClose
                 | NodeKind::UiFocus
@@ -683,7 +688,14 @@ impl Emitter<'_> {
                 | NodeKind::AccessibilitySpeak
                 | NodeKind::AccessibilityStop => {
                     let (method, inputs): (&str, &[&str]) = match node.kind {
-                        NodeKind::UiOpen => ("open", &["name", "arguments", "modal", "layer"]),
+                        NodeKind::UiOpen => {
+                            let method=match node.properties.get("story") {
+                                None|Some(PropertyValue::Bool(false))=>"open",
+                                Some(PropertyValue::Bool(true))=>"open_story",
+                                _=>return Err(TranspileError::ExpectedBool { node: node_id, key: "story".into() }),
+                            };
+                            (method,&["name", "arguments", "modal", "layer"])
+                        },
                         NodeKind::UiClose => ("close", &["name"]),
                         NodeKind::UiSetState => ("set_state", &["name", "element", "state"]),
                         NodeKind::MotionPlay => ("play", &["target", "definition"]),
@@ -975,6 +987,11 @@ impl Emitter<'_> {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 format!("component({})", arguments.join(", "))
+            }
+            kind if kind.menu_constructor().is_some() => {
+                let (name, keys) = kind.menu_constructor().unwrap();
+                let args = keys.iter().map(|key| self.expression_from_input_with_stack(node.id, key, active)).collect::<Result<Vec<_>, _>>()?;
+                format!("{name}({})", args.join(", "))
             }
             NodeKind::CanvasRect
             | NodeKind::CanvasEllipse

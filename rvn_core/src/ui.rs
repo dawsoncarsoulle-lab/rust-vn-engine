@@ -12,11 +12,27 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 pub struct UiState {
     pub screens: Vec<ScreenInstance>,
     pub next_order: u64,
+    /// Host presenters never consume the narrative allocation sequence.
+    #[serde(skip)]
+    pub host_next_order: u64,
+}
+impl UiState {
+    pub(crate) fn story_only(&self) -> Self {
+        let mut state = self.clone();
+        state.screens.retain(|screen| screen.host_role.is_none());
+        state.host_next_order = 0;
+        state
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ScreenInstance {
     pub name: String,
+    /// System presenters are host-owned, never restored from a story save.
+    #[serde(skip)]
+    pub host_role: Option<rvn_ui::PageRole>,
+    #[serde(skip)]
+    pub host_root: bool,
     pub arguments: Vec<Value>,
     pub modal: bool,
     pub layer: i32,
@@ -263,6 +279,7 @@ pub fn value_from_json(value: &serde_json::Value) -> Result<Value, EvalError> {
 }
 
 impl UiLibrary {
+    pub fn screen_arity(&self, name: &str) -> Option<usize> { self.screens.get(name).map(|(parameters, _)| parameters.len()) }
     pub fn has_handler(&self, name: &str) -> bool {
         self.handlers.contains_key(name)
     }
@@ -374,10 +391,11 @@ impl UiLibrary {
         let mut views = Vec::new();
         let mut canvas_count = 0;
         let mut budget = CanvasBudget::default();
+        let modal_host_roles: std::collections::BTreeSet<_> = state.screens.iter().filter(|screen| screen.modal).filter_map(|screen| screen.host_role).collect();
         for instance in &state.screens {
             if !names.insert(&instance.name)
-                || !orders.insert(instance.order)
-                || instance.order >= state.next_order
+                || !orders.insert((instance.host_role.is_some(), instance.order))
+                || instance.order >= if instance.host_role.is_some() { state.host_next_order } else { state.next_order }
                 || !(-1000..=1000).contains(&instance.layer)
             {
                 return Err(invalid("état d’interface sauvegardé invalide"));
@@ -541,7 +559,14 @@ impl UiLibrary {
             views.push(ScreenView {
                 name: instance.name.clone(),
                 modal: instance.modal,
-                layer: instance.layer,
+                // The system modal is above every authored story layer. Keep
+                // this same effective layer for drawing and all hit tests.
+                layer: if let Some(role) = instance.host_role {
+                    let narrative_presenter = matches!(role, rvn_ui::PageRole::Dialogue | rvn_ui::PageRole::Choices | rvn_ui::PageRole::QuickActions);
+                    if modal_host_roles.contains(&role) {
+                        instance.layer + if role == rvn_ui::PageRole::Confirm { 9000 } else if narrative_presenter { 3000 } else { 6000 }
+                    } else if narrative_presenter { instance.layer - 3000 } else { instance.layer }
+                } else { instance.layer },
                 order: instance.order,
                 focus,
                 root,
@@ -618,6 +643,7 @@ impl UiLibrary {
         random: &mut RandomState,
     ) -> Result<Option<(UiInput, Component)>, EvalError> {
         match command {
+            UiCommand::Menu { .. } => Err(EvalError::InvalidMenuRequest("Menu requests must be validated by the host authority".into())),
             UiCommand::AccessibilityConfigure { .. }
             | UiCommand::AccessibilitySpeak { .. }
             | UiCommand::AccessibilityStop => Err(EvalError::InvalidFunction(
@@ -647,9 +673,14 @@ impl UiLibrary {
                 arguments,
                 modal,
                 layer,
+                host_role,
+                ..
             } => {
                 if !self.screens.contains_key(&name) {
                     return Err(invalid(format!("écran inconnu : {name}")));
+                }
+                if state.screens.iter().any(|screen| screen.name == name && screen.host_role != host_role) {
+                    return Err(invalid("An interface name is owned by another presenter"));
                 }
                 let old_order = state
                     .screens
@@ -659,20 +690,25 @@ impl UiLibrary {
                 let order = if let Some(order) = old_order {
                     order
                 } else {
-                    let order = state.next_order;
-                    state.next_order = order.checked_add(1).ok_or(EvalError::NumericOverflow)?;
+                    let counter = if host_role.is_some() { &mut state.host_next_order } else { &mut state.next_order };
+                    let order = *counter;
+                    *counter = order.checked_add(1).ok_or(EvalError::NumericOverflow)?;
                     order
                 };
                 state.screens.retain(|screen| screen.name != name);
                 state.screens.push(ScreenInstance {
+                    host_root: false,
                     name: name.clone(),
+                    host_role,
                     arguments,
                     modal,
                     layer,
                     order,
                     focus: None,
                     values: BTreeMap::new(),
-                    random: RandomState::seeded(random.next_u64()),
+                    random: RandomState::seeded(if host_role.is_some() {
+                        name.bytes().fold(order ^ 0x72676e6d656e75, |seed, byte| seed.wrapping_mul(1099511628211) ^ u64::from(byte))
+                    } else { random.next_u64() }),
                     canvas_states: BTreeMap::new(),
                 });
                 self.reconcile_canvas_states(state, functions, globals)?;
@@ -911,7 +947,7 @@ impl UiLibrary {
             value.insert("props".into(), props);
             value.insert("frame".into(), canvas_frame_value(frame));
         }
-        let (next, commands) = functions.handle_event_budgeted(
+        let (next, mut commands) = functions.handle_event_budgeted(
             parameters,
             body,
             &[Value::Dict(value)],
@@ -919,6 +955,12 @@ impl UiLibrary {
             random,
             budget,
         )?;
+        for command in &mut commands {
+            if let UiCommand::Menu { source, .. } = command { *source = Some(event.screen.clone()); }
+            if let UiCommand::Open { host_role, inherit_host: true, .. } = command {
+                *host_role = state.screens.iter().find(|screen| screen.name == event.screen).and_then(|screen| screen.host_role);
+            }
+        }
         *globals = next;
         Ok(commands)
     }

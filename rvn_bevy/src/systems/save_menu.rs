@@ -74,10 +74,21 @@ impl SaveMenuState {
 /// Component marking the root entity of the save menu overlay.
 #[derive(Component)]
 pub struct SaveMenuOverlay;
+/// Only native presenters receive this snapshot. Authored roots/proxies are
+/// never replaced by the built-in metadata refresh.
+#[derive(Component)]
+pub(crate) struct BuiltinSaveSnapshot {
+    revision: u64,
+    mode: SaveMenuMode,
+}
 
 /// Component on each save slot button.  Holds the slot index (starting at 1).
 #[derive(Component)]
 pub struct SaveSlotButton(pub usize);
+/// Snapshot from metadata when a built-in panel opens. Authored proxies and
+/// programmable controls keep their own eligibility and never receive this tag.
+#[derive(Component)]
+pub(crate) struct BuiltinSlotUnavailable;
 #[derive(Component)]
 pub(crate) struct SaveSlotMode(pub SaveMenuMode);
 
@@ -145,19 +156,80 @@ pub fn record_resume_target(persistent: &mut PersistentDataResource, target: Las
     }
 }
 
+fn native_save_panel(display: Display) -> NodeBundle {
+    NodeBundle {
+        style: Style {
+            display,
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            top: Val::Px(0.0),
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            ..default()
+        },
+        background_color: Color::srgba(0.0, 0.0, 0.0, 0.90).into(),
+        z_index: ZIndex::Global(2000),
+        ..default()
+    }
+}
+
+fn native_save_cancel(parent: &mut ChildBuilder) {
+    parent
+        .spawn((
+            ButtonBundle {
+                style: Style {
+                    width: Val::Px(200.0),
+                    height: Val::Px(40.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    margin: UiRect::all(Val::Px(12.0)),
+                    ..default()
+                },
+                background_color: Color::srgba(0.15, 0.15, 0.30, 0.95).into(),
+                ..default()
+            },
+            SaveMenuCancelButton,
+        ))
+        .with_children(|button| {
+            button.spawn(TextBundle::from_section(
+                "Annuler",
+                TextStyle { font_size: 22.0, color: Color::WHITE, ..default() },
+            ));
+        });
+}
+
 /// Spawn the save menu overlay when becoming active.
 pub fn spawn_save_menu_overlay(
     mut commands: Commands,
     save_state: Res<SaveMenuState>,
     project_paths: Res<ProjectPaths>,
     _engine: Res<VnEngine>,
-    query: Query<Entity, With<SaveMenuOverlay>>,
+    query: Query<(Entity, Option<&BuiltinSaveSnapshot>, Option<&Style>), With<SaveMenuOverlay>>,
+    mut failed: bevy::prelude::Local<Option<(u64, SaveMenuMode, Option<Entity>)>>,
 ) {
-    // Only spawn when becoming active and overlay is not already present
+    // Reads occur at open or an explicit metadata revision/mode change. The
+    // unchanged-frame path returns before constructing or reading a manager.
     if !save_state.active {
+        *failed = None;
         return;
     }
-    if !query.is_empty() {
+    let signature = (save_state.revision, save_state.mode);
+    let mut obsolete = Vec::new();
+    let mut display = Display::Flex;
+    for (entity, snapshot, style) in &query {
+        let Some(snapshot) = snapshot else { return; };
+        if (snapshot.revision, snapshot.mode) == signature { return; }
+        obsolete.push(entity);
+        if let Some(style) = style { display = style.display; }
+    }
+    // An IO refusal must not become a retry/error loop on each frame. Keep
+    // the old presentation and retry only on reopen or another explicit event.
+    let attempt = (signature.0, signature.1, obsolete.first().copied());
+    if *failed == Some(attempt) {
         return;
     }
 
@@ -169,6 +241,26 @@ pub fn spawn_save_menu_overlay(
         Ok(mgr) => mgr,
         Err(e) => {
             error!("[save_menu] failed to create SaveManager: {e}");
+            if obsolete.is_empty() {
+                // On the first failed open there is no previous panel to
+                // retain. Keep an actual Cancel target so the refusal cannot
+                // trap the player. Its snapshot prevents retries per frame;
+                // closing/reopening removes the root and permits a retry.
+                *failed = None;
+                commands.spawn((
+                    native_save_panel(display),
+                    SaveMenuOverlay,
+                    BuiltinSaveSnapshot { revision: signature.0, mode: signature.1 },
+                )).with_children(|parent| {
+                    parent.spawn(TextBundle::from_section(
+                        "Les sauvegardes sont indisponibles. Revenez puis réessayez.",
+                        TextStyle { font_size: 24.0, color: Color::WHITE, ..default() },
+                    ));
+                    native_save_cancel(parent);
+                });
+            } else {
+                *failed = Some(attempt);
+            }
             return;
         }
     };
@@ -180,27 +272,14 @@ pub fn spawn_save_menu_overlay(
             Err(_) => slots.push(None),
         }
     }
+    *failed = None;
+    for entity in obsolete { commands.entity(entity).despawn_recursive(); }
 
     commands
         .spawn((
-            NodeBundle {
-                style: Style {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(8.0),
-                    ..default()
-                },
-                background_color: Color::srgba(0.0, 0.0, 0.0, 0.90).into(),
-                z_index: ZIndex::Global(2000),
-                ..default()
-            },
+            native_save_panel(display),
             SaveMenuOverlay,
+            BuiltinSaveSnapshot { revision: save_state.revision, mode: save_state.mode },
         ))
         .with_children(|parent| {
             // Title
@@ -222,6 +301,7 @@ pub fn spawn_save_menu_overlay(
             // Slots
             for (i, meta_opt) in slots.iter().enumerate() {
                 let slot_index = i + 1;
+                let unavailable = save_state.mode != SaveMenuMode::Save && meta_opt.is_none();
                 let label_text: String;
                 let timestamp_text: String;
                 if let Some(meta) = meta_opt {
@@ -234,8 +314,7 @@ pub fn spawn_save_menu_overlay(
                     timestamp_text = "".to_string();
                 }
 
-                parent
-                    .spawn((
+                let mut button = parent.spawn((
                         ButtonBundle {
                             style: Style {
                                 width: Val::Px(400.0),
@@ -245,18 +324,25 @@ pub fn spawn_save_menu_overlay(
                                 padding: UiRect::all(Val::Px(8.0)),
                                 ..default()
                             },
-                            background_color: Color::srgba(0.10, 0.10, 0.25, 0.95).into(),
+                            background_color: if unavailable {
+                                Color::srgba(0.08, 0.08, 0.12, 0.65)
+                            } else {
+                                Color::srgba(0.10, 0.10, 0.25, 0.95)
+                            }.into(),
                             ..default()
                         },
                         SaveSlotButton(slot_index),
-                    ))
-                    .with_children(|btn| {
+                    ));
+                if unavailable {
+                    button.insert(BuiltinSlotUnavailable);
+                }
+                button.with_children(|btn| {
                         // Label text
                         btn.spawn(TextBundle::from_section(
                             label_text.clone(),
                             TextStyle {
                                 font_size: 24.0,
-                                color: Color::WHITE,
+                                color: if unavailable {Color::srgb(0.5,0.5,0.55)} else {Color::WHITE},
                                 ..default()
                             },
                         ));
@@ -275,32 +361,7 @@ pub fn spawn_save_menu_overlay(
             }
 
             // Cancel button
-            parent
-                .spawn((
-                    ButtonBundle {
-                        style: Style {
-                            width: Val::Px(200.0),
-                            height: Val::Px(40.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            margin: UiRect::all(Val::Px(12.0)),
-                            ..default()
-                        },
-                        background_color: Color::srgba(0.15, 0.15, 0.30, 0.95).into(),
-                        ..default()
-                    },
-                    SaveMenuCancelButton,
-                ))
-                .with_children(|btn| {
-                    btn.spawn(TextBundle::from_section(
-                        "Annuler",
-                        TextStyle {
-                            font_size: 22.0,
-                            color: Color::WHITE,
-                            ..default()
-                        },
-                    ));
-                });
+            native_save_cancel(parent);
         });
 }
 
@@ -314,6 +375,7 @@ pub fn save_menu_interaction_system(
             &mut BackgroundColor,
             Option<&SaveSlotColors>,
             Option<&SaveSlotMode>,
+            Option<&BuiltinSlotUnavailable>,
         ),
         Changed<Interaction>,
     >,
@@ -335,10 +397,10 @@ pub fn save_menu_interaction_system(
         return;
     }
 
-    for (interaction, slot_comp, cancel_comp, mut bg_color, colors, mode_override) in
+    for (interaction, slot_comp, cancel_comp, mut bg_color, colors, mode_override, unavailable) in
         interaction_query.iter_mut()
     {
-        if slot_comp.is_none() && cancel_comp.is_none() {
+        if unavailable.is_some() || (slot_comp.is_none() && cancel_comp.is_none()) {
             continue;
         }
         match interaction {

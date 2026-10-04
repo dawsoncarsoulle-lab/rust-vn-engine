@@ -1,6 +1,7 @@
 mod authoring_collections;
 mod blueprint_policy;
 mod catalog;
+mod callable_refactor;
 mod choice;
 mod codegen;
 mod component;
@@ -8,6 +9,7 @@ mod document;
 mod ids;
 mod import;
 mod interface_authoring;
+mod interface_clipboard;
 mod migration;
 mod motion_authoring;
 mod pin_catalog;
@@ -20,8 +22,10 @@ mod types;
 mod validation;
 
 pub use document::*;
+pub use callable_refactor::*;
 pub use ids::*;
 pub use interface_authoring::*;
+pub use interface_clipboard::*;
 pub use migration::*;
 pub use type_inference::VariableScope;
 pub use types::*;

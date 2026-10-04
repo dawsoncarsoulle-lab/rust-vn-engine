@@ -11,6 +11,8 @@
 use crate::expr::{Expr, InterpolatedText};
 use serde::{Deserialize, Serialize};
 
+fn is_false(value: &bool) -> bool { !*value }
+
 // ─── POSITION ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -245,6 +247,10 @@ pub enum Statement {
         arguments: Expr,
         modal: Expr,
         layer: Expr,
+        /// Explicit narrative ownership from a presenter handler.
+        // Keep the legacy AST encoding and saved story identities unchanged.
+        #[serde(default, skip_serializing_if = "is_false")]
+        story: bool,
     },
     UiClose {
         name: Expr,
@@ -258,6 +264,7 @@ pub enum Statement {
         element: Expr,
         state: Expr,
     },
+    MenuExecute { request: Expr },
     MotionPlay {
         target: Expr,
         definition: Expr,

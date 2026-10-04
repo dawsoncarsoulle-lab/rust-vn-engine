@@ -32,6 +32,7 @@ mod composed_motion;
 mod custom_canvas;
 mod layered_characters;
 mod menu_documents;
+mod source_menus;
 #[cfg(not(target_arch = "wasm32"))]
 mod menu_preview_data;
 #[cfg(all(feature = "video", not(target_arch = "wasm32")))]
@@ -539,6 +540,7 @@ fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
     .insert_resource(DebugStepRequest::default())
     // Events & States
     .add_plugins(menu_documents::MenuDocumentsPlugin)
+    .add_plugins(source_menus::SourceMenusPlugin)
     .add_plugins(programmable_ui::ProgrammableUiPlugin)
     .add_plugins(custom_canvas::CustomCanvasPlugin)
     .add_plugins(accessibility::AccessibilityPlugin)
@@ -644,9 +646,28 @@ fn run_loaded_game(launch: RuntimeLaunch) -> Result<(), String> {
     app.add_plugins(native_video::NativeVideoPlugin);
     #[cfg(target_arch = "wasm32")]
     app.add_plugins(web_video::WebVideoPlugin);
-    app.run();
+    run_runtime_app(app)
+}
 
-    Ok(())
+fn run_runtime_app(mut app:App)->Result<(),String> {
+    match app.run() {
+        bevy::app::AppExit::Success=>Ok(()),
+        bevy::app::AppExit::Error(code)=>Err(format!("Runtime exited with error code {}",code.get())),
+    }
+}
+
+#[cfg(test)]
+mod runtime_exit_tests {
+    use super::*;
+    #[test]
+    fn runtime_propagates_success_and_failure_emitted_by_the_real_app_runner() {
+        let mut successful=App::new();
+        successful.add_systems(Update,|mut exit:EventWriter<bevy::app::AppExit>|{exit.send(bevy::app::AppExit::Success);});
+        assert_eq!(run_runtime_app(successful),Ok(()));
+        let mut failing=App::new();
+        failing.add_systems(Update,|mut exit:EventWriter<bevy::app::AppExit>|{exit.send(bevy::app::AppExit::Error(std::num::NonZeroU8::new(7).unwrap()));});
+        assert_eq!(run_runtime_app(failing),Err("Runtime exited with error code 7".into()));
+    }
 }
 
 fn build_engine(

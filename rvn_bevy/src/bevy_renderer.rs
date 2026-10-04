@@ -2,8 +2,17 @@ use rvn_core::{GameState, Renderer, SpriteState};
 use rvn_parser::{AnimationParam, Hotspot, Position, Transition};
 
 use crate::vn_command::VnCommand;
+use std::sync::atomic::{AtomicU64,Ordering};
+
+// Transient process allocation: a fresh Engine or restored GameState never
+// reuses an identity issued for an earlier authoritative menu candidate.
+static NEXT_MENU_RECEIPT:AtomicU64=AtomicU64::new(1);
 
 pub struct BevyRenderer {
+    pub(crate) menu_authority: rvn_ui::source_menus::MenuAuthority,
+    pub(crate) menu_stamp: crate::source_menus::Stamp,
+    pub(crate) menu_pending: bool,
+    pub(crate) menu_can_rollback: bool,
     pub pending: Vec<VnCommand>,
     pub choice_result: Option<usize>,
     pub waiting_for_input: bool,
@@ -12,6 +21,10 @@ pub struct BevyRenderer {
 impl BevyRenderer {
     pub fn new() -> Self {
         Self {
+            menu_authority: Default::default(),
+            menu_stamp: Default::default(),
+            menu_pending: false,
+            menu_can_rollback: false,
             pending: Vec::new(),
             choice_result: None,
             waiting_for_input: false,
@@ -82,9 +95,53 @@ mod restore_tests {
             .iter()
             .any(|cmd| matches!(cmd, VnCommand::MusicStop)));
     }
+
+    #[test]
+    fn actual_narrative_screen_can_issue_requests_but_fictitious_and_closed_origins_cannot() {
+        let source="handler act(event){menu.execute(menu_action(\"none\"))}\nscreen inventory(){return component(\"act\",\"button\",{\"events\":{\"click\":\"act\"}},[])}\nlabel start\nui.open(\"inventory\",[],false,0)\n\"Waiting\"";
+        let mut engine=rvn_core::Engine::new(rvn_parser::parse(source).unwrap(),BevyRenderer::new(),10).unwrap();
+        engine.step_until_interaction().unwrap();engine.renderer.menu_authority.story_ui_active=true;
+        engine. interface_event(rvn_core::ui::UiInput{screen:"inventory".into(),element:"act".into(),kind:rvn_ui::programmable::ScreenEventKind::Click,value:None,key:None}).unwrap();
+        let receipt=engine.renderer.take_pending().into_iter().find_map(|command|if let VnCommand::SourceMenu(receipt)=command{Some(receipt)}else{None}).unwrap();
+        engine.renderer.menu_pending=false;assert!(engine.renderer.validate_menu_request(&receipt.effect,&engine.state).is_ok());
+        let mut fake=receipt.effect.clone();fake.screen="invented".into();assert!(engine.renderer.validate_menu_request(&fake,&engine.state).is_err());
+        let mut closed=engine.state.clone();closed.ui.screens.clear();assert!(engine.renderer.validate_menu_request(&receipt.effect,&closed).is_err());
+    }
 }
 
 impl Renderer for BevyRenderer {
+    fn validate_menu_request(&self, effect: &rvn_ui::source_menus::MenuEffect, candidate: &GameState) -> Result<(), String> {
+        if self.menu_pending { return Err("A menu operation is already pending".into()); }
+        if matches!(&effect.request,rvn_ui::source_menus::MenuRequest::Action{action:rvn_ui::Action::Rollback})&&!self.menu_can_rollback {
+            return Err("No previous narrative or UI state is available".into());
+        }
+        let instance = candidate.ui.screens.iter().find(|screen| screen.name == effect.screen
+            && screen.order == effect.screen_order && screen.host_role == effect.host_role)
+            .ok_or_else(|| "Menu request screen is not live in the candidate state".to_string())?;
+        let mut authority = self.menu_authority.clone();
+        if let Some(role) = instance.host_role {
+            if !authority.screen_roles.values().any(|active| *active == role) {
+                return Err("Source-menu role was retired".into());
+            }
+            authority.live_screens.insert(instance.name.clone());
+            authority.screen_roles.insert(instance.name.clone(), role);
+        } else if authority.story_ui_active {
+            authority.live_screens.insert(instance.name.clone());
+            authority.screen_roles.remove(&instance.name);
+        }
+        authority.validate(effect)
+    }
+    fn menu_request(&mut self, effect: &rvn_ui::source_menus::MenuEffect, previous: &GameState, candidate: &GameState) -> Result<(), String> {
+        self.validate_menu_request(effect, candidate)?;
+        let identity=NEXT_MENU_RECEIPT.fetch_update(Ordering::Relaxed,Ordering::Relaxed,|value|value.checked_add(1))
+            .map_err(|_|"Menu receipt identities exhausted".to_string())?;
+        self.pending.push(VnCommand::SourceMenu(crate::source_menus::Receipt {
+            identity, effect: effect.clone(), stamp: self.menu_stamp.clone(), previous: previous.clone(),
+        }));
+        self.menu_pending = true;
+        Ok(())
+    }
+    fn menu_request_pending(&self) -> bool { self.menu_pending }
     fn loaded_compatibility(&mut self, compatibility: rvn_core::LoadCompatibility) {
         self.pending
             .retain(|command| !matches!(command, VnCommand::LoadedCompatibility(_)));
@@ -328,6 +385,7 @@ impl Renderer for BevyRenderer {
     }
 
     fn restore_screen(&mut self, state: &GameState) {
+        self.menu_pending = false;
         self.pending.clear();
         self.pending.push(VnCommand::ClearSprites);
         self.pending.push(VnCommand::SetBackground {

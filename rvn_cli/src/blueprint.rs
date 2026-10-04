@@ -141,7 +141,10 @@ mod tests {
         let directory = std::env::temp_dir().join(format!(
             "rvn-blueprint-cli-{}-{}",
             std::process::id(),
-            std::thread::current().name().unwrap_or("test")
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir_all(&directory).unwrap();
         let graph_path = directory.join("chapter.rvngraph");

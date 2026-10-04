@@ -41,6 +41,17 @@ pub enum PageRole {
     QuickActions,
 }
 impl PageRole {
+    pub const ALL: [Self; 11] = [Self::Title, Self::Pause, Self::Save, Self::Load,
+        Self::Settings, Self::Gallery, Self::History, Self::Confirm, Self::Dialogue,
+        Self::Choices, Self::QuickActions];
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Title => "title", Self::Pause => "pause", Self::Save => "save",
+            Self::Load => "load", Self::Settings => "settings", Self::Gallery => "gallery",
+            Self::History => "history", Self::Confirm => "confirm", Self::Dialogue => "dialogue",
+            Self::Choices => "choices", Self::QuickActions => "quick_actions",
+        }
+    }
     pub fn from_id(id: &str) -> Option<Self> {
         Some(match id {
             "title" => Self::Title,

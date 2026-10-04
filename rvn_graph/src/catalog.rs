@@ -66,6 +66,11 @@ pub fn node_definition(kind: NodeKind) -> NodeDefinition {
     use NodeCategory as Category;
     use NodeKind as Kind;
     let mut definition = match kind {
+        Kind::MenuExecute | Kind::MenuAction | Kind::MenuStartScene | Kind::MenuOpenPage | Kind::MenuSlot | Kind::MenuProtect
+        | Kind::MenuSavePage | Kind::MenuNumberPreference | Kind::MenuBoolPreference | Kind::MenuLanguage
+        | Kind::MenuAdvance | Kind::MenuSkipTypewriter | Kind::MenuChoose | Kind::MenuGalleryCg | Kind::MenuGalleryTab
+        | Kind::MenuConfirm | Kind::MenuCancel => definition!(kind, Category::Interaction, kind.menu_title(),
+            ["menu", "jeu", "source", "save", "load", "settings", "choice", "game"]),
         Kind::Use => definition!(
             kind,
             Category::Structure,
@@ -112,7 +117,7 @@ pub fn node_definition(kind: NodeKind) -> NodeDefinition {
             kind,
             Category::Interaction,
             "Ouvrir une interface",
-            ["ui", "screen", "open", "interface", "modal"]
+            ["ui", "screen", "open", "interface", "modal", "story", "open_story", "narrative"]
         ),
         Kind::UiClose => definition!(
             kind,
@@ -932,6 +937,10 @@ pub fn node_definition(kind: NodeKind) -> NodeDefinition {
 }
 
 pub const ALL_NODE_KINDS: &[NodeKind] = &[
+    NodeKind::MenuExecute, NodeKind::MenuAction, NodeKind::MenuStartScene, NodeKind::MenuOpenPage,
+    NodeKind::MenuSlot, NodeKind::MenuProtect, NodeKind::MenuSavePage, NodeKind::MenuNumberPreference,
+    NodeKind::MenuBoolPreference, NodeKind::MenuLanguage, NodeKind::MenuAdvance, NodeKind::MenuSkipTypewriter,
+    NodeKind::MenuChoose, NodeKind::MenuGalleryCg, NodeKind::MenuGalleryTab, NodeKind::MenuConfirm, NodeKind::MenuCancel,
     NodeKind::FunctionEntry,
     NodeKind::ScreenEntry,
     NodeKind::HandlerEntry,

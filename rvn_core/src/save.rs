@@ -279,7 +279,7 @@ impl SaveData {
             videos: state.videos.clone(),
             layered: state.layered.clone(),
             story_identity: state.story_identity.clone(),
-            ui: state.ui.clone(),
+            ui: state.ui.story_only(),
             format_version: SAVE_FORMAT_VERSION,
             random: state.random,
             display_random: state.display_random,
@@ -322,6 +322,7 @@ impl SaveData {
         GameState {
             accessibility: self.accessibility,
             speech_requests: Vec::new(),
+            menu_requests: Vec::new(),
             motions: self.motions,
             videos: self.videos,
             layered: self.layered,
@@ -376,7 +377,7 @@ pub struct SaveManager {
 }
 
 impl SaveManager {
-    fn protected_slots(&self) -> Result<std::collections::BTreeSet<u32>, SaveError> {
+    pub fn protected_slots(&self) -> Result<std::collections::BTreeSet<u32>, SaveError> {
         #[cfg(not(target_arch = "wasm32"))]
         let json = match fs::read_to_string(self.save_dir.join("protected_slots.json")) {
             Ok(json) => Some(json),
@@ -882,6 +883,7 @@ mod tests {
 
         GameState {
             story_identity: None,
+            menu_requests: Default::default(),
             accessibility: Default::default(),
             speech_requests: Vec::new(),
             videos: Default::default(),
@@ -1173,6 +1175,7 @@ mod tests {
         );
 
         let state = GameState {
+            menu_requests: Default::default(),
             accessibility: Default::default(),
             speech_requests: Vec::new(),
             videos: Default::default(),

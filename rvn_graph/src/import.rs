@@ -10,6 +10,25 @@ pub fn reimport_script(
     script: &Script,
     previous: &[GraphDocument],
 ) -> Result<Vec<GraphDocument>, String> {
+    reimport_scopes(script, previous, true, None)
+}
+
+/// The source transaction validates the complete, resolved project. Its
+/// writable scopes alone may legitimately reference an imported definition.
+pub(crate) fn reimport_source_scopes(
+    script: &Script,
+    resolved: &Script,
+    previous: &[GraphDocument],
+) -> Result<Vec<GraphDocument>, String> {
+    reimport_scopes(script, previous, false, Some(resolved))
+}
+
+fn reimport_scopes(
+    script: &Script,
+    previous: &[GraphDocument],
+    validate_whole_project: bool,
+    resolved: Option<&Script>,
+) -> Result<Vec<GraphDocument>, String> {
     // RVN stores Text payloads as strings. A prior explicit Text annotation is
     // presentation metadata unless source supplies a contrary typed value.
     let text_variables: std::collections::BTreeSet<_> = previous
@@ -25,7 +44,7 @@ pub fn reimport_script(
                 .map(|variable| variable.name.clone())
         })
         .collect();
-    let mut imported = import_script_with_text_variables(script, &text_variables)?;
+    let mut imported = import_script_with_text_variables(script, &text_variables, validate_whole_project, resolved)?;
     let mut next_graph = previous
         .iter()
         .map(|g| g.graph_id.get())
@@ -125,18 +144,26 @@ pub fn reimport_script(
         }
         transpile(graph).map_err(err)?;
     }
-    transpile_project(&imported)?;
+    if validate_whole_project {
+        transpile_project(&imported)?;
+    }
     Ok(imported)
 }
 
 /// One init document followed by one document per source label, in source order.
 pub fn import_script(script: &Script) -> Result<Vec<GraphDocument>, String> {
-    import_script_with_text_variables(script, &std::collections::BTreeSet::new())
+    import_script_with_text_variables(script, &std::collections::BTreeSet::new(), true, None)
+}
+
+pub(crate) fn import_source_scopes(script: &Script, resolved: &Script) -> Result<Vec<GraphDocument>, String> {
+    import_script_with_text_variables(script, &std::collections::BTreeSet::new(), false, Some(resolved))
 }
 
 fn import_script_with_text_variables(
     script: &Script,
     text_variables: &std::collections::BTreeSet<String>,
+    validate_whole_project: bool,
+    resolved: Option<&Script>,
 ) -> Result<Vec<GraphDocument>, String> {
     let mut init = Vec::new();
     let mut functions = Vec::new();
@@ -186,7 +213,7 @@ fn import_script_with_text_variables(
         }
     }
     let mut characters = BTreeMap::new();
-    let mut variables = BTreeMap::new();
+    let mut variables = initialized_variables(&init, text_variables);
     for statement in &init {
         match statement {
             Statement::CharacterCreate { id, display_name } => {
@@ -196,58 +223,6 @@ fn import_script_with_text_variables(
                 {
                     return Err(format!("Personnage déclaré deux fois : {id}"));
                 }
-            }
-            Statement::SetVar { name, value } => {
-                let cast = match value {
-                    Expr::Call { name, args }
-                        if args.len() == 1
-                            && matches!(name.as_str(), "string_to_text" | "text_to_string") =>
-                    {
-                        Some((name.as_str(), &args[0]))
-                    }
-                    _ => None,
-                };
-                let initial_literal = cast
-                    .and_then(|(_, value)| literal(value))
-                    .or_else(|| literal(value));
-                let default_value = initial_literal.clone().unwrap_or_else(|| {
-                    if cast.is_some() {
-                        PropertyValue::String(String::new())
-                    } else {
-                        PropertyValue::Int(0)
-                    }
-                });
-                let value_type = match &default_value {
-                    _ if cast.is_some_and(|(kind, _)| kind == "string_to_text") => {
-                        ValueType::InterpolatedText
-                    }
-                    _ if cast.is_some_and(|(kind, _)| kind == "text_to_string") => {
-                        ValueType::String
-                    }
-                    _ if initial_literal.is_none() => {
-                        crate::type_inference::expression_type(value, &variables)
-                    }
-                    PropertyValue::Bool(_) => ValueType::Bool,
-                    PropertyValue::Int(_) => ValueType::Int,
-                    PropertyValue::Float(_) => ValueType::Float,
-                    PropertyValue::StringList(items) => {
-                        ValueType::List(Box::new(if items.is_empty() {
-                            ValueType::Any
-                        } else {
-                            ValueType::String
-                        }))
-                    }
-                    _ if text_variables.contains(name) => ValueType::InterpolatedText,
-                    _ => ValueType::String,
-                };
-                variables.insert(
-                    name.clone(),
-                    VariableDefinition {
-                        name: name.clone(),
-                        value_type,
-                        default_value,
-                    },
-                );
             }
             _ => {}
         }
@@ -276,7 +251,16 @@ fn import_script_with_text_variables(
     // assignments faithful to the initialized type, but expose proven concrete
     // conflicts as Any with a diagnostic, never a forced conversion. Discover
     // globals declared outside init once so every graph shares that registry.
-    let conflicts = infer_project_globals(&blocks, &mut variables);
+    let conflicts = if let Some(resolved) = resolved {
+        // Use the complete validated project for types, while the blocks below
+        // still contain only scopes physically authored in this source file.
+        // Imported initialization never becomes an editable Init node.
+        let context = global_context_blocks(resolved);
+        variables = initialized_variables(&context[0].1, text_variables);
+        infer_project_globals(&context, &mut variables)
+    } else {
+        infer_project_globals(&blocks, &mut variables)
+    };
     let mut result = Vec::new();
     for (index, (kind, body, parameters)) in blocks.into_iter().enumerate() {
         let mut graph = GraphDocument::new(GraphId::new(index as u64 + 1), kind.clone());
@@ -505,7 +489,9 @@ fn import_script_with_text_variables(
         transpile(&builder.graph).map_err(err)?;
         result.push(builder.graph);
     }
-    transpile_project(&result)?;
+    if validate_whole_project {
+        transpile_project(&result)?;
+    }
     Ok(result)
 }
 
@@ -581,6 +567,82 @@ fn key_is_variable_assignment(graph: &GraphDocument, node: NodeId, key: &str) ->
             graph.nodes[&node].kind,
             NodeKind::SetVariable | NodeKind::LocalVariable
         )
+}
+
+fn initialized_variables(
+    init: &[Statement],
+    text_variables: &std::collections::BTreeSet<String>,
+) -> BTreeMap<String, VariableDefinition> {
+    let mut variables = BTreeMap::new();
+    for statement in init {
+        let Statement::SetVar { name, value } = statement else { continue; };
+        let cast = match value {
+            Expr::Call { name, args }
+                if args.len() == 1
+                    && matches!(name.as_str(), "string_to_text" | "text_to_string") =>
+            {
+                Some((name.as_str(), &args[0]))
+            }
+            _ => None,
+        };
+        let initial_literal = cast
+            .and_then(|(_, value)| literal(value))
+            .or_else(|| literal(value));
+        let default_value = initial_literal.clone().unwrap_or_else(|| {
+            if cast.is_some() { PropertyValue::String(String::new()) }
+            else { PropertyValue::Int(0) }
+        });
+        let value_type = match &default_value {
+            _ if cast.is_some_and(|(kind, _)| kind == "string_to_text") => ValueType::InterpolatedText,
+            _ if cast.is_some_and(|(kind, _)| kind == "text_to_string") => ValueType::String,
+            _ if initial_literal.is_none() => crate::type_inference::expression_type(value, &variables),
+            PropertyValue::Bool(_) => ValueType::Bool,
+            PropertyValue::Int(_) => ValueType::Int,
+            PropertyValue::Float(_) => ValueType::Float,
+            PropertyValue::StringList(items) => ValueType::List(Box::new(
+                if items.is_empty() { ValueType::Any } else { ValueType::String }
+            )),
+            _ if text_variables.contains(name) => ValueType::InterpolatedText,
+            _ => ValueType::String,
+        };
+        variables.insert(name.clone(), VariableDefinition {
+            name: name.clone(), value_type, default_value,
+        });
+    }
+    variables
+}
+
+// Build only the environments used by global inference. This never imports
+// nodes from dependencies, whose runtime statements need not be editable.
+fn global_context_blocks(script: &Script) -> Vec<(GraphKind, Script, Vec<String>)> {
+    let mut init = Vec::new();
+    let mut blocks = Vec::new();
+    let mut narrative = None;
+    for statement in script {
+        match statement {
+            Statement::Init { body } => init.extend(body.clone()),
+            Statement::Handler { name, parameters, body } => {
+                blocks.push((GraphKind::Handler { name: name.clone() }, body.clone(), parameters.clone()));
+            }
+            Statement::Label { name } => {
+                narrative = Some(blocks.len());
+                blocks.push((GraphKind::Label { name: name.clone() }, Vec::new(), Vec::new()));
+            }
+            Statement::Function { .. } | Statement::Screen { .. } => {},
+            other => {
+                if let Some(index) = narrative { blocks[index].1.push(other.clone()); }
+            }
+        }
+    }
+    blocks.insert(0, (GraphKind::Init, init, Vec::new()));
+    blocks
+}
+
+pub(crate) fn source_global_names(script: &Script) -> std::collections::BTreeSet<String> {
+    let blocks = global_context_blocks(script);
+    let mut variables = initialized_variables(&blocks[0].1, &std::collections::BTreeSet::new());
+    infer_project_globals(&blocks, &mut variables);
+    variables.into_keys().collect()
 }
 
 fn infer_project_globals(
@@ -781,7 +843,7 @@ fn infer_project_globals(
     }
     conflicts
 }
-fn expression_source(expr: &Expr) -> String {
+pub(crate) fn expression_source(expr: &Expr) -> String {
     match expr {
         Expr::Int(v) => v.to_string(),
         Expr::Float(v) => format!("{v:?}"),
@@ -1066,7 +1128,7 @@ impl Builder {
                 "image_layer" => Some((NodeKind::ImageLayer, &["id", "image", "properties"][..])),
                 "image_layers" => Some((NodeKind::ImageLayers, &["prefix", "images"][..])),
                 "video_clip" => Some((NodeKind::VideoClip, &["source", "properties"][..])),
-                _ => None,
+                _ => NodeKind::menu_constructor_named(name),
             };
             if let Some((kind, keys)) = motion.filter(|(_, keys)| keys.len() == args.len()) {
                 let node = self.node(kind, pos)?;
@@ -1238,6 +1300,7 @@ impl Builder {
                 S::UiClose { .. } => NodeKind::UiClose,
                 S::UiFocus { .. } => NodeKind::UiFocus,
                 S::UiSetState { .. } => NodeKind::UiSetState,
+                S::MenuExecute { .. } => NodeKind::MenuExecute,
                 S::MotionPlay { .. } => NodeKind::MotionPlay,
                 S::MotionStop { .. } => NodeKind::MotionStop,
                 S::MotionWait { .. } => NodeKind::MotionWait,
@@ -1302,7 +1365,9 @@ impl Builder {
                     arguments,
                     modal,
                     layer,
+                    story,
                 } => {
+                    self.graph.nodes.get_mut(&n).unwrap().properties.insert("story".into(),PropertyValue::Bool(*story));
                     self.input_expr(n, "name", name)?;
                     self.input_expr(n, "arguments", arguments)?;
                     self.input_expr(n, "modal", modal)?;
@@ -1365,6 +1430,7 @@ impl Builder {
                     self.input_expr(n, "element", element)?;
                     self.input_expr(n, "state", state)?;
                 }
+                S::MenuExecute { request } => self.input_expr(n, "request", request)?,
                 S::While { condition, body } => {
                     continuation = "completed";
                     self.input_expr(n, "condition", condition)?;

@@ -21,6 +21,7 @@ impl From<&rvn_parser::Hotspot> for ImagemapZone {
 
 #[derive(Event, Debug, Clone)]
 pub enum VnCommand {
+    SourceMenu(crate::source_menus::Receipt),
     LoadedCompatibility(rvn_core::LoadCompatibility),
     Accessibility(rvn_ui::accessibility::AccessibilitySettings),
     Speech(rvn_ui::accessibility::SpeechRequest),

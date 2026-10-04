@@ -20,6 +20,10 @@ use serde::Deserialize;
 
 mod blueprint;
 mod check;
+mod desktop_export;
+mod desktop_paths;
+mod desktop_scripts;
+mod web_export;
 #[cfg(any(test, feature = "video"))]
 mod video_distribution;
 use blueprint::transpile_blueprint;
@@ -488,31 +492,59 @@ fn build_project(project: &str, target: BuildTarget) -> Result<()> {
 }
 
 fn build_desktop_project(project_dir: &Path, cfg: &ProjectConfig, game_name: &str) -> Result<()> {
+    let published = build_desktop_project_with_runtime(project_dir, cfg, game_name, build_runtime, |_| Ok(()))?;
+    let executable_name = desktop_executable_name(game_name, std::env::consts::OS);
+    println!("Build terminé.");
+    println!("Build terminé : {}/", published.directory.display());
+    println!("Lancez : {}", published.directory.join(executable_name).display());
+    if let Some(backup) = published.backup {
+        println!("Export précédent conservé : {}", backup.display());
+    }
+    Ok(())
+}
+
+fn build_desktop_project_with_runtime(
+    project_dir: &Path,
+    cfg: &ProjectConfig,
+    game_name: &str,
+    runtime: impl FnOnce() -> Result<PathBuf>,
+    before_replace: impl FnOnce(&Path) -> Result<()>,
+) -> Result<desktop_export::Published> {
     let platform = detect_platform()?;
-    let dist_dir = create_dist_structure(project_dir, game_name, &platform)?;
+    let location = desktop_export::Location::preflight(project_dir, &format!("{game_name}-{platform}"))?;
+    desktop_paths::validate(project_dir, cfg)?;
+    let scripts = desktop_scripts::collect(project_dir, Path::new(&cfg.project.main_script), Path::new(&cfg.paths.saves))?;
+    let manifest = fs::read(project_dir.join("rvn.toml"))?;
 
     println!("Build runtime...");
-    let runtime_binary = build_runtime()?;
+    let runtime_binary = runtime()?;
+    let runtime_metadata = fs::metadata(&runtime_binary)?;
+    anyhow::ensure!(runtime_metadata.is_file() && runtime_metadata.len() > 0, "Desktop runtime is not a nonempty regular file");
+    anyhow::ensure!(fs::read(project_dir.join("rvn.toml"))? == manifest, "Project configuration changed during runtime preparation; the previous export was retained");
+    // No output has been created or moved before all project inputs and the
+    // runtime are ready. The old export remains available throughout staging.
+    let mut stage = create_dist_structure(location)?;
 
     println!("Copie fichiers...");
-    copy_project_files(project_dir, &dist_dir, &cfg)?;
-
     let executable_name = desktop_executable_name(game_name, std::env::consts::OS);
-    let output_binary = dist_dir.join(&executable_name);
-    #[cfg(feature = "video")]
-    video_distribution::copy_for_runtime(&runtime_binary, &dist_dir)?;
-    fs::copy(&runtime_binary, &output_binary).with_context(|| {
-        format!(
-            "unable to copy runtime binary '{}' to '{}'",
-            runtime_binary.display(),
-            output_binary.display()
-        )
-    })?;
-
-    println!("Build terminé.");
-    println!("Build terminé : {}/", dist_dir.display());
-    println!("Lancez : {}", output_binary.display());
-    Ok(())
+    let result = (|| {
+        copy_project_files_with_scripts(project_dir, stage.path(), cfg, &scripts)?;
+        #[cfg(feature = "video")]
+        video_distribution::copy_for_runtime(&runtime_binary, stage.path())?;
+        let output_binary = stage.path().join(&executable_name);
+        fs::copy(&runtime_binary, &output_binary).with_context(|| format!("unable to copy runtime binary '{}' to '{}'", runtime_binary.display(), output_binary.display()))?;
+        anyhow::ensure!(fs::read(project_dir.join("rvn.toml"))? == manifest, "Project configuration changed during Desktop staging; the previous export was retained");
+        stage.publish_with_hook(before_replace)
+    })();
+    match result {
+        Ok(published) => Ok(published),
+        Err(error) => {
+            if let Err(cleanup) = stage.cleanup() {
+                return Err(anyhow::anyhow!("{error:#}\nOwned Desktop stage retained at '{}': {cleanup:#}", stage.path().display()));
+            }
+            Err(error)
+        }
+    }
 }
 
 fn sanitize_game_name(name: &str) -> String {
@@ -566,25 +598,8 @@ fn desktop_platform(os: &str, arch: &str) -> Result<String> {
     }
 }
 
-fn create_dist_structure(project_dir: &Path, game_name: &str, platform: &str) -> Result<PathBuf> {
-    let dist_dir = project_dir
-        .join("dist")
-        .join(format!("{game_name}-{platform}"));
-    if dist_dir.exists() {
-        fs::remove_dir_all(&dist_dir).with_context(|| {
-            format!(
-                "unable to remove previous build directory '{}'",
-                dist_dir.display()
-            )
-        })?;
-    }
-    fs::create_dir_all(dist_dir.join("data")).with_context(|| {
-        format!(
-            "unable to create build data directory '{}'",
-            dist_dir.join("data").display()
-        )
-    })?;
-    Ok(dist_dir)
+fn create_dist_structure(location: desktop_export::Location) -> Result<desktop_export::Stage> {
+    desktop_export::Stage::create(location)
 }
 
 fn build_runtime() -> Result<PathBuf> {
@@ -624,49 +639,25 @@ fn build_runtime() -> Result<PathBuf> {
 }
 
 fn build_web_project(project_dir: &Path, cfg: &ProjectConfig, game_name: &str) -> Result<()> {
-    let dist_dir = create_web_dist_structure(project_dir, game_name)?;
-
-    println!("Build web runtime...");
-    let bundled = std::env::current_exe()?.with_file_name("web-runtime");
-    if bundled.join("game.js").is_file() && bundled.join("game_bg.wasm").is_file() {
-        copy_dir_all(&bundled, &dist_dir)?;
-    } else {
-        let wasm_input = build_web_runtime()?;
-        println!("Génération JS/WASM...");
-        run_wasm_bindgen(&wasm_input, &dist_dir)?;
-    }
-
-    println!("Copie fichiers...");
-    copy_web_project_files(project_dir, &dist_dir, cfg)?;
-
-    println!("Génération index.html...");
-    write_web_index(&dist_dir, game_name)?;
-
-    println!("Build web terminé : {}/", dist_dir.display());
+    let published = web_export::build(project_dir, cfg, game_name, prepare_web_runtime, |_| Ok(()))?;
+    println!("Build web terminé : {}/", published.directory.display());
     println!("Pour tester localement :");
-    println!("  cd {}", dist_dir.display());
+    println!("  cd {}", published.directory.display());
     println!("  python3 -m http.server 8000");
     println!("Puis ouvrez http://localhost:8000/");
+    if let Some(backup) = published.backup {
+        println!("Export précédent conservé : {}", backup.display());
+    }
     Ok(())
 }
 
-fn create_web_dist_structure(project_dir: &Path, game_name: &str) -> Result<PathBuf> {
-    let dist_dir = project_dir.join("dist-web").join(game_name);
-    if dist_dir.exists() {
-        fs::remove_dir_all(&dist_dir).with_context(|| {
-            format!(
-                "unable to remove previous web build directory '{}'",
-                dist_dir.display()
-            )
-        })?;
+fn prepare_web_runtime() -> Result<web_export::Runtime> {
+    let bundled = std::env::current_exe()?.with_file_name("web-runtime");
+    if bundled.join("game.js").is_file() && bundled.join("game_bg.wasm").is_file() {
+        Ok(web_export::Runtime::Bundled(bundled))
+    } else {
+        Ok(web_export::Runtime::Wasm(build_web_runtime()?))
     }
-    fs::create_dir_all(&dist_dir).with_context(|| {
-        format!(
-            "unable to create web build directory '{}'",
-            dist_dir.display()
-        )
-    })?;
-    Ok(dist_dir)
 }
 
 fn build_web_runtime() -> Result<PathBuf> {
@@ -1011,7 +1002,21 @@ fn html_escape(value: &str) -> String {
         .replace('"', "&quot;")
 }
 
+#[cfg(test)]
 fn copy_project_files(project_dir: &Path, dist_dir: &Path, cfg: &ProjectConfig) -> Result<()> {
+    desktop_paths::validate(project_dir, cfg)?;
+    // Resolve the complete import closure before copying anything. In particular,
+    // a root-level generated Blueprint script can import several subdirectories.
+    let scripts = desktop_scripts::collect(
+        project_dir,
+        Path::new(&cfg.project.main_script),
+        Path::new(&cfg.paths.saves),
+    )?;
+    copy_project_files_with_scripts(project_dir, dist_dir, cfg, &scripts)
+}
+
+fn copy_project_files_with_scripts(project_dir: &Path, dist_dir: &Path, cfg: &ProjectConfig, scripts: &desktop_scripts::Scripts) -> Result<()> {
+    desktop_paths::validate(project_dir, cfg)?;
     let data_dir = dist_dir.join("data");
     copy_project_notices(project_dir, &data_dir)?;
     copy_file_relative(project_dir, &data_dir, Path::new("rvn.toml"))?;
@@ -1020,12 +1025,7 @@ fn copy_project_files(project_dir: &Path, dist_dir: &Path, cfg: &ProjectConfig) 
     copy_dir_relative(project_dir, &data_dir, Path::new(&cfg.paths.assets))?;
     copy_dir_relative(project_dir, &data_dir, Path::new(&cfg.paths.locales))?;
 
-    let main_script = Path::new(&cfg.project.main_script);
-    if let Some(script_dir) = main_script.parent().filter(|p| !p.as_os_str().is_empty()) {
-        copy_dir_relative(project_dir, &data_dir, script_dir)?;
-    } else {
-        copy_file_relative(project_dir, &data_dir, main_script)?;
-    }
+    scripts.copy_to(&data_dir)?;
 
     fs::create_dir_all(data_dir.join(&cfg.paths.saves)).with_context(|| {
         format!(

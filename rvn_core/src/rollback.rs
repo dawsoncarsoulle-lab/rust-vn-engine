@@ -47,7 +47,8 @@ impl RollbackHistory {
         }
     }
 
-    pub fn push(&mut self, state: GameState, display: Option<HistoryDisplay>) {
+    pub fn push(&mut self, mut state: GameState, display: Option<HistoryDisplay>) {
+        state.ui = state.ui.story_only();
         if self.entries.len() >= self.max_size {
             self.entries.remove(0);
         }

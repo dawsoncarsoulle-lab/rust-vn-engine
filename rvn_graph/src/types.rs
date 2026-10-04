@@ -42,6 +42,23 @@ pub enum NodeKind {
     UiClose,
     UiFocus,
     UiSetState,
+    MenuExecute,
+    MenuAction,
+    MenuStartScene,
+    MenuOpenPage,
+    MenuSlot,
+    MenuProtect,
+    MenuSavePage,
+    MenuNumberPreference,
+    MenuBoolPreference,
+    MenuLanguage,
+    MenuAdvance,
+    MenuSkipTypewriter,
+    MenuChoose,
+    MenuGalleryCg,
+    MenuGalleryTab,
+    MenuConfirm,
+    MenuCancel,
     UiComponent,
     CanvasRect,
     CanvasEllipse,
@@ -201,6 +218,7 @@ pub enum ValueType {
     ImageLayer,
     VideoClip,
     Asset(AssetKind),
+    MenuRequest,
     Character,
     Label,
     /// Integer list/text position or string dictionary key.
@@ -271,6 +289,44 @@ impl ValueType {
 }
 
 impl NodeKind {
+    pub fn menu_constructor(self) -> Option<(&'static str, &'static [&'static str])> {
+        Some(match self {
+            Self::MenuAction => ("menu_action", &["action"]),
+            Self::MenuStartScene => ("menu_start_scene", &["label"]),
+            Self::MenuOpenPage => ("menu_open_page", &["page"]),
+            Self::MenuSlot => ("menu_slot", &["operation", "slot"]),
+            Self::MenuProtect => ("menu_protect", &["slot", "protected"]),
+            Self::MenuSavePage => ("menu_save_page", &["page"]),
+            Self::MenuNumberPreference => ("menu_number", &["key", "value"]),
+            Self::MenuBoolPreference => ("menu_bool", &["key", "value"]),
+            Self::MenuLanguage => ("menu_language", &["language"]),
+            Self::MenuAdvance => ("menu_advance", &[]),
+            Self::MenuSkipTypewriter => ("menu_skip_typewriter", &[]),
+            Self::MenuChoose => ("menu_choose", &["index"]),
+            Self::MenuGalleryCg => ("menu_gallery_cg", &["id"]),
+            Self::MenuGalleryTab => ("menu_gallery_tab", &["tab"]),
+            Self::MenuConfirm => ("menu_confirm", &["token"]),
+            Self::MenuCancel => ("menu_cancel", &["token"]),
+            _ => return None,
+        })
+    }
+    pub fn menu_constructor_named(name: &str) -> Option<(Self, &'static [&'static str])> {
+        MENU_CONSTRUCTORS.iter().find_map(|kind| kind.menu_constructor().filter(|(found, _)| *found == name).map(|(_, keys)| (*kind, keys)))
+    }
+    pub const fn menu_title(self) -> &'static str {
+        match self {
+            Self::MenuExecute => "Exécuter une commande de jeu",
+            Self::MenuAction => "Navigation de menu", Self::MenuStartScene => "Nouvelle partie depuis une scène",
+            Self::MenuOpenPage => "Ouvrir une page", Self::MenuSlot => "Opération de sauvegarde",
+            Self::MenuProtect => "Protection de sauvegarde", Self::MenuSavePage => "Page de sauvegardes",
+            Self::MenuNumberPreference => "Préférence numérique", Self::MenuBoolPreference => "Préférence Boolean",
+            Self::MenuLanguage => "Langue du jeu", Self::MenuAdvance => "Avancer le dialogue",
+            Self::MenuSkipTypewriter => "Terminer le texte", Self::MenuChoose => "Sélectionner une réponse",
+            Self::MenuGalleryCg => "Afficher une CG", Self::MenuGalleryTab => "Onglet de galerie",
+            Self::MenuConfirm => "Confirmer une opération", Self::MenuCancel => "Annuler une confirmation",
+            _ => "Commande de jeu",
+        }
+    }
     /// New Blueprint arithmetic is numeric. The older RVN expression nodes
     /// remain dynamic unless their author explicitly enables this policy.
     pub fn accepts_blueprint_data_source(self, source: &ValueType) -> bool {
@@ -337,6 +393,10 @@ impl NodeKind {
         }
     }
 }
+pub const MENU_CONSTRUCTORS: &[NodeKind] = &[NodeKind::MenuAction, NodeKind::MenuStartScene, NodeKind::MenuOpenPage,
+    NodeKind::MenuSlot, NodeKind::MenuProtect, NodeKind::MenuSavePage, NodeKind::MenuNumberPreference,
+    NodeKind::MenuBoolPreference, NodeKind::MenuLanguage, NodeKind::MenuAdvance, NodeKind::MenuSkipTypewriter,
+    NodeKind::MenuChoose, NodeKind::MenuGalleryCg, NodeKind::MenuGalleryTab, NodeKind::MenuConfirm, NodeKind::MenuCancel];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -265,6 +265,13 @@ impl GraphDocument {
             .id;
         let output =
             producer(self, pin)?.ok_or("Connect a screen component to the return value")?;
+        self.interface_expression_tree(self.pins[&output].node)
+    }
+
+    /// Read an authored component expression even when its parent's collection
+    /// is assembled by control flow. No evaluation or materialization occurs.
+    pub(crate) fn interface_expression_tree(&self, node: NodeId) -> Result<InterfaceAuthoringNode, String> {
+        if !self.nodes.contains_key(&node){return Err("Unknown authored component".into());}
         fn walk(
             graph: &GraphDocument,
             node: NodeId,
@@ -316,7 +323,7 @@ impl GraphDocument {
         }
         walk(
             self,
-            self.pins[&output].node,
+            node,
             &mut BTreeSet::new(),
             0,
             &mut 0,

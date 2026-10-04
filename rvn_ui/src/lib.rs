@@ -18,6 +18,7 @@ pub use controls::LocalControl;
 mod animation;
 pub use animation::*;
 pub mod accessibility;
+pub mod source_menus;
 pub mod composition;
 pub mod custom_canvas;
 pub mod motion;
@@ -144,6 +145,9 @@ pub struct Document {
     pub components: BTreeMap<String, Element>,
     #[serde(default)]
     pub theme: ThemePreset,
+    /// Explicit source presenters. An empty map preserves the legacy document.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub source_screens: BTreeMap<String, String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Page {
@@ -692,6 +696,7 @@ impl Document {
     /// Temporary component canvases have no consuming page yet. Export must
     /// always use `validate`, after removing these authoring-only pages.
     pub fn validate_authoring(&self, workspaces: &BTreeSet<String>) -> Result<(), String> {
+        self.validate_source_screens()?;
         self.validate_design()?;
         if self.version != VERSION {
             return Err(diagnostic!(
@@ -1155,6 +1160,7 @@ impl Document {
             styles: BTreeMap::new(),
             components: BTreeMap::new(),
             theme: ThemePreset::Sobre,
+            source_screens: BTreeMap::new(),
         };
         doc.apply_theme(ThemePreset::Sobre);
         doc

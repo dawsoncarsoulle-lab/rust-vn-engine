@@ -332,8 +332,9 @@ pub fn gallery_interaction_system(
     mut next_state: ResMut<NextState<VnState>>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut menu: ResMut<crate::resources::MenuState>,
+    source: Option<Res<crate::source_menus::SourceMenus>>,
 ) {
-    if keys.just_pressed(KeyCode::Escape) {
+    if !source.as_deref().is_some_and(|source|source.active(rvn_ui::PageRole::Gallery)) && keys.just_pressed(KeyCode::Escape) {
         keys.clear_just_pressed(KeyCode::Escape);
         if state.selected_cg.take().is_some() {
             for entity in &overlay_query {

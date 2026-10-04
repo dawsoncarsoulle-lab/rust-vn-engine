@@ -171,7 +171,19 @@ impl PersistentDataManager {
             fs::create_dir_all(parent)?;
         }
         let json = serde_json::to_string_pretty(data)?;
-        fs::write(&self.path, json)?;
+        use std::io::Write;
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default().as_nanos();
+        let pending = self.path.with_extension(format!("pending-{}-{stamp}", std::process::id()));
+        let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&pending)?;
+        let result = (|| {
+            file.write_all(json.as_bytes())?;
+            file.sync_all()?;
+            drop(file);
+            fs::rename(&pending, &self.path)
+        })();
+        if result.is_err() { let _ = fs::remove_file(&pending); }
+        result?;
         Ok(())
     }
 

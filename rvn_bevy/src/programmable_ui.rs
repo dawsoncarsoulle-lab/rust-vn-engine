@@ -434,12 +434,13 @@ fn render(
     font: Res<crate::menu_documents::MenuFont>,
     state: Res<State<VnState>>,
     accessibility: Res<crate::accessibility::Accessibility>,
+    source: Option<Res<crate::source_menus::SourceMenus>>,
 ) {
     let active = !screens.views.is_empty()
-        && matches!(
+        && (source.as_deref().is_some_and(|source|source.any()) || matches!(
             state.get(),
             VnState::Waiting | VnState::Stepping | VnState::Animating
-        );
+        ));
     let Ok(window) = windows.get_single() else {
         return;
     };
@@ -1403,9 +1404,11 @@ fn send(
     error: &mut ScriptErrorMessage,
     next: &mut NextState<VnState>,
 ) -> bool {
+    if engine.0.renderer.menu_pending {return false;}
+    let source_event=engine.0.state.ui.screens.iter().any(|screen|screen.name==event.screen && screen.host_role.is_some());
     if let Err(problem) = engine.0.interface_event(event) {
         error.0 = rvn_core::error::ScriptError::from_runtime(&problem).to_string();
-        next.set(VnState::Error);
+        if source_event||problem.is_menu_request_rejection() {warn!("Game menu event: {}",error.0);} else {next.set(VnState::Error);}
         return false;
     }
     match engine.0.interface_views() {
@@ -1444,14 +1447,15 @@ fn assistive_input(
     mut next: ResMut<NextState<VnState>>,
     state: Res<State<VnState>>,
     accessibility: Res<crate::accessibility::Accessibility>,
+    source: Option<Res<crate::source_menus::SourceMenus>>,
 ) {
     use bevy::a11y::accesskit::Action;
     for request in requests.read() {
         if accessibility.blocked
-            || !matches!(
+            || (!source.as_deref().is_some_and(|source|source.any()) && !matches!(
                 state.get(),
                 VnState::Waiting | VnState::Stepping | VnState::Animating
-            )
+            ))
         {
             continue;
         }
@@ -1605,6 +1609,7 @@ fn input(
     mut next: ResMut<NextState<VnState>>,
     state: Res<State<VnState>>,
     accessibility: Res<crate::accessibility::Accessibility>,
+    source: Option<Res<crate::source_menus::SourceMenus>>,
 ) {
     if accessibility.blocked {
         keyboard.clear();
@@ -1650,7 +1655,7 @@ fn input(
                 return;
             }
         };
-        if matches!(
+        if source.as_deref().is_some_and(|source|source.any()) || matches!(
             state.get(),
             VnState::Waiting | VnState::Stepping | VnState::Animating
         ) {
@@ -1723,7 +1728,7 @@ fn input(
             }
         }
     }
-    if !matches!(
+    if !source.as_deref().is_some_and(|source|source.any()) && !matches!(
         state.get(),
         VnState::Waiting | VnState::Stepping | VnState::Animating
     ) {
@@ -2287,7 +2292,7 @@ fn input(
     }
 }
 
-fn key_chords(
+pub(crate) fn key_chords(
     events: impl Iterator<Item = KeyboardInput>,
     modifiers: &mut [bool; 4],
 ) -> Vec<(KeyboardInput, bool, bool)> {
@@ -2561,6 +2566,72 @@ label start
         (app, window, controls)
     }
 
+    fn story_menu_pointer_app()->(App,Entity) {
+        let source=r#"
+handler open_inventory(event){ui.open_story("form",[],false,60)}
+handler bad(event){set clicks=clicks+1 local roll=random(1,10) ui.focus("form","name") menu.execute({"kind":"bool_preference","key":"fullscreen","value":1})}
+handler bad_constructor(event){set clicks=clicks+1 menu.execute(menu_bool("fullscreen",1))}
+handler good(event){set clicks=clicks+1 menu.execute(menu_action("none"))}
+handler general_fault(event){local missing=unknown_scenario_variable}
+screen host(){return component("open","button",{"events":{"click":"open_inventory"}},[])}
+screen form(){return component("root","panel",{},[
+    component("button","button",{"events":{"click":"bad"}},[]),
+    component("toggle","button",{"events":{"click":"good"}},[]),
+    component("slider","button",{"events":{"click":"bad_constructor"}},[]),
+    component("name","input",{"binding":"name"},[]),
+    component("general","button",{"events":{"click":"general_fault"}},[])
+])}
+init{set clicks=0 set name="Alix"}
+label start
+"Waiting"
+"#;
+        let mut engine=rvn_core::Engine::new(rvn_parser::parse(source).unwrap(),crate::bevy_renderer::BevyRenderer::new(),32).unwrap();
+        engine.step_until_interaction().unwrap();
+        engine.synchronize_source_menu(rvn_ui::PageRole::QuickActions,Some("host"),Value::Dict(Default::default()),false,100).unwrap();
+        engine.interface_event(event("host","open",EventKind::Click,None)).unwrap();
+        engine.synchronize_source_menu(rvn_ui::PageRole::QuickActions,None,Value::Dict(Default::default()),false,0).unwrap();
+        assert_eq!(engine.state.ui.screens.len(),1);assert_eq!(engine.state.ui.screens[0].host_role,None);
+        engine.renderer.menu_authority.story_ui_active=true;engine.renderer.menu_authority.game_active=true;engine.renderer.menu_authority.waiting=true;
+        engine.renderer.take_pending();
+        let views=engine.interface_views().unwrap();let(mut app,window,controls)=pointer_app();
+        let camera=app.world().get::<bevy::ui::TargetCamera>(controls[0]).unwrap().entity();
+        let extra=pointer_node(app.world_mut(),Some("general"),camera,Vec2::new(100.0,400.0),Vec2::new(120.0,40.0));
+        app.world_mut().resource_mut::<bevy::ui::UiStack>().uinodes.push(extra);
+        app.insert_resource(VnEngine(engine));update_views(&mut app.world_mut().resource_mut::<Screens>(),views);
+        (app,window)
+    }
+
+    #[test]
+    fn narrative_menu_rejections_preserve_globals_random_controls_disk_and_next_real_click() {
+        let(mut app,window)=story_menu_pointer_app();
+        let directory=std::env::temp_dir().join(format!("rvn-narrative-menu-rejection-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let manager=rvn_core::save::SaveManager::new(&directory,10).unwrap();
+        app.world().resource::<VnEngine>().0.save(&manager,1,"Preserved".into(),"qa.rvn".into()).unwrap();
+        let disk=||std::fs::read_dir(&directory).unwrap().map(|entry|{let entry=entry.unwrap();(entry.file_name(),std::fs::read(entry.path()).unwrap())}).collect::<std::collections::BTreeMap<_,_>>();
+        let before_disk=disk();let before=app.world().resource::<VnEngine>().0.state.clone();
+        let controls=|state:&rvn_core::GameState|serde_json::json!(state.ui.screens.iter().map(|screen|(&screen.name,&screen.values,&screen.canvas_states)).collect::<Vec<_>>());
+        for y in [80.0,240.0] {
+            pointer_move(&mut app,window,Vec2::new(100.0,y));pointer_edge(&mut app,window,ButtonState::Pressed);pointer_edge(&mut app,window,ButtonState::Released);app.update();
+            let engine=&app.world().resource::<VnEngine>().0;
+            assert_eq!(engine.state.vars,before.vars);assert_eq!(engine.state.random,before.random);assert_eq!(engine.state.display_random,before.display_random);
+            assert_eq!(controls(&engine.state),controls(&before));assert_eq!(disk(),before_disk);
+            assert!(matches!(app.world().resource::<NextState<VnState>>(),NextState::Unchanged));
+            assert!(!app.world().resource::<ScriptErrorMessage>().0.is_empty());assert!(!engine.renderer.menu_pending);
+        }
+        pointer_move(&mut app,window,Vec2::new(100.0,160.0));pointer_edge(&mut app,window,ButtonState::Pressed);pointer_edge(&mut app,window,ButtonState::Released);app.update();
+        assert_eq!(test_var(&app,"clicks"),Value::Int(1));assert!(app.world().resource::<VnEngine>().0.renderer.menu_pending);
+        assert!(app.world().resource::<Events<VnCommand>>().iter_current_update_events().any(|event|matches!(event,VnCommand::SourceMenu(receipt)if receipt.effect.host_role.is_none()&&receipt.effect.screen=="form")));
+        assert_eq!(disk(),before_disk);std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn general_fault_in_an_ordinary_interface_keeps_the_fatal_story_error_path() {
+        let(mut app,window)=story_menu_pointer_app();
+        pointer_move(&mut app,window,Vec2::new(100.0,400.0));pointer_edge(&mut app,window,ButtonState::Pressed);pointer_edge(&mut app,window,ButtonState::Released);app.update();
+        assert!(matches!(app.world().resource::<NextState<VnState>>(),NextState::Pending(VnState::Error)));
+        assert!(app.world().resource::<ScriptErrorMessage>().0.contains("unknown_scenario_variable"));
+    }
+
     fn pointer_node(
         world: &mut World,
         id: Option<&str>,
@@ -2628,6 +2699,51 @@ label start
             });
         }
         app.update();
+    }
+
+    #[test]
+    fn authored_screen_short_shift_tab_preserves_both_directions_and_modifier_event_order() {
+        use ButtonState::{Pressed, Released};
+        fn edges(app: &mut App, window: Entity, sequence: &[(KeyCode, ButtonState)]) {
+            for &(code, state) in sequence {
+                app.world_mut().send_event(KeyboardInput {
+                    key_code: code,
+                    logical_key: if code == KeyCode::Tab { Key::Tab } else { Key::Shift },
+                    state,
+                    window,
+                });
+            }
+            app.update();
+            assert!(app.world().resource::<ScriptErrorMessage>().0.is_empty());
+        }
+        fn focused(app: &App) -> Option<(&str, &str)> {
+            app.world().resource::<Screens>().keyboard_focus.as_ref()
+                .map(|(screen, element)| (screen.as_str(), element.as_str()))
+        }
+        for shift in [KeyCode::ShiftLeft, KeyCode::ShiftRight] {
+            let (mut app, window, _) = pointer_app();
+            edges(&mut app, window, &[(shift, Pressed), (KeyCode::Tab, Pressed),
+                (KeyCode::Tab, Released), (shift, Released)]);
+            assert_eq!(focused(&app), Some(("form", "name")));
+            assert!(!app.world().resource::<ButtonInput<KeyCode>>().pressed(shift));
+            edges(&mut app, window, &[(KeyCode::Tab, Pressed), (KeyCode::Tab, Released)]);
+            assert_eq!(focused(&app), Some(("form", "button")));
+            edges(&mut app, window, &[(shift, Pressed), (KeyCode::Tab, Pressed),
+                (KeyCode::Tab, Released), (shift, Released)]);
+            assert_eq!(focused(&app), Some(("form", "name")));
+            edges(&mut app, window, &[(shift, Pressed), (shift, Released),
+                (KeyCode::Tab, Pressed), (KeyCode::Tab, Released)]);
+            assert_eq!(focused(&app), Some(("form", "button")));
+            edges(&mut app, window, &[(KeyCode::Tab, Pressed), (shift, Pressed),
+                (KeyCode::Tab, Released), (shift, Released)]);
+            assert_eq!(focused(&app), Some(("form", "toggle")));
+            edges(&mut app, window, &[(shift, Pressed)]);
+            edges(&mut app, window, &[(KeyCode::Tab, Pressed), (KeyCode::Tab, Released)]);
+            assert_eq!(focused(&app), Some(("form", "button")));
+            edges(&mut app, window, &[(shift, Released), (KeyCode::Tab, Pressed),
+                (KeyCode::Tab, Released)]);
+            assert_eq!(focused(&app), Some(("form", "toggle")));
+        }
     }
 
     #[test]

@@ -94,14 +94,9 @@ impl Plugin for AccessibilityPlugin {
                     dialogue_layout.before(bevy::ui::UiSystem::Layout),
                     panel_focus.before(bevy::ui::UiSystem::Layout),
                     panel_scroll.after(bevy::ui::UiSystem::Layout),
-                    semantics
-                        .after(bevy::ui::UiSystem::Layout)
-                        .after(bevy::transform::TransformSystem::TransformPropagate),
-                    interface_labels
-                        .after(bevy::ui::UiSystem::Layout)
-                        .after(bevy::transform::TransformSystem::TransformPropagate),
                 ),
             );
+        install_semantics(app);
         // New UI entities inherit visibility during PostUpdate, not at spawn.
         // Reading it earlier briefly hides every rebuilt control from assistive
         // tools and causes browser focus to disappear during binding changes.
@@ -121,10 +116,139 @@ impl Plugin for AccessibilityPlugin {
         .add_systems(
             PostUpdate,
             crate::web_accessibility::render
-                .after(semantics)
-                .after(interface_labels)
+                .after(SemanticProjection)
                 .after(bevy::transform::TransformSystem::TransformPropagate),
         );
+    }
+    fn finish(&self, app: &mut App) {
+        order_after_framework_semantics(app);
+    }
+}
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct SemanticProjection;
+// Bevy 0.14's writers are private, so resolve their public SystemTypeSets
+// from the installed schedule. Keep this list explicit and regression-tested
+// against our pinned Bevy version instead of relying on executor order.
+const FRAMEWORK_SEMANTIC_WRITERS: [&str;4]=[
+    "bevy_ui::accessibility::calc_bounds",
+    "bevy_ui::accessibility::button_changed",
+    "bevy_ui::accessibility::image_changed",
+    "bevy_ui::accessibility::label_changed",
+];
+fn order_after_framework_semantics(app: &mut App) {
+    let writers:Vec<_>=app.get_schedule(PostUpdate).into_iter()
+        .flat_map(|schedule|schedule.graph().systems())
+        .filter(|(_,system,_)|FRAMEWORK_SEMANTIC_WRITERS.contains(&system.name().as_ref()))
+        .flat_map(|(_,system,_)|system.default_system_sets()).collect();
+    for writer in writers {
+        app.configure_sets(PostUpdate,SemanticProjection.after(writer));
+    }
+}
+pub(crate) fn install_semantics(app: &mut App) {
+    // Focus is an immediate resource write, while nodes are inserted/removed
+    // through deferred Commands. Publish and flush the complete semantic tree
+    // before AccessKit consumes it, including the first frame of a new menu.
+    app.add_systems(
+        PostUpdate,
+        (semantics, interface_labels, exclude_hidden_semantics, physical_semantic_bounds, retain_live_focus)
+            .chain()
+            .in_set(SemanticProjection)
+            .after(bevy::ui::UiSystem::Layout)
+            .after(bevy::transform::TransformSystem::TransformPropagate)
+            .before(bevy::a11y::AccessibilitySystem::Update),
+    );
+    order_after_framework_semantics(app);
+}
+fn physical_semantic_bounds(
+    primary: Query<Entity, With<bevy::window::PrimaryWindow>>,
+    windows: Query<&Window>,
+    cameras: Query<&Camera>,
+    default_camera: bevy::ui::DefaultUiCamera,
+    ui_scale: Option<Res<bevy::ui::UiScale>>,
+    mut nodes: Query<(&Node, &GlobalTransform, Option<&bevy::ui::TargetCamera>, &mut bevy::a11y::AccessibilityNode)>,
+) {
+    use bevy::{render::camera::RenderTarget, window::WindowRef};
+    let primary=primary.get_single().ok();
+    let ui_scale=ui_scale.as_ref().map_or(1.0,|scale|scale.0);
+    for (layout,transform,target,mut node) in &mut nodes {
+        let camera=target.map(bevy::ui::TargetCamera::entity).or_else(||default_camera.get()).and_then(|entity|cameras.get(entity).ok());
+        let window=match camera.map(|camera|&camera.target) {
+            Some(RenderTarget::Window(WindowRef::Entity(entity)))=>Some(*entity),
+            Some(RenderTarget::Window(WindowRef::Primary))|None=>primary,
+            _=>{node.clear_bounds();continue;},
+        }.and_then(|entity|windows.get(entity).ok());
+        let dpi=window.map_or(1.0,Window::scale_factor);
+        // AccessKit requires container-local physical pixels. Bevy's layout
+        // Node/GlobalTransform are logical UI units; physical_rect restores
+        // window DPI and UiScale exactly once. Player text_scale has already
+        // affected layout and must never be applied again here.
+        let rect=layout.physical_rect(transform,dpi,ui_scale);
+        let offset=camera.and_then(|camera|camera.viewport.as_ref()).map_or(Vec2::ZERO,|viewport|viewport.physical_position.as_vec2());
+        node.set_bounds(bevy::a11y::accesskit::Rect::new(
+            f64::from(rect.min.x+offset.x),f64::from(rect.min.y+offset.y),
+            f64::from(rect.max.x+offset.x),f64::from(rect.max.y+offset.y),
+        ));
+    }
+}
+// Display::None affects UI layout rather than InheritedVisibility. System
+// presenters hide a compatibility overlay through that style on its root,
+// so checking a descendant's visibility alone leaves invisible native actions.
+type SemanticHierarchy<'w, 's> = Query<'w, 's, (
+    Option<&'static Parent>, Option<&'static Style>,
+    Option<&'static Visibility>, Option<&'static InheritedVisibility>,
+    Option<&'static crate::menu_documents::legacy_navigation::Covered>,
+)>;
+fn semantic_visible(mut entity: Entity, hierarchy: &SemanticHierarchy) -> bool {
+    // Bevy prevents cyclic parenting. The bound also rejects malformed or
+    // excessively deep trees instead of exposing a target of unknown status.
+    for _ in 0..256 {
+        let Ok((parent, style, visibility, inherited,covered)) = hierarchy.get(entity) else { return false; };
+        if style.is_some_and(|style| style.display == Display::None)
+            || visibility.is_some_and(|visibility| *visibility == Visibility::Hidden)
+            || inherited.is_some_and(|visibility| !visibility.get()) || covered.is_some() {
+            return false;
+        }
+        let Some(parent) = parent else { return true; };
+        entity = parent.get();
+    }
+    false
+}
+#[derive(Component)]
+struct SuppressedSemanticNode(bevy::a11y::AccessibilityNode);
+fn exclude_hidden_semantics(
+    mut commands: Commands,
+    hierarchy: SemanticHierarchy,
+    nodes: Query<(Entity, Option<&bevy::a11y::AccessibilityNode>, Option<&SuppressedSemanticNode>),
+        Or<(With<bevy::a11y::AccessibilityNode>, With<SuppressedSemanticNode>)>>,
+) {
+    for (entity, node, suppressed) in &nodes {
+        if !semantic_visible(entity, &hierarchy) {
+            if let Some(node) = node {
+                commands.entity(entity).insert(SuppressedSemanticNode(node.clone()))
+                    .remove::<bevy::a11y::AccessibilityNode>();
+            }
+        } else if let Some(suppressed) = suppressed {
+            // Buttons and programmable labels are projected every frame. The
+            // cache restores static framework labels/images as well when the
+            // fallback reappears without a Changed<Button/Label/UiImage> event.
+            if node.is_none() { commands.entity(entity).insert(suppressed.0.clone()); }
+            commands.entity(entity).remove::<SuppressedSemanticNode>();
+        }
+    }
+}
+fn retain_live_focus(
+    mut focus: ResMut<bevy::a11y::Focus>,
+    nodes: Query<&bevy::a11y::AccessibilityNode>,
+) {
+    if focus.0.is_some_and(|entity| {
+        nodes.get(entity).map_or(true, |node| {
+            let node = node.0.clone().build();
+            node.is_hidden() || node.is_disabled()
+        })
+    }) {
+        // A closed/rebuilt/covered control no longer owns native focus. The
+        // platform falls back to its window until the next valid UI target.
+        focus.0 = None;
     }
 }
 fn french(locale: &Settings) -> bool {
@@ -457,6 +581,7 @@ fn assistive_panel(
             Option<&InheritedVisibility>,
             Option<&crate::menu_documents::MenuFocus>,
             Option<&crate::components::ChoiceButton>,
+            Option<&crate::systems::save_menu::BuiltinSlotUnavailable>,
         ),
         Without<crate::programmable_ui::Control>,
     >,
@@ -465,23 +590,24 @@ fn assistive_panel(
     mut choice: ResMut<crate::resources::ChoiceFocus>,
     mut persistent: ResMut<PersistentDataResource>,
     speech: NonSend<Speech>,
+    hierarchy: SemanticHierarchy,
 ) {
     use bevy::a11y::accesskit::Action;
     for request in requests.read() {
         let Ok(entity) = Entity::try_from_bits(request.0.target.0) else {
             continue;
         };
-        let Ok((mut interaction, panel, node, visible, menu_key, choice_button)) =
+        let Ok((mut interaction, panel, node, visible, menu_key, choice_button, unavailable)) =
             buttons.get_mut(entity)
         else {
             continue;
         };
-        if visible.is_some_and(|visible| !visible.get())
-            || node.is_some_and(|node| {
-                let node = node.0.clone().build();
-                node.is_disabled() || node.is_hidden()
-            })
-        {
+        let Some(node) = node else { continue; };
+        let node = node.0.clone().build();
+        if unavailable.is_some() || !semantic_visible(entity, &hierarchy)
+            || visible.is_some_and(|visible| !visible.get())
+            || node.is_disabled() || node.is_hidden()
+            || !node.supports_action(request.0.action) {
             continue;
         }
         if let Some(panel) = panel {
@@ -733,6 +859,7 @@ fn semantics(
             Option<&Children>,
             Option<&PanelButton>,
             Option<&InheritedVisibility>,
+            Option<&crate::systems::save_menu::BuiltinSlotUnavailable>,
         ),
         (With<Button>, Without<crate::programmable_ui::Control>),
     >,
@@ -755,18 +882,6 @@ fn semantics(
         AccessibilityNode,
     };
     let mut target = None;
-    let bounds = |entity: Entity, node: &mut NodeBuilder| {
-        if let Ok((layout, transform)) = geometry.get(entity) {
-            let center = transform.translation().truncate();
-            let size = layout.size() * 0.5;
-            node.set_bounds(bevy::a11y::accesskit::Rect::new(
-                f64::from(center.x - size.x),
-                f64::from(center.y - size.y),
-                f64::from(center.x + size.x),
-                f64::from(center.y + size.y),
-            ));
-        }
-    };
     fn name(
         entity: Entity,
         texts: &Query<&Text>,
@@ -785,7 +900,7 @@ fn semantics(
             }
         }
     }
-    for (entity, _, panel, visible) in &buttons {
+    for (entity, _, panel, visible, unavailable) in &buttons {
         let mut label = String::new();
         name(entity, &texts, &children, &mut label);
         let mut node = NodeBuilder::new(Role::Button);
@@ -793,11 +908,12 @@ fn semantics(
         if visible.is_some_and(|visible| !visible.get()) || (runtime.open && panel.is_none()) {
             node.set_hidden();
             node.set_disabled();
+        } else if unavailable.is_some() {
+            node.set_disabled();
         } else {
             node.add_action(Action::Focus);
             node.add_action(Action::Default);
         }
-        bounds(entity, &mut node);
         commands
             .entity(entity)
             .insert(AccessibilityNode::from(node));
@@ -821,7 +937,6 @@ fn semantics(
         {
             node.set_hidden();
         }
-        bounds(entity, &mut node);
         commands
             .entity(entity)
             .insert(AccessibilityNode::from(node));
@@ -922,7 +1037,6 @@ fn semantics(
             node.set_max_numeric_value(component.max);
             node.set_numeric_value_step((component.max - component.min) / 100.0);
         }
-        bounds(entity, &mut node);
         commands
             .entity(entity)
             .insert(AccessibilityNode::from(node));
@@ -974,7 +1088,7 @@ fn interface_labels(
         accesskit::{NodeBuilder, Role},
         AccessibilityNode,
     };
-    for (entity, target, layout, transform, visible) in &targets {
+    for (entity, target, _layout, _transform, visible) in &targets {
         let Some(view) = screens.views.iter().find(|view| view.name == target.screen) else {
             continue;
         };
@@ -1008,14 +1122,6 @@ fn interface_labels(
         if runtime.open || covered || visible.is_some_and(|visible| !visible.get()) {
             node.set_hidden();
         }
-        let center = transform.translation().truncate();
-        let half = layout.size() * 0.5;
-        node.set_bounds(bevy::a11y::accesskit::Rect::new(
-            f64::from(center.x - half.x),
-            f64::from(center.y - half.y),
-            f64::from(center.x + half.x),
-            f64::from(center.y + half.y),
-        ));
         commands
             .entity(entity)
             .insert(AccessibilityNode::from(node));
@@ -1676,8 +1782,258 @@ fn qa_drive(world: &mut World) {
 }
 
 #[cfg(test)]
+pub(crate) fn install_assistive_actions_fixture(app: &mut App) {
+    app.insert_non_send_resource(Speech::default())
+        .add_event::<bevy::a11y::ActionRequest>()
+        .add_systems(PreUpdate, assistive_panel);
+}
+#[cfg(test)]
 mod tests {
     use super::*;
+    fn action_node(name: &str) -> bevy::a11y::AccessibilityNode {
+        use bevy::a11y::accesskit::{Action, NodeBuilder, Role};
+        let mut node=NodeBuilder::new(Role::Button);
+        node.set_name(name.to_owned());
+        node.add_action(Action::Focus);
+        node.add_action(Action::Default);
+        bevy::a11y::AccessibilityNode(node)
+    }
+    #[derive(Resource, Default)]
+    struct ConsumedFocus(Vec<Option<Entity>>);
+    fn semantic_app() -> App {
+        let mut app = App::new();
+        app.init_resource::<Accessibility>()
+            .init_resource::<crate::programmable_ui::Screens>()
+            .init_resource::<crate::menu_documents::Menus>()
+            .init_resource::<crate::resources::ChoiceFocus>()
+            .init_resource::<bevy::a11y::Focus>()
+            .init_resource::<ConsumedFocus>()
+            .add_systems(
+                PostUpdate,
+                consume_semantic_focus.in_set(bevy::a11y::AccessibilitySystem::Update),
+            );
+        install_semantics(&mut app);
+        app
+    }
+    fn consume_semantic_focus(
+        focus: Res<bevy::a11y::Focus>,
+        nodes: Query<&bevy::a11y::AccessibilityNode>,
+        mut consumed: ResMut<ConsumedFocus>,
+    ) {
+        if let Some(entity) = focus.0 {
+            let node = nodes.get(entity).expect("Published focus must exist in the native node list");
+            let node = node.0.clone().build();
+            assert!(!node.is_hidden());
+            assert!(!node.is_disabled());
+        }
+        consumed.0.push(focus.0);
+    }
+    #[test]
+    fn new_control_focus_is_published_with_its_node_before_native_consumption() {
+        let mut app = semantic_app();
+        let button = app.world_mut().spawn((Button, crate::components::ChoiceButton(0))).id();
+        app.world_mut().resource_mut::<crate::resources::ChoiceFocus>().0 = Some(0);
+        assert!(app.world().get::<bevy::a11y::AccessibilityNode>(button).is_none());
+        app.update();
+        assert_eq!(app.world().resource::<ConsumedFocus>().0, vec![Some(button)]);
+        assert_eq!(app.world().resource::<bevy::a11y::Focus>().0, Some(button));
+        assert!(app.world().get::<bevy::a11y::AccessibilityNode>(button).is_some());
+    }
+    #[test]
+    fn native_focus_survives_valid_rebuilds_and_clears_closed_or_covered_controls() {
+        let mut app = semantic_app();
+        let button = app.world_mut().spawn((Button, crate::components::ChoiceButton(0))).id();
+        app.world_mut().resource_mut::<crate::resources::ChoiceFocus>().0 = Some(0);
+        app.update();
+        app.world_mut().entity_mut(button).insert(InheritedVisibility::HIDDEN);
+        app.update();
+        assert_eq!(app.world().resource::<bevy::a11y::Focus>().0, None);
+        app.world_mut().entity_mut(button).insert(InheritedVisibility::VISIBLE);
+        app.update();
+        assert_eq!(app.world().resource::<bevy::a11y::Focus>().0, Some(button));
+        app.world_mut().despawn(button);
+        let replacement = app.world_mut().spawn((Button, crate::components::ChoiceButton(0))).id();
+        app.update();
+        assert_eq!(app.world().resource::<bevy::a11y::Focus>().0, Some(replacement));
+        app.world_mut().despawn(replacement);
+        app.update();
+        assert_eq!(app.world().resource::<ConsumedFocus>().0,
+            vec![Some(button),None,Some(button),Some(replacement),None]);
+        assert_eq!(app.world().resource::<bevy::a11y::Focus>().0, None);
+    }
+    #[test]
+    fn source_title_hides_legacy_subtree_from_native_semantics_and_restores_fallback() {
+        use crate::programmable_ui::Control;
+        use rvn_ui::programmable::{Component, ScreenView};
+        let mut app=semantic_app();
+        let overlay=app.world_mut().spawn((crate::systems::title::TitleOverlay,Style::default(),InheritedVisibility::VISIBLE)).id();
+        let row=app.world_mut().spawn((Style::default(),InheritedVisibility::VISIBLE)).id();
+        let legacy=app.world_mut().spawn((Button,Interaction::None,InheritedVisibility::VISIBLE)).id();
+        let text=app.world_mut().spawn(Text::from_section("Nouvelle partie classique",TextStyle::default())).id();
+        app.world_mut().entity_mut(overlay).add_child(row);
+        app.world_mut().entity_mut(row).add_child(legacy);
+        app.world_mut().entity_mut(legacy).add_child(text);
+        // A static semantic image has no change-triggered rebuild when an
+        // ancestor's Display changes, unlike our button projection.
+        let mut image=bevy::a11y::accesskit::NodeBuilder::new(bevy::a11y::accesskit::Role::Image);
+        image.set_name("Logo classique".to_owned());
+        let logo=app.world_mut().spawn(bevy::a11y::AccessibilityNode(image)).id();
+        app.world_mut().entity_mut(overlay).add_child(logo);
+        app.update();
+        assert!(app.world().get::<bevy::a11y::AccessibilityNode>(legacy).is_some());
+        assert!(app.world().get::<bevy::a11y::AccessibilityNode>(logo).is_some());
+        app.world_mut().resource_mut::<bevy::a11y::Focus>().0=Some(legacy);
+        let source=app.world_mut().spawn((Control{screen:"source_title".into(),element:"new_game".into(),option:None},Node::default(),GlobalTransform::default())).id();
+        {
+            let mut screens=app.world_mut().resource_mut::<crate::programmable_ui::Screens>();
+            screens.active=true;
+            screens.keyboard_focus=Some(("source_title".into(),"new_game".into()));
+            screens.views=vec![ScreenView{name:"source_title".into(),modal:true,layer:0,order:0,focus:None,
+                root:Component::parse(serde_json::json!({"id":"new_game","kind":"button","text":"Nouvelle partie programmable"})).unwrap()}];
+        }
+        // This is the exact root-level mask applied by menu_documents::render,
+        // while descendant InheritedVisibility remains visible.
+        app.world_mut().get_mut::<Style>(overlay).unwrap().display=Display::None;
+        app.update();
+        assert!(app.world().get::<InheritedVisibility>(legacy).unwrap().get());
+        assert!(app.world().get::<bevy::a11y::AccessibilityNode>(legacy).is_none());
+        assert!(app.world().get::<bevy::a11y::AccessibilityNode>(logo).is_none());
+        let node=app.world().get::<bevy::a11y::AccessibilityNode>(source).unwrap().0.clone().build();
+        assert_eq!(node.name(),Some("Nouvelle partie programmable"));
+        assert!(node.supports_action(bevy::a11y::accesskit::Action::Default));
+        assert_eq!(app.world().resource::<bevy::a11y::Focus>().0,Some(source));
+        {
+            let mut screens=app.world_mut().resource_mut::<crate::programmable_ui::Screens>();
+            screens.views.clear();screens.active=false;screens.keyboard_focus=None;
+        }
+        app.world_mut().despawn(source);
+        app.world_mut().get_mut::<Style>(overlay).unwrap().display=Display::Flex;
+        app.update();
+        let node=app.world().get::<bevy::a11y::AccessibilityNode>(legacy).unwrap().0.clone().build();
+        assert_eq!(node.name(),Some("Nouvelle partie classique"));
+        assert!(node.supports_action(bevy::a11y::accesskit::Action::Default));
+        assert_eq!(app.world().get::<bevy::a11y::AccessibilityNode>(logo).unwrap().0.clone().build().name(),Some("Logo classique"));
+        assert!(app.world().get::<SuppressedSemanticNode>(legacy).is_none());
+        assert!(app.world().get::<SuppressedSemanticNode>(logo).is_none());
+    }
+    fn physical_layout_app(dpi:f32,ui_scale:f32)->(App,Entity,Entity,Entity){
+        use bevy::input::mouse::{MouseButtonInput,mouse_button_input_system};
+        use crate::programmable_ui::Control;
+        use rvn_ui::programmable::{Component,ScreenView};
+        let mut app=App::new();
+        app.add_plugins((MinimalPlugins,bevy::asset::AssetPlugin::default()));
+        app.init_asset::<Image>().init_asset::<Font>().init_asset::<bevy::render::render_resource::Shader>()
+            .init_resource::<bevy::render::camera::ManualTextureViews>()
+            .add_event::<bevy::window::WindowResized>().add_event::<bevy::window::WindowCreated>()
+            .add_event::<bevy::window::WindowScaleFactorChanged>().add_plugins(bevy::ui::UiPlugin);
+        // Retain the real private UI layout store, then use only the actual
+        // camera/layout/transform/focus pipeline without GPU or native window.
+        let mut schedules=app.world_mut().resource_mut::<bevy::ecs::schedule::Schedules>();
+        schedules.remove(PreUpdate);schedules.remove(PostUpdate);drop(schedules);
+        app.init_resource::<Accessibility>().init_resource::<crate::programmable_ui::Screens>()
+            .init_resource::<crate::menu_documents::Menus>().init_resource::<crate::resources::ChoiceFocus>()
+            .init_resource::<bevy::a11y::Focus>().init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<bevy::input::touch::Touches>().insert_resource(bevy::ui::UiScale(ui_scale))
+            .add_event::<MouseButtonInput>()
+            .add_systems(PreUpdate,(mouse_button_input_system,bevy::ui::ui_focus_system).chain())
+            .add_systems(PostUpdate,(
+                bevy::render::camera::camera_system::<OrthographicProjection>,bevy::ui::ui_layout_system,
+                bevy::transform::systems::sync_simple_transforms,bevy::transform::systems::propagate_transforms,
+            ).chain().before(semantics));
+        install_semantics(&mut app);
+        let window=app.world_mut().spawn((Window{resolution:bevy::window::WindowResolution::new(1280.0*dpi,720.0*dpi).with_scale_factor_override(dpi),..default()},bevy::window::PrimaryWindow)).id();
+        let camera=app.world_mut().spawn(Camera2dBundle::default()).id();
+        let make_button=|app:&mut App,y:f32|{
+            let mut visible=bevy::render::view::ViewVisibility::default();visible.set();
+            app.world_mut().spawn((ButtonBundle{style:Style{position_type:PositionType::Absolute,left:Val::Px(40.0),top:Val::Px(y),width:Val::Px(270.0),height:Val::Px(45.0),..default()},visibility:Visibility::Visible,inherited_visibility:InheritedVisibility::VISIBLE,view_visibility:visible,..default()},bevy::ui::TargetCamera(camera))).id()
+        };
+        let legacy=make_button(&mut app,160.0);
+        app.world_mut().entity_mut(legacy).insert(crate::systems::title::TitleButton::NewGame);
+        let settings=make_button(&mut app,230.0);
+        app.world_mut().entity_mut(settings).insert(Control{screen:"source_title".into(),element:"settings".into(),option:None});
+        app.world_mut().resource_mut::<crate::programmable_ui::Screens>().views=vec![ScreenView{name:"source_title".into(),modal:true,layer:0,order:0,focus:None,
+            root:Component::parse(serde_json::json!({"id":"settings","kind":"button","text":"Réglages"})).unwrap()}];
+        // Stacking is explicit; positions and sizes are not fixtures. They are
+        // calculated by the real UI layout and propagated into GlobalTransform.
+        app.world_mut().resource_mut::<bevy::ui::UiStack>().uinodes=vec![legacy,settings];
+        app.update();
+        (app,window,legacy,settings)
+    }
+    #[test]
+    fn native_settings_bounds_hit_actual_layout_at_100_125_and_150_percent_dpi(){
+        use bevy::input::{ButtonState,mouse::MouseButtonInput};
+        for dpi in [1.0,1.25,1.5]{for ui_scale in [1.0,1.2]{
+            let(mut app,window,legacy,settings)=physical_layout_app(dpi,ui_scale);
+            let node=app.world().get::<Node>(settings).unwrap();
+            let transform=app.world().get::<GlobalTransform>(settings).unwrap();
+            assert_eq!(node.size(),Vec2::new(270.0,45.0));
+            assert!((transform.translation().truncate()-Vec2::new(175.0,252.5)).length()<1.0);
+            let logical=node.logical_rect(transform);
+            let bounds=app.world().get::<bevy::a11y::AccessibilityNode>(settings).unwrap().0.clone().build().bounds().unwrap();
+            assert!((bounds.x0-f64::from(logical.min.x*dpi*ui_scale)).abs()<0.01);
+            assert!((bounds.y0-f64::from(logical.min.y*dpi*ui_scale)).abs()<0.01);
+            assert!((bounds.width()-f64::from(node.size().x*dpi*ui_scale)).abs()<0.01);
+            let legacy_bounds=app.world().get::<bevy::a11y::AccessibilityNode>(legacy).unwrap().0.clone().build().bounds().unwrap();
+            assert!((legacy_bounds.width()-f64::from(270.0*dpi*ui_scale)).abs()<0.01);
+            // Reproduce the old missing-DPI bug, using the declared logical
+            // centre as a Windows physical click. It selects NewGame above.
+            if dpi>1.0&&ui_scale==1.0{
+                let old_point=logical.center().as_dvec2();
+                app.world_mut().get_mut::<Window>(window).unwrap().set_physical_cursor_position(Some(old_point));
+                app.world_mut().send_event(MouseButtonInput{button:MouseButton::Left,state:ButtonState::Pressed,window});app.update();
+                assert_eq!(*app.world().get::<Interaction>(legacy).unwrap(),Interaction::Pressed,"Old unit mismatch must reproduce wrong NewGame target at DPI{dpi}");
+                assert_ne!(*app.world().get::<Interaction>(settings).unwrap(),Interaction::Pressed);
+                app.world_mut().send_event(MouseButtonInput{button:MouseButton::Left,state:ButtonState::Released,window});app.update();
+            }
+            let physical=bevy::math::DVec2::new((bounds.x0+bounds.x1)*0.5,(bounds.y0+bounds.y1)*0.5);
+            app.world_mut().get_mut::<Window>(window).unwrap().set_physical_cursor_position(Some(physical));
+            app.world_mut().send_event(MouseButtonInput{button:MouseButton::Left,state:ButtonState::Pressed,window});app.update();
+            assert_eq!(*app.world().get::<Interaction>(settings).unwrap(),Interaction::Pressed,"Physical UIA centre must select Settings at DPI{dpi}/UiScale{ui_scale}");
+            assert_ne!(*app.world().get::<Interaction>(legacy).unwrap(),Interaction::Pressed);
+        }}
+    }
+    #[test]
+    fn native_bounds_follow_target_window_and_physical_viewport_offset(){
+        use bevy::{render::camera::{RenderTarget,Viewport},window::WindowRef};
+        let(mut app,_primary,legacy,old_settings)=physical_layout_app(1.25,1.0);
+        let second=app.world_mut().spawn(Window{resolution:bevy::window::WindowResolution::new(1920.0,1080.0).with_scale_factor_override(1.5),..default()}).id();
+        let camera=app.world_mut().spawn(Camera2dBundle{camera:Camera{target:RenderTarget::Window(WindowRef::Entity(second)),viewport:Some(Viewport{physical_position:UVec2::new(30,60),physical_size:UVec2::new(1200,750),..default()}),..default()},..default()}).id();
+        // Create the second-window control with its actual target. Reusing a
+        // node from the primary without native resize/scale signals leaves
+        // Bevy0.14's previous physical Taffy style cached across the move.
+        let style=app.world().get::<Style>(old_settings).unwrap().clone();
+        app.world_mut().despawn(old_settings);
+        let mut visible=bevy::render::view::ViewVisibility::default();visible.set();
+        let settings=app.world_mut().spawn((ButtonBundle{style,visibility:Visibility::Visible,inherited_visibility:InheritedVisibility::VISIBLE,view_visibility:visible,..default()},bevy::ui::TargetCamera(camera),crate::programmable_ui::Control{screen:"source_title".into(),element:"settings".into(),option:None})).id();
+        app.world_mut().resource_mut::<bevy::ui::UiStack>().uinodes=vec![legacy,settings];app.update();
+        let layout=app.world().get::<Node>(settings).unwrap();
+        let transform=app.world().get::<GlobalTransform>(settings).unwrap();
+        let logical=layout.logical_rect(transform);
+        let bounds=app.world().get::<bevy::a11y::AccessibilityNode>(settings).unwrap().0.clone().build().bounds().unwrap();
+        assert_eq!(layout.size(),Vec2::new(270.0,45.0),"Second-window control must be freshly laid out at its actual target scale");
+        assert!((bounds.x0-f64::from(logical.min.x*1.5+30.0)).abs()<0.01);
+        assert!((bounds.y0-f64::from(logical.min.y*1.5+60.0)).abs()<0.01);
+        assert!((bounds.width()-405.0).abs()<0.01,"Target window DPI1.5 must replace primary DPI1.25");
+    }
+    #[test]
+    fn final_native_projection_is_ordered_after_every_framework_semantic_writer(){
+        use bevy::ecs::schedule::SystemSet;
+        let mut app=App::new();
+        app.add_plugins((MinimalPlugins,bevy::asset::AssetPlugin::default()));
+        app.init_asset::<Image>().init_asset::<Font>().init_asset::<bevy::render::render_resource::Shader>()
+            .add_plugins(bevy::ui::UiPlugin);
+        install_semantics(&mut app);
+        let graph=app.get_schedule(PostUpdate).unwrap().graph();
+        let projection=graph.system_sets().find(|(_,set,_)|set.as_dyn_eq().dyn_eq(SemanticProjection.as_dyn_eq())).unwrap().0;
+        let writers:Vec<_>=graph.systems().filter(|(_,system,_)|FRAMEWORK_SEMANTIC_WRITERS.contains(&system.name().as_ref())).collect();
+        assert_eq!(writers.len(),4,"Pinned Bevy UI semantic writer surface must remain explicit");
+        for (_,writer,_) in writers{
+            for set in writer.default_system_sets(){
+                let writer_set=graph.system_sets().find(|(_,candidate,_)|candidate.as_dyn_eq().dyn_eq(set.0.as_dyn_eq())).unwrap().0;
+                assert!(graph.dependency().graph().contains_edge(writer_set,projection),"{} must precede the final physical bounds and visibility mask",writer.name());
+            }
+        }
+    }
     #[test]
     fn custom_drawing_semantics_are_canvas_not_an_implicit_button() {
         use bevy::a11y::accesskit::Role;
@@ -1918,12 +2274,13 @@ mod tests {
             .world_mut()
             .spawn((
                 Interaction::None,
+                action_node("Charger"),
                 crate::menu_documents::MenuFocus(2, "title/load".into()),
             ))
             .id();
         let choice = app
             .world_mut()
-            .spawn((Interaction::None, crate::components::ChoiceButton(3)))
+            .spawn((Interaction::None, action_node("Réponse"), crate::components::ChoiceButton(3)))
             .id();
         let mut node = accesskit::NodeBuilder::new(accesskit::Role::Button);
         node.set_hidden();
@@ -1969,6 +2326,102 @@ mod tests {
         assert_eq!(app.world().resource::<bevy::a11y::Focus>().0, Some(choice));
         drop(app);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn assistive_actions_reject_display_hidden_ancestors_and_unpublished_targets_then_restore() {
+        use bevy::a11y::{accesskit,ActionRequest};
+        let directory=std::env::temp_dir().join(format!("rvn-source-access-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let mut app=semantic_app();
+        app.insert_resource(PersistentDataResource{manager:rvn_core::PersistentDataManager::new(&directory).unwrap(),data:Default::default()})
+            .insert_non_send_resource(Speech::default())
+            .add_event::<ActionRequest>()
+            .add_systems(PreUpdate,assistive_panel);
+        let root=app.world_mut().spawn(Style::default()).id();
+        let legacy=app.world_mut().spawn((Button,Interaction::None,InheritedVisibility::VISIBLE,crate::systems::title::TitleButton::NewGame,
+            crate::menu_documents::MenuFocus(0,"title/new_game".into()))).id();
+        app.world_mut().entity_mut(root).add_child(legacy);
+        let unpublished=app.world_mut().spawn(Interaction::None).id();
+        fn request(app:&mut App,entity:Entity,action:accesskit::Action){
+            app.world_mut().send_event(ActionRequest(accesskit::ActionRequest{action,target:accesskit::NodeId(entity.to_bits()),data:None}));app.update();
+        }
+        app.update();
+        request(&mut app,legacy,accesskit::Action::Focus);
+        assert_eq!(app.world().resource::<bevy::a11y::Focus>().0,Some(legacy));
+        app.world_mut().get_mut::<Style>(root).unwrap().display=Display::None;
+        // Reject already queued IDs even before PostUpdate has removed their
+        // old node; then reject the same IDs after semantic publication.
+        request(&mut app,legacy,accesskit::Action::Default);
+        assert_eq!(*app.world().get::<Interaction>(legacy).unwrap(),Interaction::None);
+        assert_eq!(app.world().resource::<bevy::a11y::Focus>().0,None);
+        assert!(app.world().get::<bevy::a11y::AccessibilityNode>(legacy).is_none());
+        request(&mut app,legacy,accesskit::Action::Focus);
+        request(&mut app,legacy,accesskit::Action::Default);
+        request(&mut app,unpublished,accesskit::Action::Focus);
+        request(&mut app,unpublished,accesskit::Action::Default);
+        assert_eq!(app.world().resource::<bevy::a11y::Focus>().0,None);
+        assert_eq!(*app.world().get::<Interaction>(legacy).unwrap(),Interaction::None);
+        assert_eq!(*app.world().get::<Interaction>(unpublished).unwrap(),Interaction::None);
+        app.world_mut().get_mut::<Style>(root).unwrap().display=Display::Flex;
+        app.update();
+        request(&mut app,legacy,accesskit::Action::Focus);
+        assert_eq!(app.world().resource::<bevy::a11y::Focus>().0,Some(legacy));
+        request(&mut app,legacy,accesskit::Action::Default);
+        assert_eq!(*app.world().get::<Interaction>(legacy).unwrap(),Interaction::Pressed);
+        // A painted background panel is also excluded when a built-in modal
+        // takes ownership; queued native IDs cannot focus or activate it.
+        *app.world_mut().get_mut::<Interaction>(legacy).unwrap()=Interaction::None;
+        app.world_mut().entity_mut(root).insert(crate::menu_documents::legacy_navigation::Covered);
+        request(&mut app,legacy,accesskit::Action::Default);
+        assert_eq!(*app.world().get::<Interaction>(legacy).unwrap(),Interaction::None);
+        assert!(app.world().get::<bevy::a11y::AccessibilityNode>(legacy).is_none());
+        assert_eq!(app.world().resource::<bevy::a11y::Focus>().0,None);
+        request(&mut app,legacy,accesskit::Action::Focus);
+        assert_eq!(app.world().resource::<bevy::a11y::Focus>().0,None);
+        app.world_mut().entity_mut(root).remove::<crate::menu_documents::legacy_navigation::Covered>();
+        app.update();
+        request(&mut app,legacy,accesskit::Action::Focus);
+        request(&mut app,legacy,accesskit::Action::Default);
+        assert_eq!(app.world().resource::<bevy::a11y::Focus>().0,Some(legacy));
+        assert_eq!(*app.world().get::<Interaction>(legacy).unwrap(),Interaction::Pressed);
+        drop(app);std::fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn unavailable_builtin_slot_rejects_native_actions_before_and_after_disabled_publication() {
+        use bevy::a11y::{accesskit,ActionRequest};
+        use crate::systems::save_menu::{BuiltinSlotUnavailable,SaveSlotButton};
+        let directory=std::env::temp_dir().join(format!("rvn-disabled-slot-access-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let mut app=semantic_app();
+        app.insert_resource(PersistentDataResource{manager:rvn_core::PersistentDataManager::new(&directory).unwrap(),data:Default::default()})
+            .insert_non_send_resource(Speech::default()).add_event::<ActionRequest>().add_systems(PreUpdate,assistive_panel);
+        // A stale published node still advertises actions. Eligibility must be
+        // checked immediately, before PostUpdate replaces that native node.
+        let target=app.world_mut().spawn((Button,SaveSlotButton(1),BuiltinSlotUnavailable,
+            Interaction::None,InheritedVisibility::VISIBLE,action_node("Slot1 vide"),
+            crate::menu_documents::MenuFocus(0,"__builtin/save/1".into()))).id();
+        assert!(app.world().get::<bevy::a11y::AccessibilityNode>(target).unwrap().0.clone().build().supports_action(accesskit::Action::Default));
+        fn requests(app:&mut App,target:Entity){
+            for action in [accesskit::Action::Focus,accesskit::Action::Default] {
+                app.world_mut().send_event(ActionRequest(accesskit::ActionRequest{action,target:accesskit::NodeId(target.to_bits()),data:None}));
+            }
+            app.update();
+        }
+        requests(&mut app,target);
+        assert_eq!(*app.world().get::<Interaction>(target).unwrap(),Interaction::None);
+        assert_eq!(app.world().resource::<bevy::a11y::Focus>().0,None);
+        assert_eq!(app.world().resource::<crate::menu_documents::Menus>().keyboard_focus(),None);
+        let node=app.world().get::<bevy::a11y::AccessibilityNode>(target).unwrap().0.clone().build();
+        assert!(node.is_disabled());assert!(!node.is_hidden());
+        assert!(!node.supports_action(accesskit::Action::Focus));assert!(!node.supports_action(accesskit::Action::Default));
+        requests(&mut app,target);
+        assert_eq!(*app.world().get::<Interaction>(target).unwrap(),Interaction::None);
+        assert_eq!(app.world().resource::<bevy::a11y::Focus>().0,None);
+        // Without the private spawn tag, ordinary authored save proxies keep
+        // their existing semantic actions; no blanket SaveSlotButton filter.
+        app.world_mut().entity_mut(target).remove::<BuiltinSlotUnavailable>();app.update();
+        requests(&mut app,target);
+        assert_eq!(*app.world().get::<Interaction>(target).unwrap(),Interaction::Pressed);
+        assert_eq!(app.world().resource::<bevy::a11y::Focus>().0,Some(target));
+        drop(app);std::fs::remove_dir_all(directory).unwrap();
     }
     #[test]
     fn visual_preferences_are_absolute_reversible_and_do_not_compound() {

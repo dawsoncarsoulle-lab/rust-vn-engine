@@ -21,6 +21,36 @@ pub struct InputSaveContext<'w> {
     thumbnails: ResMut<'w, crate::save_thumbnails::SaveThumbnails>,
 }
 
+/// The core stack includes the currently displayed narrative anchor. The game
+/// facade skips that anchor, while actual UI transactions remain undoable.
+pub(crate) fn can_rollback<R:rvn_core::Renderer>(engine:&rvn_core::Engine<R>)->bool {
+    let entries=engine.history.entries();
+    entries.last().is_some_and(|entry| if entry.display.is_some()&&entry.state.pc==engine.state.pc {entries.len()>1} else {true})
+}
+pub(crate) fn rollback_game<R:rvn_core::Renderer>(engine:&mut rvn_core::Engine<R>)->bool {
+    if !can_rollback(engine){return false;}
+    let current=if engine.history.entries().last().is_some_and(|entry|entry.display.is_some()&&entry.state.pc==engine.state.pc) {
+        engine.history.pop()
+    } else {None};
+    if engine.rollback(){true} else {
+        if let Some(entry)=current{engine.history.push(entry.state,entry.display);}
+        false
+    }
+}
+pub(crate) fn present_rollback(engine:&mut VnEngine,render:&mut VnRenderState,imagemap:&mut ImagemapState,
+    focus:&mut ChoiceFocus,typing:&mut TypewriterState,events:&mut EventWriter<VnCommand>) {
+    render.choice_options.clear();imagemap.clear();focus.clear();typing.skip();
+    let mut pending=engine.0.renderer.take_pending();
+    for command in &mut pending {
+        match command {
+            VnCommand::SetBackground{transition,..}|VnCommand::ShowSprite{transition,..}
+                |VnCommand::HideSprite{transition,..}|VnCommand::MoveSprite{transition,..}=>*transition=Transition::None,
+            _=>{}
+        }
+    }
+    for command in pending{events.send(command);}
+}
+
 pub fn input_system(
     cameras: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -208,7 +238,9 @@ pub fn input_system(
 pub fn menu_input_system(
     keys: Res<ButtonInput<KeyCode>>,
     mut player_events: EventWriter<PlayerInput>,
+    source: Option<Res<crate::source_menus::SourceMenus>>,
 ) {
+    if source.as_deref().is_some_and(|source|source.modal()) {return;}
     if keys.just_pressed(KeyCode::Escape) {
         player_events.send(PlayerInput::ToggleMenu);
     }
@@ -285,33 +317,8 @@ pub fn player_input_system(
             }
 
             PlayerInput::Rollback => {
-                if engine.0.rollback() {
-                    render_state.choice_options.clear();
-                    imagemap_state.clear();
-                    choice_focus.clear();
-                    tw_state.skip();
-
-                    let mut pending = engine.0.renderer.take_pending();
-                    for cmd in pending.iter_mut() {
-                        match cmd {
-                            VnCommand::SetBackground { transition, .. } => {
-                                *transition = Transition::None
-                            }
-                            VnCommand::ShowSprite { transition, .. } => {
-                                *transition = Transition::None
-                            }
-                            VnCommand::HideSprite { transition, .. } => {
-                                *transition = Transition::None
-                            }
-                            VnCommand::MoveSprite { transition, .. } => {
-                                *transition = Transition::None
-                            }
-                            _ => {}
-                        }
-                    }
-                    for cmd in pending {
-                        vn_events.send(cmd);
-                    }
+                if rollback_game(&mut engine.0) {
+                    present_rollback(&mut engine,&mut render_state,&mut imagemap_state,&mut choice_focus,&mut tw_state,&mut vn_events);
                     next_state.set(VnState::Waiting);
                 }
             }
@@ -425,5 +432,37 @@ pub fn player_input_system(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod rollback_tests {
+    use super::*;
+    fn game(source:&str)->rvn_core::Engine<crate::bevy_renderer::BevyRenderer> {
+        let mut engine=rvn_core::Engine::new(rvn_parser::parse(source).unwrap(),crate::bevy_renderer::BevyRenderer::new(),16).unwrap();
+        engine.step_until_interaction().unwrap();engine
+    }
+    #[test]
+    fn one_game_rollback_reaches_previous_dialogue_and_does_not_undo_a_counter_frame() {
+        let mut engine=game("init{set counter=0}\n\"First\"\n\"Second\"");
+        assert!(!can_rollback(&engine));engine.advance_dialogue().unwrap();engine.step_until_interaction().unwrap();let second=engine.state.pc;
+        engine.state.vars.insert("counter".into(),rvn_parser::Value::Int(1));
+        assert!(can_rollback(&engine));assert!(rollback_game(&mut engine));assert!(engine.state.pc<second);assert_eq!(engine.state.vars["counter"],rvn_parser::Value::Int(0));assert!(!can_rollback(&engine));
+    }
+    #[test]
+    fn real_narrative_ui_transaction_is_restored_without_skipping_its_frame() {
+        let mut engine=game("init{set counter=0}\nhandler increment(event){set counter=counter+1}\nscreen inventory(){return component(\"increment\",\"button\",{\"events\":{\"click\":\"increment\"}},[])}\nlabel start\nui.open(\"inventory\",[],false,0)\n\"Current\"");
+        let pc=engine.state.pc;engine.interface_event(rvn_core::ui::UiInput{screen:"inventory".into(),element:"increment".into(),kind:rvn_ui::programmable::ScreenEventKind::Click,value:None,key:None}).unwrap();
+        assert!(engine.history.entries().last().unwrap().display.is_none());assert!(can_rollback(&engine));assert!(rollback_game(&mut engine));
+        assert_eq!(engine.state.pc,pc);assert_eq!(engine.state.vars["counter"],rvn_parser::Value::Int(0));assert_eq!(engine.state.ui.screens[0].name,"inventory");assert!(!can_rollback(&engine));
+    }
+    #[test]
+    fn rejected_previous_ui_state_keeps_story_rng_and_complete_history() {
+        let mut engine=game("screen inventory(){return component(\"root\",\"text\",{},[])}\nlabel start\nui.open(\"inventory\",[],false,0)\n\"First\"\n\"Second\"");
+        engine.advance_dialogue().unwrap();engine.step_until_interaction().unwrap();
+        let current=engine.history.pop().unwrap();let mut target=engine.history.pop().unwrap();target.state.ui.screens[0].name="closed_unknown".into();engine.history.push(target.state,target.display);engine.history.push(current.state,current.display);
+        let before=serde_json::to_value(&engine.state).unwrap();let history:Vec<_>=engine.history.entries().iter().map(|entry|serde_json::to_value(&entry.state).unwrap()).collect();
+        assert!(!rollback_game(&mut engine));assert_eq!(serde_json::to_value(&engine.state).unwrap(),before);
+        assert_eq!(engine.history.entries().iter().map(|entry|serde_json::to_value(&entry.state).unwrap()).collect::<Vec<_>>(),history);
     }
 }

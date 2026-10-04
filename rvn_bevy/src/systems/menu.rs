@@ -101,8 +101,8 @@ pub fn despawn_menu_overlay(
 
 pub fn menu_interaction_system(
     mut interaction_query: Query<
-        (&Interaction, &MenuButton, &mut BackgroundColor),
-        (Changed<Interaction>, With<Button>),
+        (Ref<Interaction>, &MenuButton, &mut BackgroundColor),
+        With<Button>,
     >,
     mut next_state: ResMut<NextState<VnState>>,
     mut menu_state: ResMut<MenuState>,
@@ -110,63 +110,148 @@ pub fn menu_interaction_system(
     mut save_menu_state: ResMut<SaveMenuState>,
     mut settings_menu_state: ResMut<SettingsMenuState>,
 ) {
-    // When a sub-menu is open, do not let clicks pass through to the pause menu
-    // behind it. This prevents opening "Charger" while "Paramètres" is already
-    // active, and vice versa.
-    if save_menu_state.active || settings_menu_state.active {
-        return;
-    }
-
     for (interaction, button, mut bg_color) in interaction_query.iter_mut() {
-        match interaction {
-            Interaction::Hovered => {
-                *bg_color = Color::srgba(0.15, 0.15, 0.35, 0.95).into();
-            }
-            Interaction::None => {
-                *bg_color = Color::srgba(0.08, 0.08, 0.20, 0.95).into();
-            }
-            Interaction::Pressed => {
-                *bg_color = Color::srgba(0.25, 0.25, 0.55, 0.95).into();
-
-                match button {
-                    MenuButton::Resume => {
-                        if menu_state.return_to == Some(VnState::TitleScreen) {
-                            menu_state.return_to = None;
-                            next_state.set(VnState::TitleScreen);
-                            return;
-                        }
-                        let ret = menu_state.return_to.take().unwrap_or(VnState::Waiting);
-                        next_state.set(ret);
-                    }
-
-                    MenuButton::Save => {
-                        if menu_state.return_to == Some(VnState::TitleScreen) {
-                            warn!("[menu] save ignored outside an active game session");
-                            return;
-                        }
-                        // Open save menu overlay in Save mode
-                        save_menu_state.open(SaveMenuMode::Save, SaveMenuOrigin::InGame);
-                    }
-
-                    MenuButton::Load => {
-                        if menu_state.return_to == Some(VnState::TitleScreen) {
-                            warn!("[menu] load ignored outside an active game session");
-                            return;
-                        }
-                        // Open save menu overlay in Load mode
-                        save_menu_state.open(SaveMenuMode::Load, SaveMenuOrigin::InGame);
-                    }
-
-                    MenuButton::Settings => {
-                        // Open settings overlay
-                        settings_menu_state.active = true;
-                    }
-
-                    MenuButton::Quit => {
-                        exit.send(AppExit::Success);
-                    }
+        // Covered presenters already project Interaction::None. Paint that
+        // state even while their actions are blocked, so a change consumed
+        // under Save/Settings cannot leave a stale highlight on return.
+        let background = match *interaction {
+            Interaction::Hovered => Color::srgba(0.15, 0.15, 0.35, 0.95),
+            Interaction::Pressed => Color::srgba(0.25, 0.25, 0.55, 0.95),
+            Interaction::None => Color::srgba(0.08, 0.08, 0.20, 0.95),
+        };
+        if bg_color.0 != background {
+            bg_color.0 = background;
+        }
+        // Activation still belongs only to a fresh press. An unchanged
+        // Pressed component must never reopen a closed submenu or repeat Quit.
+        if save_menu_state.active || settings_menu_state.active
+            || !interaction.is_changed() || *interaction != Interaction::Pressed
+        {
+            continue;
+        }
+        match button {
+            MenuButton::Resume => {
+                if menu_state.return_to == Some(VnState::TitleScreen) {
+                    menu_state.return_to = None;
+                    next_state.set(VnState::TitleScreen);
+                    return;
                 }
+                let ret = menu_state.return_to.take().unwrap_or(VnState::Waiting);
+                next_state.set(ret);
+            }
+
+            MenuButton::Save => {
+                if menu_state.return_to == Some(VnState::TitleScreen) {
+                    warn!("[menu] save ignored outside an active game session");
+                    return;
+                }
+                // Open save menu overlay in Save mode
+                save_menu_state.open(SaveMenuMode::Save, SaveMenuOrigin::InGame);
+            }
+
+            MenuButton::Load => {
+                if menu_state.return_to == Some(VnState::TitleScreen) {
+                    warn!("[menu] load ignored outside an active game session");
+                    return;
+                }
+                // Open save menu overlay in Load mode
+                save_menu_state.open(SaveMenuMode::Load, SaveMenuOrigin::InGame);
+            }
+
+            MenuButton::Settings => {
+                // Open settings overlay
+                settings_menu_state.active = true;
+            }
+
+            MenuButton::Quit => {
+                exit.send(AppExit::Success);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod feedback_tests {
+    use super::*;
+    #[derive(Resource, Default)]
+    struct PaintChanges(usize);
+    fn count_changes(
+        colors: Query<(), (With<MenuButton>, Changed<BackgroundColor>)>,
+        mut count: ResMut<PaintChanges>,
+    ) {
+        count.0 = colors.iter().count();
+    }
+    fn fixture() -> (App, [Entity; 5]) {
+        let mut app=App::new();
+        app.init_resource::<NextState<VnState>>()
+            .init_resource::<MenuState>()
+            .init_resource::<SaveMenuState>()
+            .init_resource::<SettingsMenuState>()
+            .init_resource::<PaintChanges>()
+            .add_systems(Update,(menu_interaction_system,count_changes).chain());
+        let buttons=[MenuButton::Resume,MenuButton::Save,MenuButton::Load,MenuButton::Settings,MenuButton::Quit]
+            .map(|button|app.world_mut().spawn((Button,button,Interaction::None,
+                BackgroundColor(Color::srgba(0.08,0.08,0.20,0.95)))).id());
+        app.update();app.update();
+        assert_eq!(app.world().resource::<PaintChanges>().0,0);
+        (app,buttons)
+    }
+    #[test]
+    fn each_builtin_color_tracks_current_interaction_without_redundant_changed_ticks() {
+        let (mut app,buttons)=fixture();
+        for (interaction,color) in [
+            (Interaction::Hovered,Color::srgba(0.15,0.15,0.35,0.95)),
+            (Interaction::None,Color::srgba(0.08,0.08,0.20,0.95)),
+        ] {
+            for entity in buttons {*app.world_mut().get_mut::<Interaction>(entity).unwrap()=interaction;}
+            app.update();
+            for entity in buttons {assert_eq!(app.world().get::<BackgroundColor>(entity).unwrap().0,color);}
+            assert_eq!(app.world().resource::<PaintChanges>().0,5);
+            app.update();assert_eq!(app.world().resource::<PaintChanges>().0,0,
+                "matching colors must not be marked Changed merely by repaint projection");
+        }
+    }
+    #[test]
+    fn unchanged_pressed_does_not_reopen_save_and_a_covered_press_cannot_change_its_mode() {
+        let (mut app,buttons)=fixture();let save=buttons[1];let load=buttons[2];
+        *app.world_mut().get_mut::<Interaction>(save).unwrap()=Interaction::Pressed;
+        app.update();assert!(app.world().resource::<SaveMenuState>().active);
+        assert_eq!(app.world().resource::<SaveMenuState>().mode,SaveMenuMode::Save);
+        assert_eq!(app.world().get::<BackgroundColor>(save).unwrap().0,Color::srgba(0.25,0.25,0.55,0.95));
+        *app.world_mut().get_mut::<Interaction>(load).unwrap()=Interaction::Pressed;
+        app.update();assert_eq!(app.world().resource::<SaveMenuState>().mode,SaveMenuMode::Save,
+            "fresh Load under Save must remain blocked");
+        app.world_mut().resource_mut::<SaveMenuState>().active=false;
+        app.update();assert!(!app.world().resource::<SaveMenuState>().active,
+            "retained Pressed components must not count as new activation");
+        assert_eq!(app.world().resource::<PaintChanges>().0,0);
+        *app.world_mut().get_mut::<Interaction>(save).unwrap()=Interaction::None;
+        *app.world_mut().get_mut::<Interaction>(load).unwrap()=Interaction::None;
+        app.update();
+        *app.world_mut().get_mut::<Interaction>(save).unwrap()=Interaction::Pressed;
+        app.update();assert!(app.world().resource::<SaveMenuState>().active,
+            "a genuine new press must still activate the original action");
+    }
+    #[test]
+    fn settings_cover_blocks_actions_without_altering_an_authored_button_or_its_outline() {
+        let (mut app,buttons)=fixture();
+        let authored=app.world_mut().spawn((Button,Interaction::Hovered,
+            BackgroundColor(Color::srgba(0.77,0.11,0.24,0.63)),
+            Outline{width:Val::Px(3.0),offset:Val::Px(4.0),color:Color::srgba(0.9,0.8,0.1,0.6)})).id();
+        app.world_mut().resource_mut::<SettingsMenuState>().active=true;
+        for entity in buttons {*app.world_mut().get_mut::<Interaction>(entity).unwrap()=Interaction::Pressed;}
+        app.update();
+        assert!(!app.world().resource::<SaveMenuState>().active);
+        assert!(app.world().resource::<SettingsMenuState>().active);
+        assert!(app.world().resource::<Events<AppExit>>().is_empty());
+        assert!(matches!(app.world().resource::<NextState<VnState>>(),NextState::Unchanged));
+        assert_eq!(app.world().get::<BackgroundColor>(authored).unwrap().0,Color::srgba(0.77,0.11,0.24,0.63));
+        let outline=app.world().get::<Outline>(authored).unwrap();
+        assert_eq!(outline.width,Val::Px(3.0));assert_eq!(outline.offset,Val::Px(4.0));
+        assert_eq!(outline.color,Color::srgba(0.9,0.8,0.1,0.6));
+        for entity in buttons {*app.world_mut().get_mut::<Interaction>(entity).unwrap()=Interaction::None;}
+        app.update();app.world_mut().resource_mut::<SettingsMenuState>().active=false;
+        app.update();assert_eq!(app.world().resource::<PaintChanges>().0,0);
+        assert!(app.world().resource::<Events<AppExit>>().is_empty());
     }
 }

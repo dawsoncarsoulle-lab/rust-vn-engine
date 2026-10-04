@@ -11,6 +11,9 @@ use std::{collections::BTreeSet, path::PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "qa_atlas.rs"]
 mod atlas;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "qa_source_menus.rs"]
+mod source_menus;
 #[path = "qa_compositions.rs"]
 mod compositions;
 #[path = "qa_menu_designs.rs"]
@@ -43,6 +46,22 @@ impl Plugin for QaPlugin {
                 unfocused_mode: bevy::winit::UpdateMode::Continuous,
             });
             crate::custom_canvas::install_qa(app);
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if std::env::var_os("RVN_QA_SOURCE").is_some() {
+            app.insert_resource(bevy::winit::WinitSettings {
+                focused_mode: bevy::winit::UpdateMode::Continuous,
+                unfocused_mode: bevy::winit::UpdateMode::Continuous,
+            });
+            app.add_systems(PreUpdate, source_menus::isolate_inputs
+                .after(bevy::input::InputSystem).before(apply_qa_pointer)
+                .before(bevy::ui::UiSystem::Focus));
+            app.add_systems(PostUpdate, source_menus::drive
+                .after(crate::composed_motion::MotionApply)
+                .after(bevy::ui::UiSystem::Layout)
+                .after(bevy::transform::TransformSystem::TransformPropagate)
+                .after(bevy::render::view::VisibilitySystems::VisibilityPropagate));
             return;
         }
         #[cfg(not(target_arch = "wasm32"))]

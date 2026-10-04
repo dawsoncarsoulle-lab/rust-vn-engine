@@ -695,6 +695,13 @@ save/load and temporary conditional hiding. `options` contain saved values;
 `option_labels` or `option_keys` contain display labels/translations.
 
 `ui.open(name, arguments, modal, layer)` opens or replaces a named instance.
+When called by a source game-menu presenter, the new instance belongs to that
+presenter: its children close together, and these temporary menu screens are
+excluded from narrative saves and rollback. `ui.open_story(name, arguments,
+modal, layer)` explicitly opens a narrative instance instead. It takes the
+same four arguments and checks, persists with the story and survives closing
+the presenter. Use it when a quick action opens an inventory, map or other
+independent screen. It grants no additional save, load or confirmation rights.
 Higher layers appear above lower layers; later instances resolve equal layers.
 `ui.close(name)` closes an instance and `ui.focus(name, element)` requests focus
 on an enabled, visible control. A modal screen prevents story advancement and
@@ -1179,3 +1186,46 @@ sans modifier les autres. Les sauvegardes 9 conservent état et temps ; le sché
 5 ajoute les nœuds sans redessiner ni déplacer les anciens. Voir le
 [contrat complet FR/EN](programmable-components.md) et les limites explicites :
 ceci n’est ni Python, ni des shaders natifs arbitraires, ni une parité Ren’Py.
+
+### Source game-menu presenters
+
+A menu document can opt into a source `screen` for each `source_screens` key:
+`title`, `pause`, `save`, `load`, `settings`, `gallery`, `history`, `confirm`,
+`dialogue`, `choices`, and `quick_actions`. An absent mapping keeps the existing
+menu page. The editor changes this association through the menu document's
+normal undo and save operations; it does not convert that document into a
+snapshot of evaluated components.
+
+Each presenter is a zero-argument screen or a screen taking one context
+argument. The context contains the real role and origin (`title` or
+`in_game`), preferences, save slots and protection/compatibility, dialogue,
+visible choices, history, unlocked gallery entries and the current confirmation
+token. `diagnostic` contains a local host error, or an empty string. It is input
+for expressions and functions, not an editable game-state snapshot. Designer
+sample data is only a preview.
+
+Pure constructors return a nominal `MenuRequest`: `menu_action`,
+`menu_start_scene`, `menu_open_page`, `menu_slot`, `menu_protect`,
+`menu_save_page`, `menu_number`, `menu_bool`, `menu_language`, `menu_advance`,
+`menu_skip_typewriter`, `menu_choose`, `menu_gallery_cg`, `menu_gallery_tab`,
+`menu_confirm`, and `menu_cancel`. Bind a request in a control's `event_data`,
+then call `menu.execute(event["data"]["request"])` from its handler. Ordinary
+live narrative screens may use these requests too. A screen function remains
+pure; it cannot execute a request while producing components.
+
+The host checks request types, ranges, actual game phase and the exact living
+screen instance before committing the handler's globals, random state or UI.
+Confirmation requires the real `confirm` presenter and its exact, non-replayable
+token. A request from a closed screen, retired presenter or changed choice list
+is rejected. Rejection keeps the game usable and exposes a diagnostic; a valid
+following action clears it. Save/load and preferences use the existing game
+operations and protection rules. A presenter cannot supply arbitrary file
+paths or acquire extra authority by editing its context.
+
+Choice indices are zero-based indices of the visible list. Conditions filter
+both displayed labels and destinations. The first visible option has index 0
+and numerical shortcut 1, even when earlier authored responses are hidden.
+System modal presenters and their children stay above narrative screens;
+dialogue, choices and quick actions remain below a narrative modal inventory
+or map. These transient presentations do not consume narrative screen order
+or enter a story save.

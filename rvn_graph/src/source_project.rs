@@ -5,28 +5,91 @@ use crate::{
     GraphDocument, GraphKind,
 };
 use rvn_parser::{SourceDocument, Statement};
+use std::path::Path;
+#[path = "source_imports.rs"]
+mod imports;
+pub(crate) use imports::ImportSnapshot;
 
 #[derive(Debug, Clone)]
 pub struct SourceProject {
     source: SourceDocument,
     graphs: Vec<GraphDocument>,
+    context: Option<imports::Context>,
+    imported_globals: std::collections::BTreeSet<String>,
 }
 
 impl SourceProject {
     pub fn open(source: impl Into<String>, presentation: &[GraphDocument]) -> Result<Self, String> {
+        Self::open_context(source.into(), presentation, None)
+    }
+
+    /// The file's `use` statements are validated against their real source
+    /// context. Only scopes physically authored in this file become graphs.
+    pub fn open_at(path: &Path, source: impl Into<String>, presentation: &[GraphDocument]) -> Result<Self, String> {
+        let source = source.into();
+        let (context, resolved) = imports::Context::live(path, &source)?;
+        validate_project_script(&resolved, false)?;
+        Self::open_context(source, presentation, Some((context, resolved)))
+    }
+
+    pub(crate) fn open_snapshot(path: &Path, source: String, presentation: &[GraphDocument], imports: Option<ImportSnapshot>) -> Result<Self, String> {
+        if let Some(imports) = imports {
+            let (context, resolved) = imports::Context::cached(path, &source, imports)?;
+            validate_project_script(&resolved, false)?;
+            Self::open_context(source, presentation, Some((context, resolved)))
+        } else {
+            // Old snapshots passed the isolated strict validation before they
+            // were written. Keep that baseline if an external import broke.
+            let mut project = Self::open(source, presentation)?;
+            project.context = Some(imports::Context::empty(path));
+            Ok(project)
+        }
+    }
+
+    fn open_context(source: String, presentation: &[GraphDocument], context: Option<(imports::Context, rvn_parser::Script)>) -> Result<Self, String> {
+        let (context, resolved) = match context {
+            Some((context, resolved)) => (Some(context), Some(resolved)),
+            None => (None, None),
+        };
         let source = SourceDocument::parse(source).map_err(|error| error.to_string())?;
-        let script = source
+        let mut script: rvn_parser::Script = source
             .statements()
             .iter()
             .map(|statement| statement.statement.clone())
             .collect();
-        validate_project_script(&script, false)?;
-        let graphs = if presentation.is_empty() {
-            import_script(&script)?
+        let imported_globals = if let Some(context) = &context {
+            let imported = crate::import::source_global_names(&context.imported_script()?);
+            let authored_init = script.iter().filter(|statement| matches!(statement, Statement::Init { .. }))
+                .cloned().collect();
+            let owned = crate::import::source_global_names(&authored_init);
+            imported.difference(&owned).cloned().collect()
+        } else { std::collections::BTreeSet::new() };
+        let graphs = if let Some(resolved) = &resolved {
+            let mut narrative_started = false;
+            for statement in &script {
+                if matches!(statement, Statement::Label { .. }) { narrative_started = true; }
+                if narrative_started && matches!(statement, Statement::Use { .. }) {
+                    return Err("For visual editing, move all use imports before the first narrative label. No source was changed.".into());
+                }
+            }
+            // Keep `use` and its trivia in SourceDocument. Only the physically
+            // authored scopes are projected; resolved imports were validated
+            // strictly before entering here, and remain read-only context.
+            script.retain(|statement| !matches!(statement, Statement::Use { .. }));
+            if presentation.is_empty() {
+                crate::import::import_source_scopes(&script, resolved)?
+            } else {
+                crate::import::reimport_source_scopes(&script, resolved, presentation)?
+            }
         } else {
-            reimport_script(&script, presentation)?
+            validate_project_script(&script, false)?;
+            if presentation.is_empty() {
+                import_script(&script)?
+            } else {
+                reimport_script(&script, presentation)?
+            }
         };
-        Ok(Self { source, graphs })
+        Ok(Self { source, graphs, context, imported_globals })
     }
 
     pub fn source(&self) -> &str {
@@ -36,9 +99,49 @@ impl SourceProject {
         &self.graphs
     }
 
+    /// A global supplied by read-only imported sources rather than an authored
+    /// initialization. Runtime Set remains legal; definition editors should
+    /// protect it unless the current graph has a local/parameter shadow.
+    pub fn is_imported_global(&self, name: &str) -> bool {
+        self.imported_globals.contains(name)
+    }
+
+    /// Compile the complete real import tree without writing the main source
+    /// or projecting imported files into writable Blueprint documents.
+    pub fn resolved_script(&self) -> Result<rvn_parser::Script, String> {
+        let script = if let Some(context) = &self.context { context.check(self.source())? }
+            else { rvn_parser::parse(self.source()).map_err(|error| error.to_string())? };
+        validate_project_script(&script, false)?;
+        Ok(script)
+    }
+
+    /// Exact, baseline-checked sources for an isolated preview/export. Callers
+    /// choose their portable staging boundary; this function writes nothing.
+    pub fn resolved_source_files(&self) -> Result<Vec<(std::path::PathBuf, String)>, String> {
+        self.context.as_ref().ok_or("Source file origin is required to collect RVN imports")?.source_files(self.source())
+    }
+
+    pub(crate) fn has_imports(&self) -> bool {
+        self.source.statements().iter().any(|statement| matches!(statement.statement, Statement::Use { .. }))
+    }
+
+    pub(crate) fn imports_snapshot(&self) -> Option<ImportSnapshot> {
+        self.context.as_ref().and_then(imports::Context::snapshot)
+    }
+
+    pub(crate) fn check_imports(&self) -> Result<(), String> {
+        if let Some(context) = &self.context { context.check(self.source())?; }
+        Ok(())
+    }
+
     /// Invalid source leaves the last valid graph and its layout untouched.
     pub fn refresh(&mut self, source: impl Into<String>) -> Result<(), String> {
-        let next = Self::open(source, &self.graphs)?;
+        let source = source.into();
+        let next = if let Some(context) = &self.context {
+            let (context, resolved) = context.resolve(&source)?;
+            validate_project_script(&resolved, false)?;
+            Self::open_context(source, &self.graphs, Some((context, resolved)))?
+        } else { Self::open(source, &self.graphs)? };
         *self = next;
         Ok(())
     }
@@ -55,6 +158,18 @@ impl SourceProject {
                 "RVN source changed: reload or explicitly resolve the conflict before saving."
                     .into(),
             );
+        }
+        self.check_imports()?;
+        for graph in edited {
+            let Some(previous) = self.graphs.iter().find(|old| old.graph_id == graph.graph_id) else { continue; };
+            for name in &self.imported_globals {
+                if previous.variable_scope(name) == Some(crate::VariableScope::Global)
+                    && !matches!(graph.variable_scope(name), Some(crate::VariableScope::Local | crate::VariableScope::Parameter))
+                    && graph.variables.get(name) != previous.variables.get(name)
+                {
+                    return Err(format!("Imported global '{name}' has a read-only definition. Edit its own RVN source; runtime Set remains allowed. No source was changed."));
+                }
+            }
         }
         let mut identities = std::collections::HashSet::new();
         if edited
@@ -134,7 +249,16 @@ impl SourceProject {
         }
         crate::resolve_label_references(&mut resolved)?;
         let edited = resolved.as_slice();
-        transpile_project(edited)?;
+        if self.context.is_none() {
+            transpile_project(edited)?;
+        } else {
+            // A scope's pins and code generation must still be valid. Its
+            // external references are checked against the real resolved AST
+            // below, rather than treating local scopes as a whole project.
+            for graph in edited {
+                transpile(graph).map_err(|error| error.to_string())?;
+            }
+        }
         let statements = self.source.statements();
         let mut edits = Vec::new();
         let mut declarations = String::new();
@@ -176,6 +300,7 @@ impl SourceProject {
                             | Statement::Screen { .. }
                             | Statement::Handler { .. }
                             | Statement::Init { .. }
+                            | Statement::Use { .. }
                     )
                 }) {
                     return Err("Move interleaved declarations outside this label before editing its visual flow; no source was changed.".into());
@@ -211,8 +336,11 @@ impl SourceProject {
                 }
                 continue;
             };
-            if old.kind != graph.kind {
-                return Err("Rename a source-linked scope in RVN first; existing references must be reconciled together.".into());
+            if old.kind != graph.kind && !matches!((&old.kind,&graph.kind),
+                (GraphKind::Function{..},GraphKind::Function{..})|
+                (GraphKind::Screen{..},GraphKind::Screen{..})|
+                (GraphKind::Handler{..},GraphKind::Handler{..})) {
+                return Err("Changing a source scope’s family is not a rename; no source was changed.".into());
             }
             let before = compile(old)?;
             let after = compile(graph)?;
@@ -223,7 +351,7 @@ impl SourceProject {
                 .iter()
                 .enumerate()
                 .filter_map(|(index, statement)| {
-                    let matches = match (&graph.kind, &statement.statement) {
+                    let matches = match (&old.kind, &statement.statement) {
                         (GraphKind::Init, Statement::Init { .. }) => true,
                         (GraphKind::Function { name }, Statement::Function { name: other, .. }) => {
                             name == other
@@ -293,6 +421,7 @@ impl SourceProject {
                                 | Statement::Screen { .. }
                                 | Statement::Handler { .. }
                                 | Statement::Init { .. }
+                                | Statement::Use { .. }
                         )
                     }) {
                         return Err("Move interleaved declarations outside this label before editing its visual flow; no source was changed.".into());
@@ -407,7 +536,11 @@ impl SourceProject {
             .filter(|id| !characters.contains_key(*id))
             .map(String::as_str)
             .collect();
-        check_removed_character_references(&ast, &removed)?;
+        let (context, checked_ast) = if let Some(context) = &self.context {
+            let (context, resolved) = context.resolve(trial.source())?;
+            (Some(context), resolved)
+        } else { (None, ast) };
+        check_removed_character_references(&checked_ast, &removed)?;
         for graph in &resolved {
             for node in graph
                 .nodes
@@ -421,9 +554,21 @@ impl SourceProject {
                 }
             }
         }
-        validate_project_script(&ast, false)?;
+        validate_project_script(&checked_ast, false)?;
+        let imported_globals = if let Some(context) = &context {
+            let imported = crate::import::source_global_names(&context.imported_script()?);
+            // The resolved AST contains imported Init as well. Ownership must
+            // instead follow only Init physically present in the trial source.
+            let authored_init = trial.statements().iter()
+                .filter(|statement| matches!(statement.statement, Statement::Init { .. }))
+                .map(|statement| statement.statement.clone()).collect();
+            let owned = crate::import::source_global_names(&authored_init);
+            imported.difference(&owned).cloned().collect()
+        } else { std::collections::BTreeSet::new() };
         self.source = trial;
         self.graphs = resolved;
+        self.context = context;
+        self.imported_globals = imported_globals;
         Ok(())
     }
 }

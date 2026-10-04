@@ -122,7 +122,9 @@ pub fn history_input_system(
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut next_state: ResMut<NextState<VnState>>,
+    source: Option<Res<crate::source_menus::SourceMenus>>,
 ) {
+    if source.as_deref().is_some_and(|source|source.active(rvn_ui::PageRole::History)) {return;}
     if keys.just_pressed(KeyCode::Escape) || mouse.just_pressed(MouseButton::Right) {
         next_state.set(VnState::Waiting);
     }

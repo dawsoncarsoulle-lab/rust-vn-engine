@@ -7,7 +7,7 @@ platform=${1:-linux}
 task_script=$(realpath "$0")
 case "$platform" in
   linux) cross=() ;;
-  windows) cross=(--target-os=mingw32 --arch=x86_64 --enable-cross-compile --cross-prefix=x86_64-w64-mingw32- --extra-ldflags=-static-libgcc) ;;
+  windows) cross=(--target-os=mingw32 --arch=x86_64 --enable-cross-compile --cross-prefix=x86_64-w64-mingw32- --extra-ldflags=-static-libgcc --disable-pthreads --enable-w32threads) ;;
   *) printf 'Expected linux or windows\n' >&2; exit 2 ;;
 esac
 # FFmpeg's generated config.sh does not quote its prefix. Avoid producing
@@ -65,9 +65,34 @@ cp COPYING.LGPLv2.1 "$sources/COPYING.LGPLv2.1"
 cp "$task_script" "$sources/build-ffmpeg-lgpl.sh"
 make -j "${RVN_BUILD_JOBS:-4}"
 make install
+# Modern MinGW may provide clock_gettime/nanosleep in winpthreads even when
+# FFmpeg itself uses native Windows threads. Carry that explicit dependency
+# and its complete independent notices when the actual PE imports require it.
+windows_libraries=(avcodec-63.dll avformat-63.dll avutil-61.dll swscale-10.dll swresample-7.dll)
+if [[ "$platform" == windows ]]; then
+  needs_winpthread=false
+  for library in "${windows_libraries[@]}"; do
+    library_imports=$(x86_64-w64-mingw32-objdump -p "$prefix/bin/$library")
+    if printf '%s\n' "$library_imports" | awk '/DLL Name:/ {print tolower($3)}' | grep -x libwinpthread-1.dll > /dev/null; then
+      needs_winpthread=true
+    fi
+  done
+  if [[ "$needs_winpthread" == true ]]; then
+    winpthread_dll="${RVN_WINPTHREAD_DLL:-}"
+    winpthread_notice="${RVN_WINPTHREAD_NOTICE:-}"
+    if [[ "$winpthread_dll" != /* || "$winpthread_notice" != /* || ! -s "$winpthread_dll" || ! -s "$winpthread_notice" ]]; then
+      printf 'Required clock runtime: set absolute RVN_WINPTHREAD_DLL and RVN_WINPTHREAD_NOTICE to the reviewed matching MinGW files\n' >&2; exit 2
+    fi
+    x86_64-w64-mingw32-objdump -p "$winpthread_dll" > "$sources/WINPTHREAD-PE-IMPORTS.txt"
+    cp "$winpthread_dll" "$prefix/bin/libwinpthread-1.dll"
+    cp "$winpthread_notice" "$sources/WINPTHREAD-NOTICES.txt"
+    runtime_notices+=(WINPTHREAD-NOTICES.txt)
+    windows_libraries+=(libwinpthread-1.dll)
+  fi
+fi
 (cd "$sources"; sha256sum "$archive" "$archive.asc" COPYING.LGPLv2.1 config.log "${runtime_notices[@]}") > "$sources/SHA256SUMS"
 case "$platform" in
   linux) (cd "$prefix/lib"; sha256sum libavcodec.so.63 libavformat.so.63 libavutil.so.61 libswscale.so.10 libswresample.so.7) > "$sources/LIBRARY-SHA256SUMS" ;;
-  windows) (cd "$prefix/bin"; sha256sum avcodec-63.dll avformat-63.dll avutil-61.dll swscale-10.dll swresample-7.dll) > "$sources/LIBRARY-SHA256SUMS" ;;
+  windows) (cd "$prefix/bin"; sha256sum "${windows_libraries[@]}") > "$sources/LIBRARY-SHA256SUMS" ;;
 esac
 printf '\nFFmpeg LGPL shared runtime: %s\n' "$prefix"

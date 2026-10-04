@@ -10,6 +10,8 @@ use std::{
 const SIDECAR: &str = ".rvn-authoring.json";
 const JOURNAL: &str = ".rvn-authoring.transaction.json";
 const RECOVERY: &str = ".rvn-authoring.recovery.json";
+#[path="source_refactor.rs"] mod refactor;
+pub use refactor::{SourceRefactorFile,SourceRefactorReceipt};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Recovery {
@@ -26,6 +28,8 @@ struct Snapshot {
     source: String,
     source_snapshot: String,
     graphs: Vec<GraphDocument>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    imports: Option<crate::source_project::ImportSnapshot>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -79,7 +83,7 @@ impl SourceWorkspace {
             .ok_or("The source path must be valid Unicode")?
             .replace('\\', "/");
         let contents = fs::read_to_string(&source).map_err(|error| error.to_string())?;
-        let project = SourceProject::open(contents, presentation)?;
+        let project = SourceProject::open_at(&source, contents, presentation)?;
         let mut workspace = Self {
             root,
             relative_source,
@@ -97,7 +101,7 @@ impl SourceWorkspace {
     /// Invalid external source retains the last valid graph, with its error.
     pub fn open(root: &Path) -> Result<Option<Self>, String> {
         let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
-        if !root.join(SIDECAR).exists() && !root.join(JOURNAL).exists() {
+        if !root.join(SIDECAR).exists() && !root.join(JOURNAL).exists() && !root.join(refactor::REFACTOR_JOURNAL).exists() {
             return Ok(None);
         }
         let _lock = lock(&root)?;
@@ -114,19 +118,18 @@ impl SourceWorkspace {
             ));
         }
         let path = source_path(&root, &snapshot.source)?;
-        let mut project = SourceProject::open(snapshot.source_snapshot.as_str(), &snapshot.graphs)?;
+        let mut project = SourceProject::open_snapshot(&path, snapshot.source_snapshot.clone(), &snapshot.graphs, snapshot.imports.clone())?;
         let source_error = match fs::read_to_string(&path) {
-            // The snapshot was fully parsed, validated and reconciled above.
-            // Unchanged authored bytes need no second import of every graph.
-            Ok(source) if source == project.source() => None,
-            Ok(source) => project
-                .refresh(source)
-                .err()
-                .map(|error| format!("{}: {error}", path.display())),
+            Ok(source) if source == project.source() && project.imports_snapshot().is_none()
+                && !project.has_imports() => None,
+            // Imports can change even while the linked file's bytes do not.
+            // A failed refresh retains the validated, cached context/graphs.
+            Ok(source) => project.refresh(source).err().map(|error| format!("{}: {error}", path.display())),
             Err(error) => Some(format!("{}: {error}", path.display())),
         };
         let snapshot_matches_project = snapshot.source_snapshot == project.source()
             && snapshot.graphs == project.graphs()
+            && snapshot.imports == project.imports_snapshot()
             && references_are_current(project.graphs())
             && snapshot
                 .graphs
@@ -233,6 +236,7 @@ impl SourceWorkspace {
     }
 
     fn check_recovery_baseline(&self) -> Result<(), String> {
+        self.project.check_imports()?;
         if fs::read_to_string(self.source_path()).map_err(|error| error.to_string())?
             != self.project.source()
             || read_optional(&self.root.join(SIDECAR))? != self.expected_sidecar
@@ -282,6 +286,7 @@ impl SourceWorkspace {
             source: self.relative_source.clone(),
             source_snapshot: next.source().into(),
             graphs: next.graphs().to_vec(),
+            imports: next.imports_snapshot(),
         };
         let after_sidecar =
             serde_json::to_string_pretty(&snapshot).map_err(|error| error.to_string())?;
@@ -315,6 +320,7 @@ impl SourceWorkspace {
             }
         }
         self.check_save_inputs(&path, &current, &sidecar)?;
+        next.check_imports()?;
         // Successful explicit save supersedes autosaved edits, but archives
         // rather than deletes them. If archiving fails, the cache stays intact.
         self.archive_recovery_locked()?;
@@ -338,6 +344,7 @@ impl SourceWorkspace {
         current: &str,
         sidecar: &Option<String>,
     ) -> Result<(), String> {
+        self.project.check_imports()?;
         if fs::read_to_string(path).map_err(|error| error.to_string())? != current
             || read_optional(&self.root.join(SIDECAR))? != *sidecar
         {
@@ -409,6 +416,7 @@ fn read_optional(path: &Path) -> Result<Option<String>, String> {
 }
 
 fn recover(root: &Path) -> Result<(), String> {
+    refactor::recover_refactor(root)?;
     let Some(journal) = read_optional(&root.join(JOURNAL))? else {
         return Ok(());
     };
@@ -431,7 +439,8 @@ fn recover(root: &Path) -> Result<(), String> {
     {
         return Err("Inconsistent save journal; files were not overwritten".into());
     }
-    SourceProject::open(snapshot.source_snapshot, &snapshot.graphs)?;
+    let project = SourceProject::open_snapshot(&source, snapshot.source_snapshot, &snapshot.graphs, snapshot.imports)?;
+    project.check_imports()?;
     if current != transaction.after_source {
         atomic_write(&source, &transaction.after_source)?;
     }
@@ -495,8 +504,265 @@ mod tests {
     }
     impl Drop for Fixture {
         fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
+            let Ok(path) = self.0.canonicalize() else { return; };
+            let Ok(temporary) = std::env::temp_dir().canonicalize() else { return; };
+            if path.parent() == Some(temporary.as_path())
+                && path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with("rvn-source-storage-")) {
+                let _ = fs::remove_dir_all(path);
+            }
         }
+    }
+
+    const IMPORTED_MAIN: &str = "// main stays authored\nuse \"chapter.rvn\"\nfunction local_value(n) { return helper(n) }\nlabel start\n music.volume(\"0.2\")\n \"[local_value(3)]\"\n ui.open(\"hud\", [], false, 1)\n jump chapter\n";
+    const IMPORTED_CHAPTER: &str = "// exact imported CRLF and Unicode — 雨\r\nfunction helper(n) { return n + 2 }\r\nscreen hud() { return {\"id\":\"root\",\"kind\":\"text\",\"text\":\"Imported\"} }\r\nhandler clicked(event) { return true }\r\nlabel chapter\r\n\"Imported chapter\"\r\nreturn\r\n";
+
+    fn imported_fixture() -> (Fixture, PathBuf) {
+        let fixture = Fixture::new();
+        fs::create_dir(fixture.0.join("scripts")).unwrap();
+        let path = fixture.0.join("scripts/main.rvn");
+        fs::write(&path, IMPORTED_MAIN).unwrap();
+        fs::write(fixture.0.join("scripts/chapter.rvn"), IMPORTED_CHAPTER).unwrap();
+        // An identically named root file must never supply the import's scope.
+        fs::write(fixture.0.join("chapter.rvn"), "label wrong_origin\nreturn\n").unwrap();
+        (fixture, path)
+    }
+
+    fn imported_edits(workspace: &SourceWorkspace) -> Vec<GraphDocument> {
+        let mut graphs = workspace.project().graphs().to_vec();
+        let graph = graphs.iter_mut().find(|graph| matches!(&graph.kind, GraphKind::Label { name } if name == "start")).unwrap();
+        let volume = graph.nodes.values().find(|node| node.kind == NodeKind::MusicVolume).unwrap().id;
+        let pin = graph.pin_by_key(volume, "level").unwrap().id;
+        let producer = graph.pins[&graph.edges.values().find(|edge| edge.input == pin).unwrap().output].node;
+        graph.set_property(producer, "value", PropertyValue::Float(0.4)).unwrap();
+        graph.nodes.get_mut(&volume).unwrap().position = [430.0, 210.0];
+        graphs
+    }
+
+    #[test]
+    fn linked_imports_validate_the_real_project_without_writing_or_projecting_imported_scopes() {
+        let (fixture, path) = imported_fixture();
+        let mut workspace = SourceWorkspace::link(&fixture.0, &path, &[]).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), IMPORTED_MAIN);
+        assert!(workspace.project().graphs().iter().all(|graph| match &graph.kind {
+            GraphKind::Init => true,
+            GraphKind::Label { name } => name == "start",
+            GraphKind::Function { name } => name == "local_value",
+            _ => false,
+        }));
+        let compiled = workspace.project().resolved_script().unwrap();
+        assert_eq!(compiled, rvn_parser::parse_file_with_uses(&path).unwrap());
+        assert!(compiled.iter().any(|statement| matches!(statement, rvn_parser::Statement::Screen { name, .. } if name == "hud")));
+        assert!(compiled.iter().any(|statement| matches!(statement, rvn_parser::Statement::Handler { name, .. } if name == "clicked")));
+        let files = workspace.project().resolved_source_files().unwrap();
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().any(|(file, source)| file == &fixture.0.join("scripts/chapter.rvn").canonicalize().unwrap() && source == IMPORTED_CHAPTER));
+        let graphs = imported_edits(&workspace);
+        workspace.save(&graphs).unwrap();
+        assert!(workspace.project().source().contains("// main stays authored"));
+        assert!(workspace.project().source().contains("use \"chapter.rvn\""));
+        assert!(workspace.project().resolved_script().unwrap().iter().any(|statement| matches!(statement, rvn_parser::Statement::MusicVolume { level } if *level == 0.4)));
+        assert_eq!(fs::read_to_string(fixture.0.join("scripts/chapter.rvn")).unwrap(), IMPORTED_CHAPTER);
+        assert_eq!(fs::read_to_string(fixture.0.join("chapter.rvn")).unwrap(), "label wrong_origin\nreturn\n");
+        let backups: Vec<_> = fs::read_dir(fixture.0.join(".rvn-backups")).unwrap().filter_map(Result::ok).collect();
+        assert!(backups.iter().any(|entry| fs::read_to_string(entry.path().join("source.rvn")).ok().as_deref() == Some(IMPORTED_MAIN)));
+        assert!(backups.iter().all(|entry| !entry.path().join("chapter.rvn").exists()));
+        // Reopening exercises the same source projection with prior graph
+        // identities and layout, including the cached import snapshot.
+        let reopened = SourceWorkspace::open(&fixture.0).unwrap().unwrap();
+        assert!(reopened.source_error.is_none());
+        assert_eq!(reopened.project().graphs(), workspace.project().graphs());
+        assert_eq!(reopened.project().resolved_script().unwrap(), rvn_parser::parse_file_with_uses(&path).unwrap());
+        assert!(reopened.project().source().contains("use \"chapter.rvn\""));
+        assert_eq!(fs::read_to_string(fixture.0.join("scripts/chapter.rvn")).unwrap(), IMPORTED_CHAPTER);
+    }
+
+    #[test]
+    fn real_imports_never_relax_unknown_references_at_link_or_save() {
+        let (fixture, path) = imported_fixture();
+        let invalid = IMPORTED_MAIN.replace("jump chapter", "jump absent");
+        fs::write(&path, &invalid).unwrap();
+        assert!(SourceWorkspace::link(&fixture.0, &path, &[]).unwrap_err().contains("absent"));
+        assert!(!fixture.0.join(SIDECAR).exists());
+        assert_eq!(fs::read_to_string(&path).unwrap(), invalid);
+        let invalid = IMPORTED_MAIN.replace("helper(n)", "missing_function(n)");
+        assert!(SourceProject::open_at(&path, invalid, &[]).unwrap_err().contains("missing_function"));
+        fs::write(&path, IMPORTED_MAIN).unwrap();
+        let mut workspace = SourceWorkspace::link(&fixture.0, &path, &[]).unwrap();
+        let original = workspace.project().graphs().to_vec();
+        let mut invalid = original.clone();
+        let graph = invalid.iter_mut().find(|graph| matches!(&graph.kind, GraphKind::Label { name } if name == "start")).unwrap();
+        let target = graph.nodes.values().find(|node| node.kind == NodeKind::LabelValue && node.properties.get("label") == Some(&PropertyValue::String("chapter".into()))).unwrap().id;
+        graph.set_property(target, "label", PropertyValue::String("absent".into())).unwrap();
+        workspace.write_recovery(&invalid).unwrap();
+        let sidecar = fs::read(fixture.0.join(SIDECAR)).unwrap();
+        let recovery = fs::read(fixture.0.join(RECOVERY)).unwrap();
+        assert!(workspace.save(&invalid).unwrap_err().contains("absent"));
+        assert_eq!(workspace.project().graphs(), original);
+        assert_eq!(fs::read_to_string(&path).unwrap(), IMPORTED_MAIN);
+        assert_eq!(fs::read(fixture.0.join(SIDECAR)).unwrap(), sidecar);
+        assert_eq!(fs::read(fixture.0.join(RECOVERY)).unwrap(), recovery);
+        assert_eq!(fs::read_to_string(fixture.0.join("scripts/chapter.rvn")).unwrap(), IMPORTED_CHAPTER);
+    }
+
+    #[test]
+    fn a_use_after_a_label_refuses_visual_projection_and_preserves_last_valid_cache_and_recovery() {
+        let (fixture, path) = imported_fixture();
+        let mut workspace = SourceWorkspace::link(&fixture.0, &path, &[]).unwrap();
+        let edited = imported_edits(&workspace);
+        workspace.write_recovery(&edited).unwrap();
+        let graphs = workspace.project().graphs().to_vec();
+        let sidecar = fs::read(fixture.0.join(SIDECAR)).unwrap();
+        let recovery = fs::read(fixture.0.join(RECOVERY)).unwrap();
+        let interleaved = IMPORTED_MAIN.replacen("use \"chapter.rvn\"\n", "", 1)
+            .replacen("label start\n", "label start\nuse \"chapter.rvn\"\n", 1);
+        fs::write(&path, &interleaved).unwrap();
+        // This is a legal runtime import. Only visual ownership is unsafe:
+        // the imported label would own the following narrative statements.
+        assert!(rvn_parser::parse_file_with_uses(&path).is_ok());
+        assert!(SourceProject::open_at(&path, &interleaved, &[]).unwrap_err().contains("before the first narrative label"));
+        assert!(workspace.project.refresh(&interleaved).unwrap_err().contains("before the first narrative label"));
+        assert_eq!(workspace.project().source(), IMPORTED_MAIN);
+        assert_eq!(workspace.project().graphs(), graphs);
+        let mut reopened = SourceWorkspace::open(&fixture.0).unwrap().unwrap();
+        assert!(reopened.source_error.as_deref().unwrap().contains("before the first narrative label"));
+        assert_eq!(reopened.project().source(), IMPORTED_MAIN);
+        assert_eq!(reopened.project().graphs(), graphs);
+        assert!(reopened.recovery().is_err());
+        assert!(reopened.save(&edited).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), interleaved);
+        assert_eq!(fs::read(fixture.0.join(SIDECAR)).unwrap(), sidecar);
+        assert_eq!(fs::read(fixture.0.join(RECOVERY)).unwrap(), recovery);
+        assert_eq!(fs::read_to_string(fixture.0.join("scripts/chapter.rvn")).unwrap(), IMPORTED_CHAPTER);
+    }
+
+    #[test]
+    fn changed_or_missing_import_keeps_recovery_and_the_last_valid_portable_snapshot() {
+        let (fixture, path) = imported_fixture();
+        let mut workspace = SourceWorkspace::link(&fixture.0, &path, &[]).unwrap();
+        let graphs = imported_edits(&workspace);
+        workspace.write_recovery(&graphs).unwrap();
+        let sidecar = fs::read(fixture.0.join(SIDECAR)).unwrap();
+        let recovery = fs::read(fixture.0.join(RECOVERY)).unwrap();
+        let external = format!("{IMPORTED_CHAPTER}// externally edited\n");
+        fs::write(fixture.0.join("scripts/chapter.rvn"), &external).unwrap();
+        assert!(workspace.save(&graphs).unwrap_err().contains("changed externally"));
+        assert!(workspace.project().resolved_script().is_err());
+        assert_eq!(fs::read_to_string(fixture.0.join("scripts/chapter.rvn")).unwrap(), external);
+        assert_eq!(fs::read_to_string(&path).unwrap(), IMPORTED_MAIN);
+        assert_eq!(fs::read(fixture.0.join(SIDECAR)).unwrap(), sidecar);
+        assert_eq!(fs::read(fixture.0.join(RECOVERY)).unwrap(), recovery);
+        fs::remove_file(fixture.0.join("scripts/chapter.rvn")).unwrap();
+        let reopened = SourceWorkspace::open(&fixture.0).unwrap().unwrap();
+        assert!(reopened.source_error.is_some());
+        assert_eq!(reopened.project().graphs(), workspace.project().graphs());
+        assert_eq!(fs::read(fixture.0.join(RECOVERY)).unwrap(), recovery);
+        fs::write(fixture.0.join("scripts/chapter.rvn"), IMPORTED_CHAPTER).unwrap();
+
+        let moved = Fixture::new();
+        fs::create_dir(moved.0.join("scripts")).unwrap();
+        fs::copy(&path, moved.0.join("scripts/main.rvn")).unwrap();
+        fs::copy(fixture.0.join("scripts/chapter.rvn"), moved.0.join("scripts/chapter.rvn")).unwrap();
+        fs::copy(fixture.0.join(SIDECAR), moved.0.join(SIDECAR)).unwrap();
+        let portable = SourceWorkspace::open(&moved.0).unwrap().unwrap();
+        assert!(portable.source_error.is_none());
+        assert_eq!(portable.project().graphs(), workspace.project().graphs());
+        assert_eq!(portable.project().resolved_script().unwrap(), rvn_parser::parse_file_with_uses(moved.0.join("scripts/main.rvn")).unwrap());
+    }
+
+    #[test]
+    fn wildcards_nested_deduplicated_imports_and_cycles_match_runtime_resolution() {
+        let fixture = Fixture::new();
+        fs::create_dir(fixture.0.join("chapters")).unwrap();
+        fs::write(fixture.0.join("chapters/a.rvn"), "use \"../helper.rvn\"\nlabel a\nreturn\n").unwrap();
+        fs::write(fixture.0.join("chapters/b.rvn"), "use \"../helper.rvn\"\nlabel b\nreturn\n").unwrap();
+        fs::write(fixture.0.join("helper.rvn"), "function helper(n) { return n + 1 }\n").unwrap();
+        let path = fixture.0.join("story.rvn");
+        let main = "use { \"chapters/*.rvn\", \"helper.rvn\" }\nlabel start\n\"[helper(3)]\"\njump a\n";
+        fs::write(&path, main).unwrap();
+        let mut workspace = SourceWorkspace::link(&fixture.0, &path, &[]).unwrap();
+        assert_eq!(workspace.project().resolved_script().unwrap(), rvn_parser::parse_file_with_uses(&path).unwrap());
+        assert_eq!(workspace.project().resolved_source_files().unwrap().len(), 4);
+        let graphs = workspace.project().graphs().to_vec();
+        fs::write(fixture.0.join("chapters/c.rvn"), "label c\nreturn\n").unwrap();
+        assert!(workspace.save(&graphs).unwrap_err().contains("changed externally"));
+        let reopened = SourceWorkspace::open(&fixture.0).unwrap().unwrap();
+        assert!(reopened.source_error.is_none());
+        assert!(reopened.project().resolved_script().unwrap().iter().any(|statement| matches!(statement, rvn_parser::Statement::Label { name } if name == "c")));
+        fs::write(fixture.0.join("helper.rvn"), "use \"story.rvn\"\nfunction helper(n) { return n + 1 }\n").unwrap();
+        assert!(SourceProject::open_at(&path, main, &[]).unwrap_err().contains("cycle"));
+        assert!(rvn_parser::parse_file_with_uses(&path).is_err());
+        assert!(SourceWorkspace::open(&fixture.0).unwrap().unwrap().source_error.is_some());
+    }
+
+    #[test]
+    fn interrupted_save_checks_import_bytes_before_publishing_main_or_presentation() {
+        let (fixture, path) = imported_fixture();
+        let workspace = SourceWorkspace::link(&fixture.0, &path, &[]).unwrap();
+        let before_sidecar = fs::read_to_string(fixture.0.join(SIDECAR)).unwrap();
+        let mut next = workspace.project().clone();
+        next.apply_visual(IMPORTED_MAIN, &imported_edits(&workspace)).unwrap();
+        let after_sidecar = serde_json::to_string(&Snapshot {
+            version: 1, source: "scripts/main.rvn".into(), source_snapshot: next.source().into(),
+            graphs: next.graphs().to_vec(), imports: next.imports_snapshot(),
+        }).unwrap();
+        let transaction = Transaction {
+            source: "scripts/main.rvn".into(), before_source: IMPORTED_MAIN.into(), after_source: next.source().into(),
+            before_sidecar: Some(before_sidecar.clone()), after_sidecar,
+        };
+        let journal = serde_json::to_string(&transaction).unwrap();
+        fs::write(fixture.0.join(JOURNAL), &journal).unwrap();
+        let external = format!("{IMPORTED_CHAPTER}// third party\n");
+        fs::write(fixture.0.join("scripts/chapter.rvn"), &external).unwrap();
+        assert!(SourceWorkspace::open(&fixture.0).unwrap_err().contains("changed externally"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), IMPORTED_MAIN);
+        assert_eq!(fs::read_to_string(fixture.0.join(SIDECAR)).unwrap(), before_sidecar);
+        assert_eq!(fs::read_to_string(fixture.0.join(JOURNAL)).unwrap(), journal);
+        assert_eq!(fs::read_to_string(fixture.0.join("scripts/chapter.rvn")).unwrap(), external);
+        fs::write(fixture.0.join("scripts/chapter.rvn"), IMPORTED_CHAPTER).unwrap();
+        let recovered = SourceWorkspace::open(&fixture.0).unwrap().unwrap();
+        assert_eq!(recovered.project().source(), next.source());
+        assert!(!fixture.0.join(JOURNAL).exists());
+        assert_eq!(fs::read_to_string(fixture.0.join("scripts/chapter.rvn")).unwrap(), IMPORTED_CHAPTER);
+    }
+
+    #[test]
+    fn refactor_and_replay_keep_imports_read_only_and_compare_their_exact_baseline() {
+        let (fixture, path) = imported_fixture();
+        let mut workspace = SourceWorkspace::link(&fixture.0, &path, &[]).unwrap();
+        let original = workspace.project().graphs().to_vec();
+        let graphs = imported_edits(&workspace);
+        let extra = SourceRefactorFile { path: "scripts/chapter.rvn".into(), before: Some(IMPORTED_CHAPTER.into()), after: Some("label chapter\nreturn\n".into()) };
+        assert!(workspace.refactor(&graphs, &[extra]).unwrap_err().contains("read-only"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), IMPORTED_MAIN);
+        assert_eq!(workspace.project().graphs(), original);
+        let receipt = workspace.refactor(&graphs, &[]).unwrap();
+        assert_eq!(workspace.project().resolved_script().unwrap(), rvn_parser::parse_file_with_uses(&path).unwrap());
+        workspace.replay_refactor(&receipt, false).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), IMPORTED_MAIN);
+        let sidecar = fs::read(fixture.0.join(SIDECAR)).unwrap();
+        let external = format!("{IMPORTED_CHAPTER}// external edit\n");
+        fs::write(fixture.0.join("scripts/chapter.rvn"), &external).unwrap();
+        assert!(workspace.replay_refactor(&receipt, true).unwrap_err().contains("changed externally"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), IMPORTED_MAIN);
+        assert_eq!(fs::read(fixture.0.join(SIDECAR)).unwrap(), sidecar);
+        assert_eq!(fs::read_to_string(fixture.0.join("scripts/chapter.rvn")).unwrap(), external);
+    }
+
+    #[test]
+    fn use_path_resolution_keeps_the_same_filesystem_semantics_as_the_runtime() {
+        let fixture = Fixture::new();
+        fs::write(fixture.0.join("helper.rvn"), "label imported\nreturn\n").unwrap();
+        let path = fixture.0.join("story.rvn");
+        for raw in ["not_existing/../helper.rvn", "not_existing/../*.rvn"] {
+            let source = format!("use \"{raw}\"\nlabel start\njump imported\n");
+            fs::write(&path, &source).unwrap();
+            assert_eq!(SourceProject::open_at(&path, &source, &[]).is_ok(), rvn_parser::parse_file_with_uses(&path).is_ok(), "do not erase a missing intermediate directory: {raw}");
+        }
+        fs::create_dir(fixture.0.join("empty")).unwrap();
+        let source = "use \"empty/../helper.rvn\"\nlabel start\njump imported\n";
+        fs::write(&path, source).unwrap();
+        let project = SourceProject::open_at(&path, source, &[]).unwrap();
+        assert_eq!(project.resolved_script().unwrap(), rvn_parser::parse_file_with_uses(&path).unwrap());
     }
 
     fn edited(workspace: &SourceWorkspace) -> Vec<GraphDocument> {
@@ -840,6 +1106,7 @@ mod tests {
             source: "story.rvn".into(),
             source_snapshot: source.clone(),
             graphs: linked.project().graphs().to_vec(),
+            imports: linked.project().imports_snapshot(),
         };
         for graph in &mut snapshot.graphs {
             graph.schema_version = 2;
@@ -1015,6 +1282,7 @@ mod tests {
                 source: "story.rvn".into(),
                 source_snapshot: next.source().into(),
                 graphs: next.graphs().to_vec(),
+                imports: next.imports_snapshot(),
             })
             .unwrap();
             let transaction = Transaction {

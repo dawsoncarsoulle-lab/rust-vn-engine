@@ -4,6 +4,10 @@ use ffmpeg::{codec, format, frame, media, software, ChannelLayout};
 use ffmpeg_next as ffmpeg;
 use std::path::Path;
 
+/// Select before decoding. Existing callers still decode both streams.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Selection { Both, Video, Audio }
+
 #[derive(Clone, Debug)]
 pub struct Metadata {
     pub width: u32,
@@ -35,13 +39,17 @@ struct AudioTrack {
 pub struct Decoder {
     input: format::context::Input,
     video: ffmpeg::decoder::Video,
-    scaler: software::scaling::Context,
+    scaler: Option<software::scaling::Context>,
     video_index: usize,
     video_clock: f64,
     audio: Option<AudioTrack>,
     pub metadata: Metadata,
     ended: bool,
     seek_floor: f64,
+    selection: Selection,
+    // A selected picture preview keeps the last frame preceding its seek.
+    // Default Both callers retain their existing floor/discard behaviour.
+    seek_preview: Option<Chunk>,
 }
 fn error(error: impl std::fmt::Display) -> String {
     format!("Video decoder: {error}")
@@ -57,6 +65,9 @@ fn exhausted(error: ffmpeg::Error) -> Result<(), String> {
 }
 impl Decoder {
     pub fn open(path: &Path) -> Result<Self, String> {
+        Self::open_selected(path, Selection::Both)
+    }
+    pub fn open_selected(path: &Path, selection: Selection) -> Result<Self, String> {
         // Check before passing ABI-sensitive structures across the boundary.
         // A system library must never quietly replace the packaged runtime.
         if codec::version() >> 16 != 63
@@ -117,7 +128,7 @@ impl Decoder {
         if duration.is_some_and(|duration| !duration.is_finite() || duration > 86_400.0) {
             return Err("Video duration exceeds the 24-hour limit".into());
         }
-        let scaler = software::scaling::Context::get(
+        let scaler = (selection != Selection::Audio).then(|| software::scaling::Context::get(
             video.format(),
             width,
             height,
@@ -125,8 +136,8 @@ impl Decoder {
             width,
             height,
             software::scaling::Flags::BILINEAR,
-        )
-        .map_err(error)?;
+        )).transpose().map_err(error)?;
+        let has_audio = input.streams().best(media::Type::Audio).is_some();
         let audio = input
             .streams()
             .best(media::Type::Audio)
@@ -149,6 +160,9 @@ impl Decoder {
                 {
                     return Err("Unsupported video audio sample rate or channel count".into());
                 }
+                // Metadata/codec validation is identical for every selection.
+                // Video-only never resamples or decodes PCM packets.
+                if selection == Selection::Video { return Ok(None); }
                 let resampler = software::resampling::Context::get(
                     decoder.format(),
                     decoder.channel_layout(),
@@ -158,20 +172,20 @@ impl Decoder {
                     48_000,
                 )
                 .map_err(error)?;
-                Ok(AudioTrack {
+                Ok(Some(AudioTrack {
                     index: stream.index(),
                     clock: stream.time_base().into(),
                     next_seconds: None,
                     decoder,
                     resampler,
-                })
+                }))
             })
-            .transpose()?;
+            .transpose()?.flatten();
         let metadata = Metadata {
             width,
             height,
             duration,
-            audio: audio.is_some(),
+            audio: has_audio,
         };
         Ok(Self {
             input,
@@ -183,6 +197,8 @@ impl Decoder {
             metadata,
             ended: false,
             seek_floor: 0.0,
+            selection,
+            seek_preview: None,
         })
     }
     pub fn seek(&mut self, seconds: f64) -> Result<(), String> {
@@ -199,7 +215,7 @@ impl Decoder {
         self.input
             .seek((seconds * f64::from(ffmpeg::ffi::AV_TIME_BASE)) as i64, ..)
             .map_err(error)?;
-        self.video.flush();
+        if self.selection != Selection::Audio { self.video.flush(); }
         if let Some(audio) = &mut self.audio {
             audio.decoder.flush();
             audio.next_seconds = None;
@@ -216,12 +232,18 @@ impl Decoder {
             .map_err(error)?;
         }
         self.seek_floor = seconds;
+        self.seek_preview = None;
         self.ended = false;
         Ok(())
     }
     pub fn next(&mut self) -> Result<Vec<Chunk>, String> {
         if self.ended {
             return Ok(Vec::new());
+        }
+        // No useful packets exist; do not scan an entire video-only file.
+        if self.selection == Selection::Audio && self.audio.is_none() {
+            self.ended = true;
+            return Ok(vec![Chunk::End]);
         }
         let mut packet = ffmpeg::Packet::empty();
         let mut result = Vec::new();
@@ -230,7 +252,7 @@ impl Decoder {
                 if packet.size() > 64 * 1024 * 1024 {
                     return Err("Video packet exceeds the 64 MiB limit".into());
                 }
-                if packet.stream() == self.video_index {
+                if packet.stream() == self.video_index && self.selection != Selection::Audio {
                     self.video.send_packet(&packet).map_err(error)?;
                     self.frames(&mut result)?;
                 } else if self
@@ -248,8 +270,11 @@ impl Decoder {
                 }
             }
             Err(ffmpeg::Error::Eof) => {
-                self.video.send_eof().map_err(error)?;
-                self.frames(&mut result)?;
+                if self.selection != Selection::Audio {
+                    self.video.send_eof().map_err(error)?;
+                    self.frames(&mut result)?;
+                    if let Some(frame) = self.seek_preview.take() { result.push(frame); }
+                }
                 if let Some(audio) = &mut self.audio {
                     audio.decoder.send_eof().map_err(error)?;
                     self.samples(&mut result)?;
@@ -276,11 +301,13 @@ impl Decoder {
                 .or(frame.pts())
                 .ok_or("Video frame has no timestamp")? as f64
                 * self.video_clock;
-            if seconds + 0.0001 < self.seek_floor {
+            let preserve_before_seek = self.selection == Selection::Video && self.seek_floor > 0.0;
+            if seconds + 0.0001 < self.seek_floor && !preserve_before_seek {
                 continue;
             }
             let mut rgba = frame::Video::empty();
-            self.scaler.run(&frame, &mut rgba).map_err(error)?;
+            self.scaler.as_mut().ok_or("Video decoding is not selected")?
+                .run(&frame, &mut rgba).map_err(error)?;
             let row_bytes = rgba.width() as usize * 4;
             let used: usize = output
                 .iter()
@@ -302,12 +329,18 @@ impl Decoder {
                         .ok_or("Invalid decoded video row")?,
                 );
             }
-            output.push(Chunk::Frame {
+            let chunk = Chunk::Frame {
                 seconds: seconds.max(0.0),
                 width: rgba.width(),
                 height: rgba.height(),
                 rgba: pixels,
-            });
+            };
+            if preserve_before_seek && seconds < self.seek_floor {
+                self.seek_preview = Some(chunk);
+            } else {
+                if let Some(previous) = self.seek_preview.take() { output.push(previous); }
+                output.push(chunk);
+            }
             if output.len() > 64 {
                 return Err("Video packet produced too many frames".into());
             }
@@ -490,5 +523,68 @@ mod tests {
         }
         assert!(sought);
         assert!(decoder.seek(f64::NAN).is_err());
+    }
+    fn selected(path: &Path, selection: Selection) -> (Vec<(f64, u32, u32, Vec<u8>)>, Vec<(f64, Vec<f32>)>) {
+        let mut decoder = Decoder::open_selected(path, selection).unwrap();
+        assert!(decoder.metadata.audio, "Selection must not hide source metadata");
+        let mut pictures = Vec::new();
+        let mut audio = Vec::new();
+        let mut ended = false;
+        for _ in 0..1000 {
+            for chunk in decoder.next().unwrap() {
+                match chunk {
+                    Chunk::Frame { seconds, width, height, rgba } => pictures.push((seconds, width, height, rgba)),
+                    Chunk::Audio { seconds, samples } => audio.push((seconds, samples)),
+                    Chunk::End => ended = true,
+                }
+            }
+            if ended { break; }
+        }
+        assert!(ended);
+        assert!(decoder.next().unwrap().is_empty());
+        (pictures, audio)
+    }
+    #[test]
+    fn selected_streams_match_default_decoding_including_eof_resampler_flush() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/videos/assets/clip.webm");
+        let (pictures, pcm) = selected(&fixture, Selection::Both);
+        let (video_only, no_pcm) = selected(&fixture, Selection::Video);
+        let (no_video, audio_only) = selected(&fixture, Selection::Audio);
+        assert!(!pictures.is_empty() && !pcm.is_empty());
+        assert_eq!(pictures, video_only);
+        assert_eq!(pcm, audio_only);
+        assert!(no_pcm.is_empty() && no_video.is_empty());
+    }
+    #[test]
+    fn selected_seek_keeps_picture_before_floor_and_trims_all_pre_seek_pcm() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/videos/assets/clip.webm");
+        let mut picture = Decoder::open_selected(&fixture, Selection::Video).unwrap();
+        let end = picture.metadata.duration.unwrap();
+        picture.seek((end - 0.000_001).max(0.0)).unwrap();
+        let mut last = None;
+        let mut ended = false;
+        for _ in 0..1000 {
+            for chunk in picture.next().unwrap() {
+                match chunk { Chunk::Frame { seconds, .. } => last = Some(seconds), Chunk::End => ended = true, Chunk::Audio { .. } => panic!("Unselected PCM") }
+            }
+            if ended { break; }
+        }
+        assert!(ended && last.is_some_and(|seconds| seconds <= end));
+        let mut audio = Decoder::open_selected(&fixture, Selection::Audio).unwrap();
+        for floor in [0.8, 0.2] {
+            audio.seek(floor).unwrap();
+            let mut heard = false;
+            let mut ended = false;
+            for _ in 0..1000 {
+                for chunk in audio.next().unwrap() {
+                    match chunk {
+                        Chunk::Audio { seconds, samples } => { assert!(seconds >= floor); assert_eq!(samples.len() % 2, 0); heard = true; },
+                        Chunk::Frame { .. } => panic!("Unselected picture"), Chunk::End => ended = true,
+                    }
+                }
+                if ended { break; }
+            }
+            assert!(heard && ended);
+        }
     }
 }

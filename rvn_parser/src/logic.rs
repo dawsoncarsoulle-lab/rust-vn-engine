@@ -12,6 +12,10 @@ pub fn is_binding_name(name: &str) -> bool {
 /// Single catalogue used by the runtime, CLI and Blueprint compiler.
 pub fn builtin_arity(name: &str) -> Option<std::ops::RangeInclusive<usize>> {
     Some(match name {
+        "menu_action" | "menu_start_scene" | "menu_open_page" | "menu_save_page" | "menu_language"
+        | "menu_choose" | "menu_gallery_cg" | "menu_gallery_tab" | "menu_confirm" | "menu_cancel" => 1..=1,
+        "menu_slot" | "menu_protect" | "menu_number" | "menu_bool" => 2..=2,
+        "menu_advance" | "menu_skip_typewriter" => 0..=0,
         "min" | "max" => 0..=128,
         "dict" => 0..=128,
         "dict_keys" | "dict_values" => 1..=1,
@@ -195,12 +199,14 @@ pub fn validate_logic(script: &[Statement], allow_external: bool) -> Vec<LogicDi
                     arguments,
                     modal,
                     layer,
+                    ..
                 } => {
                     for value in [name, arguments, modal, layer] {
                         expression(value, functions, external, errors);
                     }
                 }
                 Statement::UiClose { name } => expression(name, functions, external, errors),
+                Statement::MenuExecute { request } => expression(request, functions, external, errors),
                 Statement::UiFocus { name, element } => {
                     expression(name, functions, external, errors);
                     expression(element, functions, external, errors);
@@ -434,12 +440,14 @@ fn validate_canvas_callbacks(
                     arguments,
                     modal,
                     layer,
+                    ..
                 } => {
                     for expression in [name, arguments, modal, layer] {
                         visit_expr(expression, visit);
                     }
                 }
                 Statement::UiClose { name } => visit_expr(name, visit),
+                Statement::MenuExecute { request } => visit_expr(request, visit),
                 Statement::UiFocus { name, element } => {
                     for expression in [name, element] {
                         visit_expr(expression, visit);

@@ -10,6 +10,11 @@ pub struct RuntimeError {
 }
 
 impl RuntimeError {
+    /// Only a typed game-request rejection is recoverable by an ordinary UI
+    /// handler. General expression, interface and narrative errors stay fatal.
+    pub fn is_menu_request_rejection(&self) -> bool {
+        matches!(self.kind,RuntimeErrorKind::EvalError(EvalErrorKind::InvalidMenuRequest(_)))
+    }
     pub fn new(kind: RuntimeErrorKind, pc: usize, stmt_debug: impl Into<String>) -> Self {
         Self {
             kind,
@@ -48,6 +53,7 @@ pub enum EvalErrorKind {
     },
     DivisionByZero,
     InvalidFunction(String),
+    InvalidMenuRequest(String),
     ExecutionLimit {
         limit: &'static str,
     },
@@ -66,6 +72,7 @@ impl std::fmt::Display for EvalErrorKind {
             }
             Self::DivisionByZero => write!(f, "division par zéro"),
             Self::InvalidFunction(message) => write!(f, "fonction RVN invalide : {message}"),
+            Self::InvalidMenuRequest(message) => write!(f, "demande de menu invalide : {message}"),
             Self::ExecutionLimit { limit } => write!(f, "limite d’exécution dépassée : {limit} ; vérifier les boucles et les appels récursifs"),
             Self::NumericOverflow => write!(f, "résultat hors de la plage des entiers"),
         }

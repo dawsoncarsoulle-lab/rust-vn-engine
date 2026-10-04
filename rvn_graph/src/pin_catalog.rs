@@ -64,7 +64,26 @@ fn transition() -> PinDefinition {
 
 pub(crate) fn pin_definitions(kind: NodeKind) -> Vec<PinDefinition> {
     use NodeKind as Kind;
+    if let Some((_, keys)) = kind.menu_constructor() {
+        let mut pins: Vec<_> = keys.iter().map(|key| match (kind, *key) {
+            (_, "slot" | "index" | "token") | (Kind::MenuSavePage, "page") => input_default(key, key, ValueType::Int, PropertyValue::Int(if *key == "slot" || *key == "page" {1} else {0})),
+            (_, "protected") | (Kind::MenuBoolPreference, "value") => input_default(key, key, ValueType::Bool, PropertyValue::Bool(true)),
+            (Kind::MenuNumberPreference, "value") => input_default(key, key, ValueType::Float, PropertyValue::Float(1.0)),
+            _ => input_default(key, key, ValueType::String, PropertyValue::String(match (kind, *key) {
+                (Kind::MenuAction, _) => "resume", (Kind::MenuSlot, "operation") => "save",
+                (Kind::MenuNumberPreference, "key") => "music_volume", (Kind::MenuBoolPreference, "key") => "typewriter",
+                (Kind::MenuLanguage, _) => "fr", (Kind::MenuGalleryTab, _) => "cg", _ => "",
+            }.into())),
+        }).collect();
+        pins.push(output("request", "Demande", ValueType::MenuRequest)); return pins;
+    }
     match kind {
+        Kind::MenuExecute => vec![input("exec_in", "", ValueType::Execution),
+            input("request", "Demande", ValueType::MenuRequest), output("exec_out", "", ValueType::Execution)],
+        Kind::MenuAction | Kind::MenuStartScene | Kind::MenuOpenPage | Kind::MenuSlot | Kind::MenuProtect
+        | Kind::MenuSavePage | Kind::MenuNumberPreference | Kind::MenuBoolPreference | Kind::MenuLanguage
+        | Kind::MenuAdvance | Kind::MenuSkipTypewriter | Kind::MenuChoose | Kind::MenuGalleryCg | Kind::MenuGalleryTab
+        | Kind::MenuConfirm | Kind::MenuCancel => unreachable!("Menu constructor handled above"),
         Kind::MakeColor => vec![
             input_default("r", "R", ValueType::Float, PropertyValue::Float(0.0)),
             input_default("g", "G", ValueType::Float, PropertyValue::Float(0.0)),
