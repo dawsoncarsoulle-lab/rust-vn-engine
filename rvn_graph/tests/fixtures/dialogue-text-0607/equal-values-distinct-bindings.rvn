@@ -1,0 +1,5 @@
+scene label start
+local a="same"
+local b="same"
+"[a]"
+"[b]"

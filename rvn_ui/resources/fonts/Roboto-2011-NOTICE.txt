@@ -1,0 +1,14 @@
+Roboto Regular, version 1.00000; 2011.
+Font data copyright Google 2011 (embedded font notice).
+Font data copyright Google 2012 (distributed license notice).
+Roboto is a trademark of Google.
+
+Licensed under Apache License 2.0; see Roboto-2011-LICENSE.txt.
+The font is redistributed unchanged, renamed as a resource file only.
+SHA-256: 16466EF65064E6F3885A6D2806B8949AC1AC38B524DD0CF8FC96565EB4CC28E8
+
+Source: locally installed UE 5.8 Engine/Content/Slate/Fonts/Roboto-Regular.ttf.
+Its Roboto.tps maps this font directory to ROBOTO_License.txt.
+No separate Roboto NOTICE file is present in that distributed font directory.
+This attribution applies only to this third-party font, not to Unreal source or assets.
+Include this notice and license whenever distributing this font with the editor.

@@ -1,0 +1,13 @@
+function condition() {local draw=random(1,1) return true}
+function caption() {local draw=random(1,1) return __rvn_string_table_text_name(__rvn_literal_name("asset:Table")," raw key ")}
+scene label start
+flow.consume_v2("scene:start","choice") {
+    capture "effect"=random(1,1)
+    inspect "i"=__rvn_string_table_text_name(__rvn_literal_name("asset:Table")," raw key ")
+    choice {
+        "A [caption()]" if condition() => {flow.consume_v2("scene:start","a") {capture "effect"=random(1,1) inspect "i"=__rvn_invariant_text("literal") set result=1}}
+        "hidden [1/0]" if false => {flow.consume_v2("scene:start","hidden") {capture "effect"=random(1,1) set result=1/0}}
+        "B [caption()]" => {flow.consume_v2("scene:start","b") {capture "effect"=random(1,1) inspect "i"=__rvn_invariant_text("literal") set result=2}}
+    }
+}
+"done"

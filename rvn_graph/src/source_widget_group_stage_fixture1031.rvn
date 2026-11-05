@@ -1,0 +1,24 @@
+
+ screen Widget_1() {
+    return component("root","column",{"layout_contract":"widget_v1"},[
+        component("Sibling_A","text",{"text":Widget_1_value(),"font_size":24,"parent_slot":{"kind":"vertical_box","padding":{"left":8,"top":8,"right":8,"bottom":8},"horizontal":"start","vertical":"center","size":{"rule":"auto"}}},[]),
+        component("Sibling_B","text",{"text":"Deuxième frère — slot distinct","font_size":24,"parent_slot":{"kind":"vertical_box","padding":{"left":16,"top":4,"right":20,"bottom":12},"horizontal":"stretch","vertical":"center","size":{"rule":"fill","weight":2}}},[]),
+        component("Horizontal_Children","row",{"parent_slot":{"kind":"vertical_box","padding":{"left":4,"top":6,"right":4,"bottom":6}}},[
+            component("Horizontal_A","text",{"text":"Horizontal A","font_size":24,"parent_slot":{"kind":"horizontal_box","padding":{"left":3,"top":2,"right":5,"bottom":2},"horizontal":"start","vertical":"center","size":{"rule":"auto"}}},[]),
+            component("Horizontal_B","text",{"text":"Horizontal B","font_size":24,"parent_slot":{"kind":"horizontal_box","padding":{"left":9,"top":2,"right":3,"bottom":2},"horizontal":"stretch","vertical":"center","size":{"rule":"fill","weight":1}}},[])
+        ])
+    ])
+}
+
+handler Widget_1_event(event) {
+    return 0
+}
+
+function Widget_1_value() {
+    return "Texte dynamique A"
+} 
+label start
+"Première scène"
+jump other
+label other
+"Autre scène"

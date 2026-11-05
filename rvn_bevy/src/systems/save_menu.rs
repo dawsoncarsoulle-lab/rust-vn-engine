@@ -65,7 +65,7 @@ impl SaveMenuState {
         self.active = true;
     }
 
-    fn close(&mut self) {
+    pub(crate) fn close(&mut self) {
         self.active = false;
         self.origin = SaveMenuOrigin::InGame;
     }
@@ -129,6 +129,8 @@ pub fn apply_loaded_game(
     history: &mut DialogueHistory,
     vn_events: &mut EventWriter<VnCommand>,
 ) {
+    // Keep the old visible cursor until the modern restore batch is accepted.
+    if engine.0.state.scene_execution.is_some(){return;}
     render_state.choice_options.clear();
     imagemap_state.clear();
     tw_state.skip();
@@ -392,6 +394,8 @@ pub fn save_menu_interaction_system(
     mut vn_events: EventWriter<VnCommand>,
     mut confirmation: ResMut<SaveConfirmation>,
     thumbnails: Res<crate::save_thumbnails::SaveThumbnails>,
+    reveal_binding: Option<Res<crate::display_reveal::DialogueRevealBinding>>,
+    mut requests:Option<ResMut<crate::checkpoint_requests::CheckpointRequests>>,
 ) {
     if !save_state.active || confirmation.action_pending.is_some() {
         return;
@@ -489,6 +493,13 @@ pub fn save_menu_interaction_system(
                                 SaveMenuMode::Save => {
                                     let label = format!("Sauvegarde {}", slot_index);
                                     let script_name = "script.rvn".to_string();
+                                    if let Err(error)=crate::display_reveal::flush(&mut engine,&tw_state,reveal_binding.as_deref()) {
+                                        engine.0.renderer.scene_frame_failed=true;error!("Save reveal refused: {error}");return;
+                                    }
+                                    match crate::checkpoint_requests::defer_save(&engine,requests.as_deref_mut(),
+                                        crate::checkpoint_requests::SaveDestination::Manual(slot_index as u32),label.clone(),script_name.clone(),mgr.load(slot_index as u32).ok()) {
+                                        Ok(true)=>return,Ok(false)=>{},Err(error)=>{error!("Save admission: {error}");return;}
+                                    }
                                     match engine.0.save(&mgr, slot_index as u32, label, script_name)
                                     {
                                         Ok(_) => {
@@ -519,6 +530,12 @@ pub fn save_menu_interaction_system(
                                     save_state.close();
                                 }
                                 SaveMenuMode::Load => {
+                                    if let Ok(data)=mgr.load(slot_index as u32) {
+                                        let target=LastResumeTarget::manual(slot_index as u32,data.timestamp);
+                                        match crate::checkpoint_requests::defer_load(&engine,requests.as_deref_mut(),&data,Some(target),true) {
+                                            Ok(true)=>return,Ok(false)=>{},Err(error)=>{error!("Load admission: {error}");return;}
+                                        }
+                                    }
                                     match engine.0.load(&mgr, slot_index as u32) {
                                         Ok(_) => {
                                             info!("[save_menu] loaded slot {}", slot_index);

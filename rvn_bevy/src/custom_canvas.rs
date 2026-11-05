@@ -31,6 +31,7 @@ use bevy::{
     window::{CursorMoved, WindowFocused},
 };
 use rvn_core::ui::UiInput;
+use rvn_core::ui_input::{UiInputSource, ScopedUiInput};
 use rvn_parser::Value;
 use rvn_ui::custom_canvas::{
     flatten, inverse_point, transform_point, CanvasClip, CanvasDrawing, CanvasItem,
@@ -49,9 +50,12 @@ pub(crate) struct CanvasRenderSet;
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct CanvasInputSet;
 
+#[derive(Resource,Default)]
+pub(crate) struct DebuggerHostProducer;
 pub(crate) struct CustomCanvasPlugin;
 impl Plugin for CustomCanvasPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<DebuggerHostProducer>();
         bevy::asset::load_internal_asset!(app, SHADER, "custom_canvas.wgsl", Shader::from_wgsl);
         app.add_plugins(UiMaterialPlugin::<CanvasMaterial>::default());
         let white = app
@@ -70,12 +74,14 @@ impl Plugin for CustomCanvasPlugin {
             ));
         app.insert_resource(CanvasCache { white, ..default() })
             .init_resource::<PointerState>()
+            .init_resource::<CanvasPointerProducers>()
+            .add_systems(PreUpdate, capture_pointer_producers.after(crate::programmable_ui::UiInputCaptureSet).after(bevy::input::InputSystem))
             .add_systems(
                 Update,
-                (
-                    tick.after(crate::programmable_ui::InterfaceReceiveSet)
+                ((
+                    tick.run_if(crate::scene_publication::host_frame_ready).in_set(crate::scene_publication::CanvasFeedbackSet)
                         .before(crate::programmable_ui::InterfaceInputSet),
-                    input
+                    input.run_if(crate::runtime_restart::input_available).run_if(resource_exists::<VnEngine>.and_then(crate::scene_publication::ready))
                         .after(crate::programmable_ui::InterfaceInputSet)
                         .before(crate::programmable_ui::InterfaceRenderSet)
                         .before(crate::systems::input_system)
@@ -89,16 +95,16 @@ impl Plugin for CustomCanvasPlugin {
                     refresh_texture_bindings
                         .after(build)
                         .in_set(CanvasRenderSet),
-                ),
+                )).distributive_run_if(crate::runtime_restart::presentation_available),
             )
             .add_systems(
                 PostUpdate,
-                sync_materials
+                (sync_materials
                     .after(bevy::ui::UiSystem::Layout)
                     .after(bevy::ui::UiSystem::Stack)
                     .after(bevy::transform::TransformSystem::TransformPropagate)
                     .after(bevy::ui::update::update_clipping_system)
-                    .after(crate::programmable_ui::InterfaceScrollSet),
+                    .after(crate::programmable_ui::InterfaceScrollSet)).distributive_run_if(crate::runtime_restart::presentation_available),
             );
     }
 }
@@ -416,10 +422,23 @@ fn resource_problem(
     next.set(VnState::Error);
 }
 
-fn tick(
+// PRIVATE NOT_RUN. Existing CanvasFeedbackSet producer, no second clock.
+pub(crate) fn tick(world:&mut World) {
+    // Startup keeps accepted canvas presentation; this clock mutates only Game.
+    if !world.contains_resource::<VnEngine>() { return; }
+    if world.get_resource::<VnEngine>().is_some_and(|engine|engine.0.state.scene_execution.is_some()) {
+        crate::scene_publication::host_frame(world);
+    } else {
+        // The old legacy producer/gates and delta are retained, not a second
+        // modern route. A real exclusive World system preserves tick's set.
+        use bevy::ecs::system::RunSystemOnce;
+        world.run_system_once(tick_legacy);
+    }
+}
+fn tick_legacy(
     time: Res<Time>,
     state: Res<State<VnState>>,
-    windows: Query<&Window>,
+    windows: Query<(&Window, Option<&bevy::window::PrimaryWindow>)>,
     accessibility: Res<crate::accessibility::Accessibility>,
     mut engine: ResMut<VnEngine>,
     mut screens: ResMut<Screens>,
@@ -428,29 +447,37 @@ fn tick(
     mut next: ResMut<NextState<VnState>>,
     source: Option<Res<crate::source_menus::SourceMenus>>,
 ) {
-    if accessibility.blocked
-        || (!source.as_deref().is_some_and(|source|source.any()) && !matches!(
-            state.get(),
-            VnState::Waiting | VnState::Stepping | VnState::Animating
-        ))
-    {
-        return;
+    let opted = engine.0.state.scene_execution.is_some();
+    if opted {
+        let focused = windows.iter().find_map(|(window, primary)|
+            primary.is_some().then_some(window.focused))
+            .unwrap_or_else(|| windows.iter().all(|(window, _)| window.focused));
+        if !crate::scene_publication::host_clock_allowed(&engine, focused, accessibility.blocked) {
+            return;
+        }
+    } else {
+        // Preserve the legacy state/menu/focus/Canvas gate and f32 delta route.
+        if engine.0.renderer.scene_frame_failed || accessibility.blocked
+            || (!source.as_deref().is_some_and(|source| source.any()) && !matches!(
+                state.get(), VnState::Waiting | VnState::Stepping | VnState::Animating)) {
+            return;
+        }
+        if windows.get_single().is_ok_and(|(window, _)| !window.focused) { return; }
+        let mut canvas = false;
+        for view in &screens.views {
+            view.root.visit(&mut |component| canvas |= component.kind == ComponentKind::Canvas);
+        }
+        if !canvas { return; }
     }
-    if windows.get_single().is_ok_and(|window| !window.focused) {
-        return;
-    }
-    let mut canvas = false;
-    for view in &screens.views {
-        view.root
-            .visit(&mut |component| canvas |= component.kind == ComponentKind::Canvas);
-    }
-    if !canvas {
-        return;
-    }
-    if let Err(problem) = engine
-        .0
-        .interface_tick(f64::from(time.delta_seconds()).min(0.25))
-    {
+    let result = if opted {
+        engine.0.interface_tick_host(time.delta_seconds_f64().min(0.25))
+    } else {
+        engine.0.interface_tick(f64::from(time.delta_seconds()).min(0.25))
+    };
+    if let Err(problem) = result {
+        // A refused automatic opted Host instant cannot retry its handlers on
+        // every subsequent frame. Explicit existing recovery inputs stay live.
+        if opted { engine.0.renderer.scene_frame_failed = true; }
         error.0 = rvn_core::error::ScriptError::from_runtime(&problem).to_string();
         next.set(VnState::Error);
         return;
@@ -463,6 +490,208 @@ fn tick(
     }
 }
 
+#[derive(Resource, Default)]
+struct CanvasInputSources(std::collections::HashMap<(String,u64), UiInputSource>);
+
+// A raw event retains its producer's physical frame, including an empty hit.
+// The shared Arc is transient; it is neither saved nor a second UI authority.
+#[derive(Clone)]
+struct CanvasPhysicalGeometry {
+    inverse: Mat4,
+    z: f32,
+    size: Vec2,
+    extent: Vec2,
+    clips: Vec<(Mat4, f32, Vec2, [bool; 2])>,
+}
+impl CanvasPhysicalGeometry {
+    fn local(&self, point: Vec2, captured: bool) -> Option<Vec2> {
+        let local = self.inverse.transform_point3(point.extend(self.z)).truncate();
+        if !local.is_finite() || !self.size.cmpgt(Vec2::ZERO).all() { return None; }
+        if !captured {
+            if !local.abs().cmple(self.size * 0.5).all() { return None; }
+            for (inverse, z, size, clip) in &self.clips {
+                let local = inverse.transform_point3(point.extend(*z)).truncate();
+                if !local.is_finite()
+                    || (clip[0] && local.x.abs() > size.x * 0.5)
+                    || (clip[1] && local.y.abs() > size.y * 0.5) { return None; }
+            }
+        }
+        let local = (local / self.size + Vec2::splat(0.5)) * self.extent;
+        local.is_finite().then_some(local)
+    }
+}
+#[derive(Clone)]
+struct CanvasPhysicalTarget {
+    capture: Capture,
+    source: UiInputSource,
+    geometry: CanvasPhysicalGeometry,
+    drawing: CanvasDrawing,
+}
+struct CanvasPhysicalNode {
+    inverse: Mat4,
+    z: f32,
+    size: Vec2,
+    blocking: bool,
+    target: Option<CanvasPhysicalTarget>,
+}
+#[derive(Default)]
+struct CanvasPhysicalFrame {
+    nodes: Vec<CanvasPhysicalNode>,
+}
+impl CanvasPhysicalFrame {
+    fn pick(&self, point: Vec2) -> Option<&CanvasPhysicalTarget> {
+        for node in self.nodes.iter().rev() {
+            let local = node.inverse.transform_point3(point.extend(node.z)).truncate();
+            if !local.is_finite() || !local.abs().cmple(node.size * 0.5).all() { continue; }
+            if let Some(target) = &node.target {
+                target.geometry.local(point, false)?;
+                return Some(target);
+            }
+            if node.blocking { return None; }
+        }
+        None
+    }
+    fn target(&self, capture: &Capture) -> Option<&CanvasPhysicalTarget> {
+        self.nodes.iter().filter_map(|node|node.target.as_ref()).find(|target|
+            target.capture.screen == capture.screen && target.capture.element == capture.element
+                && target.capture.order == capture.order && target.capture.resource_token == capture.resource_token)
+    }
+}
+fn physical_geometry(world: &World, entity: Entity, extent: Vec2) -> Option<CanvasPhysicalGeometry> {
+    let node = world.get::<Node>(entity)?;
+    let transform = world.get::<GlobalTransform>(entity)?;
+    let matrix = transform.compute_matrix();
+    if !matrix.is_finite() || matrix.determinant().abs() < 1e-8 || !node.size().cmpgt(Vec2::ZERO).all() { return None; }
+    let mut clips = Vec::new();
+    let mut ancestor = entity;
+    loop {
+        let style = world.get::<Style>(ancestor)?;
+        let transform = world.get::<GlobalTransform>(ancestor)?;
+        let node = world.get::<Node>(ancestor)?;
+        let matrix = transform.compute_matrix();
+        if !matrix.is_finite() || matrix.determinant().abs() < 1e-8 { return None; }
+        clips.push((matrix.inverse(), transform.translation().z, node.size(),
+            [style.overflow.x != OverflowAxis::Visible, style.overflow.y != OverflowAxis::Visible]));
+        let Some(parent) = world.get::<Parent>(ancestor) else { break; };
+        ancestor = parent.get();
+    }
+    Some(CanvasPhysicalGeometry { inverse: matrix.inverse(), z: transform.translation().z,
+        size: node.size(), extent, clips })
+}
+fn capture_physical_frame(world: &World) -> CanvasPhysicalFrame {
+    let mut frame = CanvasPhysicalFrame::default();
+    let (Some(stack), Some(screens), Some(engine)) = (world.get_resource::<bevy::ui::UiStack>(),
+        world.get_resource::<Screens>(), world.get_resource::<VnEngine>()) else { return frame; };
+    for &entity in &stack.uinodes {
+        if world.get::<ViewVisibility>(entity).is_some_and(|visible|!visible.get()) { continue; }
+        let (Some(node), Some(transform)) = (world.get::<Node>(entity),world.get::<GlobalTransform>(entity)) else { continue; };
+        let matrix = transform.compute_matrix();
+        if !matrix.is_finite() || matrix.determinant().abs() < 1e-8 { continue; }
+        let surface = world.get::<CanvasSurface>(entity);
+        let target = surface.and_then(|surface| {
+            let view = screens.views.iter().find(|view|view.name == surface.screen)?;
+            let source = world.get::<crate::programmable_ui::ControlSource>(entity).map(|source|source.0.clone())
+                .or_else(||engine.0.state.scene_execution.is_none().then(||engine.0.capture_ui_input_source(&surface.screen)).flatten())?;
+            if source.order != view.order || !engine.0.ui_input_source_current(&source) { return None; }
+            let resource_token = crate::programmable_ui::rendered_canvas_input_token(screens,&surface.screen,&surface.element);
+            if engine.0.state.scene_execution.is_some() && resource_token.is_none() { return None; }
+            let capture = Capture { screen: surface.screen.clone(), element:surface.element.clone(), order:view.order,
+                button:String::new(), position:Vec2::ZERO, resource_token };
+            if !target_available(world,&capture) { return None; }
+            Some(CanvasPhysicalTarget { capture, source, geometry:physical_geometry(world,entity,surface.extent)?,
+                drawing:surface.drawing.clone() })
+        });
+        frame.nodes.push(CanvasPhysicalNode { inverse:matrix.inverse(),z:transform.translation().z,size:node.size(),
+            blocking:surface.is_some() || world.get::<crate::programmable_ui::Control>(entity).is_some()
+                || world.get::<FocusPolicy>(entity)==Some(&FocusPolicy::Block), target });
+    }
+    frame
+}
+#[derive(Clone)]
+struct CanvasProducedPointer {
+    point: Option<Vec2>,
+    frame: std::sync::Arc<CanvasPhysicalFrame>,
+}
+#[derive(Resource, Default)]
+struct CanvasPointerProducers {
+    mouse_reader: ManualEventReader<MouseButtonInput>,
+    motion_reader: ManualEventReader<CursorMoved>,
+    touch_reader: ManualEventReader<TouchInput>,
+    wheel_reader: ManualEventReader<MouseWheel>,
+    mouse: HashMap<usize,CanvasProducedPointer>,
+    motion: HashMap<usize,CanvasProducedPointer>,
+    touch: HashMap<usize,CanvasProducedPointer>,
+    wheel: HashMap<usize,CanvasProducedPointer>,
+}
+fn retain_pointer_events<E: bevy::ecs::event::Event>(world:&World, reader:&mut ManualEventReader<E>,
+    produced:&mut HashMap<usize,CanvasProducedPointer>,frame:&std::sync::Arc<CanvasPhysicalFrame>,
+    point:impl Fn(&E)->Option<Vec2>) {
+    let Some(events)=world.get_resource::<Events<E>>() else { return; };
+    produced.retain(|id,_|*id>=events.oldest_event_count());
+    for (event,id) in reader.read_with_id(events) {
+        produced.entry(id.id).or_insert_with(||CanvasProducedPointer { point:point(event),frame:frame.clone() });
+    }
+}
+#[derive(Clone)]
+pub(crate) struct PreviewCanvasFrame(std::sync::Arc<CanvasPhysicalFrame>);
+pub(crate) fn preview_canvas_cost(world:&World)->Option<usize> {
+    let Some(stack)=world.get_resource::<bevy::ui::UiStack>()else{return Some(0);};
+    if stack.uinodes.len()>4096{return None;}
+    let mut cost=crate::editor_preview_input::PreviewCost::new(1024*1024);
+    cost.add(stack.uinodes.len().checked_mul(512)?)?;
+    for &entity in &stack.uinodes {
+        if let Some(surface)=world.get::<CanvasSurface>(entity) {
+            cost.add(surface.screen.len().checked_add(surface.element.len())?)?;
+            if let Some(source)=world.get::<crate::programmable_ui::ControlSource>(entity) {cost.add(crate::editor_preview_input::preview_source_cost(&source.0)?)?;}
+            else {cost.add(surface.screen.len().checked_mul(6)?.checked_add(512)?)?;}
+            if let Some(screens)=world.get_resource::<Screens>() {
+                if let Some(token)=crate::programmable_ui::borrowed_canvas_input_token(screens,&surface.screen,&surface.element) {cost.add(crate::editor_preview_input::preview_token_cost(token)?)?;}
+            }
+            // Traverse borrowed ancestors before physical_geometry allocates its
+            // clip vector. The budget also bounds malformed cycles/deep trees.
+            let mut ancestor=entity;
+            loop {cost.add(256)?;let Some(parent)=world.get::<Parent>(ancestor)else{break;};ancestor=parent.get();}
+            surface.drawing.validate().ok()?;
+            cost.serialized(&surface.drawing)?;
+        }
+    }
+    Some(cost.bytes)
+}
+pub(crate) fn capture_preview_canvas(world:&World)->Option<(PreviewCanvasFrame,usize)> {
+    let cost=preview_canvas_cost(world)?;
+    let frame=capture_physical_frame(world);
+    Some((PreviewCanvasFrame(std::sync::Arc::new(frame)),cost))
+}
+impl PreviewCanvasFrame {
+    pub(crate) fn mouse(&self,world:&mut World,event:MouseButtonInput,point:Vec2){
+        let id=world.resource_mut::<Events<MouseButtonInput>>().send(event).id;
+        world.init_resource::<CanvasPointerProducers>();
+        world.resource_mut::<CanvasPointerProducers>().mouse.insert(id,CanvasProducedPointer{point:Some(point),frame:self.0.clone()});
+    }
+    pub(crate) fn motion(&self,world:&mut World,event:CursorMoved){
+        let point=event.position;
+        let id=world.resource_mut::<Events<CursorMoved>>().send(event).id;
+        world.init_resource::<CanvasPointerProducers>();
+        world.resource_mut::<CanvasPointerProducers>().motion.insert(id,CanvasProducedPointer{point:Some(point),frame:self.0.clone()});
+    }
+    pub(crate) fn wheel(&self,world:&mut World,event:MouseWheel,point:Vec2){
+        let id=world.resource_mut::<Events<MouseWheel>>().send(event).id;
+        world.init_resource::<CanvasPointerProducers>();
+        world.resource_mut::<CanvasPointerProducers>().wheel.insert(id,CanvasProducedPointer{point:Some(point),frame:self.0.clone()});
+    }
+}
+fn capture_pointer_producers(world:&mut World) {
+    if !crate::runtime_restart::input_available(world){cancel_runtime_input(world); }
+    let mut produced=world.remove_resource::<CanvasPointerProducers>().unwrap_or_default();
+    let frame=std::sync::Arc::new(if crate::runtime_restart::input_available(world){capture_physical_frame(world)}else{CanvasPhysicalFrame::default()});
+    let cursor=world.query::<&Window>().iter(world).next().and_then(Window::cursor_position);
+    retain_pointer_events(world,&mut produced.mouse_reader,&mut produced.mouse,&frame,|_|cursor);
+    retain_pointer_events(world,&mut produced.motion_reader,&mut produced.motion,&frame,|event|Some(event.position));
+    retain_pointer_events(world,&mut produced.touch_reader,&mut produced.touch,&frame,|event|Some(event.position));
+    retain_pointer_events(world,&mut produced.wheel_reader,&mut produced.wheel,&frame,|_|cursor);
+    world.insert_resource(produced);
+}
+
 #[derive(Clone, Debug)]
 struct Capture {
     screen: String,
@@ -470,6 +699,7 @@ struct Capture {
     order: u64,
     button: String,
     position: Vec2,
+    resource_token: Option<rvn_core::scene_resources::ResourceToken>,
 }
 #[derive(Resource, Default)]
 struct PointerState {
@@ -485,6 +715,36 @@ struct PointerState {
     modifiers: [bool; 8],
 }
 
+/// Retire physical captures while retaining the last real modifier state.
+/// Suspended PreUpdate refreshes this baseline after InputSystem; a later
+/// genuine K then CtrlRelease must still see Ctrl at K's ordered keydown.
+pub(crate) fn cancel_runtime_input(world:&mut World){
+    cancel_preview_pointer_capture(world,true);
+    let modifiers=world.get_resource::<ButtonInput<KeyCode>>().map(|held|[
+        held.pressed(KeyCode::ControlLeft),held.pressed(KeyCode::ControlRight),
+        held.pressed(KeyCode::ShiftLeft),held.pressed(KeyCode::ShiftRight),
+        held.pressed(KeyCode::AltLeft),held.pressed(KeyCode::AltRight),
+        held.pressed(KeyCode::SuperLeft),held.pressed(KeyCode::SuperRight),
+    ]).unwrap_or([false;8]);
+    if let Some(mut pointer)=world.get_resource_mut::<PointerState>(){pointer.modifiers=modifiers;}
+}
+pub(crate) fn cancel_preview_pointer_capture(world:&mut World,all:bool){
+    if let Some(mut pointer)=world.get_resource_mut::<PointerState>() {
+        if all {pointer.captures.clear();pointer.suppressed.clear();pointer.modifiers=[false;8];}
+        else {pointer.captures.remove("mouse");pointer.suppressed.remove("mouse");}
+    }
+    // Preserve ordinals as negative captures, so PreUpdate cannot give an old
+    // deferred edge new geometry or a new source after cancellation.
+    if let Some(mut producers)=world.get_resource_mut::<CanvasPointerProducers>() {
+        let empty=std::sync::Arc::new(CanvasPhysicalFrame::default());
+        for produced in producers.mouse.values_mut(){produced.point=None;produced.frame=empty.clone();}
+        for produced in producers.motion.values_mut(){produced.point=None;produced.frame=empty.clone();}
+        if all {
+            for produced in producers.wheel.values_mut(){produced.point=None;produced.frame=empty.clone();}
+            for produced in producers.touch.values_mut(){produced.point=None;produced.frame=empty.clone();}
+        }
+    }
+}
 fn modifiers_value(modifiers: [bool; 8]) -> Value {
     Value::Dict(std::collections::BTreeMap::from([
         ("ctrl".into(), Value::Bool(modifiers[0] || modifiers[1])),
@@ -585,7 +845,15 @@ fn canvas_entity(world: &mut World, screen: &str, element: &str) -> Option<Entit
         .find(|(_, surface)| surface.screen == screen && surface.element == element)
         .map(|(entity, _)| entity)
 }
+fn capture_matches_live_instance(world:&World,capture:&Capture)->bool {
+    if let Some(token)=&capture.resource_token {
+        let game=&world.resource::<VnEngine>().0;
+        if !game.state.scene_execution.as_ref().is_some_and(|execution|execution.resources.accepts(token,game.runtime_epoch(),execution.owner())) {return false;}
+    }
+    world.resource::<Screens>().views.iter().any(|view|view.name==capture.screen && view.order==capture.order)
+}
 fn target_available(world: &World, capture: &Capture) -> bool {
+    if !capture_matches_live_instance(world,capture) {return false;}
     let screens = world.resource::<Screens>();
     screens
         .views
@@ -635,6 +903,7 @@ fn pick(world: &World, point: Vec2) -> Option<(Entity, Capture, Vec2)> {
                 order: view.order,
                 button: String::new(),
                 position: point,
+                resource_token: world.resource::<VnEngine>().0.scene_resource_token(rvn_core::scene_resources::ResourceTaskKind::Canvas,&format!("{}/{}",surface.screen,surface.element)),
             };
             let local = local_position(world, *entity, point, false)?;
             if target_available(world, &capture) {
@@ -652,16 +921,33 @@ fn pick(world: &World, point: Vec2) -> Option<(Entity, Capture, Vec2)> {
     }
     None
 }
-fn dispatch(world: &mut World, event: UiInput) -> bool {
-    if world.resource::<VnEngine>().0.renderer.menu_pending {return false;}
+fn dispatch(world: &mut World, source: UiInputSource, event: UiInput) -> bool {
+    if world.resource::<VnEngine>().0.renderer.menu_pending || world.resource::<VnEngine>().0.renderer.scene_batch_pending() {return false;}
+    let before_epoch=world.resource::<VnEngine>().0.runtime_epoch();
+    let before_owner=world.resource::<VnEngine>().0.state.scene_execution.as_ref().and_then(|execution|execution.owner());
     let source_event=world.resource::<VnEngine>().0.state.ui.screens.iter().any(|screen|screen.name==event.screen && screen.host_role.is_some());
-    if let Err(problem) = world.resource_mut::<VnEngine>().0.interface_event(event) {
+    if world.resource::<VnEngine>().0.renderer.scene_frame_failed && !source_event {return false;}
+    if crate::editor_debugger::enabled(world.resource::<VnEngine>()){
+        return match crate::editor_debugger::input(world.resource::<VnEngine>(),ScopedUiInput{source,event}){
+            Ok(accepted)=>accepted,
+            Err(problem)=>{world.resource_mut::<ScriptErrorMessage>().0=problem;if !source_event{world.resource_mut::<NextState<VnState>>().set(VnState::Error);}false}
+        };
+    }
+    match world.resource_mut::<VnEngine>().0.interface_event_scoped(ScopedUiInput { source: source.clone(), event }) {
+        Ok(false) => return false,
+        Ok(true) => {},
+        Err(problem) => {
         world.resource_mut::<ScriptErrorMessage>().0 =
             rvn_core::error::ScriptError::from_runtime(&problem).to_string();
         if source_event||problem.is_menu_request_rejection() {warn!("Game menu canvas event: {}",world.resource::<ScriptErrorMessage>().0);}
         else {world.resource_mut::<NextState<VnState>>().set(VnState::Error);}
         return false;
+        }
     }
+    crate::scene_publication::consume(world);
+    let game=&world.resource::<VnEngine>().0;
+    let still_current=game.ui_input_source_current(&source);
+    if game.runtime_epoch()!=before_epoch || game.state.scene_execution.as_ref().and_then(|execution|execution.owner())!=before_owner {return false;}
     for event in world.resource_mut::<VnEngine>().0.renderer.take_pending() {
         if let VnCommand::Interfaces(views) = &event {
             crate::programmable_ui::update_views(
@@ -671,7 +957,7 @@ fn dispatch(world: &mut World, event: UiInput) -> bool {
         }
         world.send_event(event);
     }
-    true
+    still_current
 }
 fn deliver(
     world: &mut World,
@@ -683,11 +969,31 @@ fn deliver(
     modifiers: [bool; 8],
     wheel: Vec2,
 ) -> bool {
-    let Some(entity) = canvas_entity(world, &capture.screen, &capture.element) else {
-        return true;
-    };
-    let Some(local) = local_position(world, entity, point, captured) else {
-        return true;
+    deliver_from_frame(world,capture,pointer,kind,point,captured,modifiers,wheel,None)
+}
+fn deliver_from_frame(
+    world: &mut World,
+    capture: &Capture,
+    pointer: &str,
+    kind: ScreenEventKind,
+    point: Vec2,
+    captured: bool,
+    modifiers: [bool; 8],
+    wheel: Vec2,
+    physical: Option<&CanvasPhysicalFrame>,
+) -> bool {
+    if !capture_matches_live_instance(world,capture) {return true;}
+    let Some(source) = world.get_resource::<CanvasInputSources>()
+        .and_then(|sources|sources.0.get(&(capture.screen.clone(),capture.order))).cloned()
+        .filter(|source|world.resource::<VnEngine>().0.ui_input_source_current(source)) else { return true; };
+    let (local, frozen_drawing) = if let Some(physical) = physical {
+        let Some(target) = physical.target(capture).filter(|target|target.source==source) else { return true; };
+        let Some(local) = target.geometry.local(point,captured) else { return true; };
+        (local, Some(&target.drawing))
+    } else {
+        let Some(entity) = canvas_entity(world, &capture.screen, &capture.element) else { return true; };
+        let Some(local) = local_position(world,entity,point,captured) else { return true; };
+        (local,None)
     };
     let Some(component) = world
         .resource::<Screens>()
@@ -699,9 +1005,7 @@ fn deliver(
     else {
         return true;
     };
-    let hit = component
-        .drawing
-        .as_ref()
+    let hit = frozen_drawing.or(component.drawing.as_ref())
         .and_then(|drawing| flatten(drawing).ok())
         .and_then(|items| rvn_ui::custom_canvas::hit_test(&items, local.to_array()));
     if component.consume_input {
@@ -709,6 +1013,7 @@ fn deliver(
     }
     dispatch(
         world,
+        source,
         UiInput {
             screen: capture.screen.clone(),
             element: capture.element.clone(),
@@ -735,6 +1040,18 @@ fn route_pointer(
     button: &str,
     wheel: Vec2,
 ) -> bool {
+    route_pointer_from_frame(world,state,pointer,kind,point,button,wheel,None)
+}
+fn route_pointer_from_frame(
+    world: &mut World,
+    state: &mut PointerState,
+    pointer: &str,
+    kind: ScreenEventKind,
+    point: Vec2,
+    button: &str,
+    wheel: Vec2,
+    physical: Option<&CanvasPhysicalFrame>,
+) -> bool {
     if state.suppressed.contains(pointer) && kind != ScreenEventKind::Wheel {
         if kind == ScreenEventKind::PointerDown {
             state.suppressed.remove(pointer);
@@ -750,10 +1067,31 @@ fn route_pointer(
     }
     let existing = state.captures.get(pointer).cloned();
     let target = existing.clone().or_else(|| {
-        pick(world, point).map(|(_, mut capture, _)| {
-            capture.button = button.into();
-            capture
-        })
+        let (mut capture, source) = if let Some(physical) = physical {
+            let target=physical.pick(point)?;
+            (target.capture.clone(),target.source.clone())
+        } else {
+            // Only existing standalone legacy adapters may synchronously pick.
+            if crate::programmable_ui::frame_input_captured(world.resource::<Screens>()) || world.resource::<VnEngine>().0.state.scene_execution.is_some() { return None; }
+            let (entity,capture,_) = pick(world,point)?;
+            let source=world.get::<crate::programmable_ui::ControlSource>(entity).map(|source|source.0.clone())
+                .or_else(||world.resource::<VnEngine>().0.capture_ui_input_source(&capture.screen))?;
+            (capture,source)
+        };
+        let game=&world.resource::<VnEngine>().0;
+        if source.order != capture.order || !game.ui_input_source_current(&source) || !target_available(world,&capture) { return None; }
+        if crate::programmable_ui::frame_input_captured(world.resource::<Screens>())
+            && crate::programmable_ui::frame_input_source(world.resource::<Screens>(),&capture.screen).as_ref()!=Some(&source) { return None; }
+        world.init_resource::<CanvasInputSources>();
+        // Bound live registry plus outstanding captures, never a name-only cache.
+        let stale: Vec<_> = world.resource::<CanvasInputSources>().0.iter()
+            .filter(|(_,source)|!world.resource::<VnEngine>().0.ui_input_source_current(source))
+            .map(|(key,_)|key.clone()).collect();
+        let mut sources=world.resource_mut::<CanvasInputSources>();
+        for key in stale { sources.0.remove(&key); }
+        sources.0.entry((capture.screen.clone(),capture.order)).or_insert(source);
+        capture.button = button.into();
+        Some(capture)
     });
     let Some(mut capture) = target else {
         return true;
@@ -772,8 +1110,11 @@ fn route_pointer(
             .cloned();
         if let Some(component) = component {
             if component.is_focusable() {
+                let Some(source) = world.get_resource::<CanvasInputSources>()
+                    .and_then(|sources|sources.0.get(&(capture.screen.clone(),capture.order))).cloned() else { return true; };
                 if !dispatch(
                     world,
+                    source,
                     UiInput {
                         screen: capture.screen.clone(),
                         element: capture.element.clone(),
@@ -795,7 +1136,7 @@ fn route_pointer(
         state.captures.insert(pointer.into(), capture.clone());
     }
     let captured = state.captures.contains_key(pointer);
-    let mut success = deliver(
+    let mut success = deliver_from_frame(
         world,
         &capture,
         pointer,
@@ -804,6 +1145,7 @@ fn route_pointer(
         captured,
         state.modifiers,
         wheel,
+        physical,
     );
     if success
         && captured
@@ -834,39 +1176,44 @@ fn input(world: &mut World) {
     let mut pointer = world.remove_resource::<PointerState>().unwrap_or_default();
     let mouse: Vec<_> = pointer
         .mouse
-        .read(world.resource::<Events<MouseButtonInput>>())
-        .copied()
+        .read_with_id(world.resource::<Events<MouseButtonInput>>())
+        .filter(|(_,id)|crate::runtime_restart::accepts_event::<MouseButtonInput>(world,id.id))
+        .map(|(event,id)|((*event).clone(),id.id))
         .collect();
     let moves: Vec<_> = pointer
         .motion
-        .read(world.resource::<Events<CursorMoved>>())
-        .cloned()
+        .read_with_id(world.resource::<Events<CursorMoved>>())
+        .filter(|(_,id)|crate::runtime_restart::accepts_event::<CursorMoved>(world,id.id))
+        .map(|(event,id)|((*event).clone(),id.id))
         .collect();
     let touches: Vec<_> = pointer
         .touch
-        .read(world.resource::<Events<TouchInput>>())
-        .copied()
+        .read_with_id(world.resource::<Events<TouchInput>>())
+        .filter(|(_,id)|crate::runtime_restart::accepts_event::<TouchInput>(world,id.id))
+        .map(|(event,id)|((*event).clone(),id.id))
         .collect();
     let wheel: Vec<_> = pointer
         .wheel
-        .read(world.resource::<Events<MouseWheel>>())
-        .copied()
+        .read_with_id(world.resource::<Events<MouseWheel>>())
+        .filter(|(_,id)|crate::runtime_restart::accepts_event::<MouseWheel>(world,id.id))
+        .map(|(event,id)|((*event).clone(),id.id))
         .collect();
     let keys: Vec<_> = pointer
         .keyboard
-        .read(world.resource::<Events<KeyboardInput>>())
-        .cloned()
+        .read_with_id(world.resource::<Events<KeyboardInput>>())
+        .map(|(event,id)|((*event).clone(),id.id))
         .collect();
     let lost_focus = pointer
         .focus
         .read(world.resource::<Events<WindowFocused>>())
         .any(|event| !event.focused);
-    let epoch = world.resource::<VnEngine>().0.interface_epoch();
-    if epoch != pointer.epoch {
-        pointer.suppressed.extend(pointer.captures.keys().cloned());
-        pointer.captures.clear();
-        pointer.epoch = epoch;
-    }
+    let key_target = crate::programmable_ui::frame_input_target(world.resource::<Screens>())
+        .or_else(||(!crate::programmable_ui::frame_input_captured(world.resource::<Screens>()) && world.resource::<VnEngine>().0.state.scene_execution.is_none()).then(|| {
+            let (screen,element)=world.resource::<Screens>().keyboard_focus.clone()?;
+            let source=world.resource::<VnEngine>().0.capture_ui_input_source(&screen)?;
+            Some((screen,element,source))
+        }).flatten());
+    reconcile_capture_authority(world,&mut pointer);
     let blocked = world
         .resource::<crate::accessibility::Accessibility>()
         .blocked;
@@ -927,20 +1274,26 @@ fn input(world: &mut World) {
     // Mouse movement is a final sample per frame; touch paths retain all phase
     // events. The native/browser window system supplies pointer capture outside
     // the window canvas; RVN target capture remains a separate stable identity.
-    if let Some(event) = moves.last() {
-        success = route_pointer(
+    if let Some((event,id)) = moves.last() {
+        let produced=world.get_resource::<CanvasPointerProducers>().and_then(|p|p.motion.get(id)).cloned();
+        success = route_pointer_from_frame(
             world,
             &mut pointer,
             "mouse",
             ScreenEventKind::PointerMove,
-            event.position,
+            produced.as_ref().and_then(|p|p.point).unwrap_or(event.position),
             "",
             Vec2::ZERO,
+            produced.as_ref().map(|p|p.frame.as_ref()),
         );
     }
     if success {
-        for event in mouse {
-            let position = cursor.or_else(|| {
+        for (event,id) in mouse {
+            let produced=world.get_resource::<CanvasPointerProducers>().and_then(|p|p.mouse.get(&id)).cloned();
+            let position = produced.as_ref().and_then(|p|p.point).or_else(|| {
+                if produced.is_some() { return None; }
+                cursor
+            }).or_else(|| {
                 pointer
                     .captures
                     .get("mouse")
@@ -954,7 +1307,7 @@ fn input(world: &mut World) {
             } else {
                 ScreenEventKind::PointerUp
             };
-            if !route_pointer(
+            if !route_pointer_from_frame(
                 world,
                 &mut pointer,
                 "mouse",
@@ -962,6 +1315,7 @@ fn input(world: &mut World) {
                 position,
                 &button_name(event.button),
                 Vec2::ZERO,
+                produced.as_ref().map(|p|p.frame.as_ref()),
             ) {
                 success = false;
                 break;
@@ -969,21 +1323,23 @@ fn input(world: &mut World) {
         }
     }
     if success {
-        for event in touches {
+        for (event,id) in touches {
+            let produced=world.get_resource::<CanvasPointerProducers>().and_then(|p|p.touch.get(&id)).cloned();
             let kind = match event.phase {
                 TouchPhase::Started => ScreenEventKind::PointerDown,
                 TouchPhase::Moved => ScreenEventKind::PointerMove,
                 TouchPhase::Ended => ScreenEventKind::PointerUp,
                 TouchPhase::Canceled => ScreenEventKind::PointerCancel,
             };
-            if !route_pointer(
+            if !route_pointer_from_frame(
                 world,
                 &mut pointer,
                 &format!("touch:{}", event.id),
                 kind,
-                event.position,
+                produced.as_ref().and_then(|p|p.point).unwrap_or(event.position),
                 "touch",
                 Vec2::ZERO,
+                produced.as_ref().map(|p|p.frame.as_ref()),
             ) {
                 success = false;
                 break;
@@ -991,15 +1347,18 @@ fn input(world: &mut World) {
         }
     }
     if success {
-        if let Some(position) = cursor {
-            for event in wheel {
+        {
+            for (event,id) in wheel {
+                let produced=world.get_resource::<CanvasPointerProducers>().and_then(|p|p.wheel.get(&id)).cloned();
+                let position=produced.as_ref().and_then(|p|p.point).or_else(||produced.is_none().then_some(cursor).flatten());
+                let Some(position)=position else {continue;};
                 let delta = Vec2::new(event.x, event.y)
                     * if event.unit == MouseScrollUnit::Line {
                         36.0
                     } else {
                         1.0
                     };
-                if !route_pointer(
+                if !route_pointer_from_frame(
                     world,
                     &mut pointer,
                     "mouse",
@@ -1007,6 +1366,7 @@ fn input(world: &mut World) {
                     position,
                     "",
                     delta,
+                    produced.as_ref().map(|p|p.frame.as_ref()),
                 ) {
                     success = false;
                     break;
@@ -1014,7 +1374,7 @@ fn input(world: &mut World) {
             }
         }
     }
-    for key in keys {
+    for (key,id) in keys {
         let index = match key.key_code {
             KeyCode::ControlLeft => Some(0),
             KeyCode::ControlRight => Some(1),
@@ -1029,13 +1389,16 @@ fn input(world: &mut World) {
         if let Some(index) = index {
             pointer.modifiers[index] = key.state == ButtonState::Pressed;
         }
-        if !success || reserved_game_key(key.key_code) {
+        // Physical modifier state is still drained above, even for stale input.
+        if !crate::runtime_restart::accepts_event::<KeyboardInput>(world,id)
+            || !crate::programmable_ui::queued_native_key_current(world.resource::<Screens>(),world.resource::<VnEngine>(),id)
+            || !success || reserved_game_key(key.key_code) {
             continue;
         }
-        let focused = world.resource::<Screens>().keyboard_focus.clone();
-        let Some((screen, element)) = focused else {
+        let Some((screen, element, source)) = key_target.clone() else {
             continue;
         };
+        if !world.resource::<VnEngine>().0.ui_input_source_current(&source) { continue; }
         let component = world
             .resource::<Screens>()
             .views
@@ -1066,6 +1429,7 @@ fn input(world: &mut World) {
         ]));
         success = dispatch(
             world,
+            source,
             UiInput {
                 screen,
                 element,
@@ -1079,6 +1443,15 @@ fn input(world: &mut World) {
         pointer.modifiers = [false; 8];
     }
     world.insert_resource(pointer);
+}
+
+fn reconcile_capture_authority(world:&World,pointer:&mut PointerState) {
+    let epoch=world.resource::<VnEngine>().0.interface_epoch();
+    if epoch!=pointer.epoch {
+        let stale:Vec<_>=pointer.captures.iter().filter(|(_,capture)|capture.resource_token.is_none() || !target_available(world,capture)).map(|(id,_)|id.clone()).collect();
+        for id in stale {pointer.captures.remove(&id);pointer.suppressed.insert(id);}
+        pointer.epoch=epoch;
+    }
 }
 
 /// A focused drawing must not make game navigation or quick saves inaccessible.
@@ -1568,12 +1941,47 @@ pub(crate) fn tint(world: &mut World, entity: Entity, pose: &rvn_ui::motion::Pos
 mod qa;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn install_qa(app: &mut App) {
-    app.add_systems(PostUpdate, qa::drive.after(sync_materials));
+    app.add_systems(PostUpdate, qa::drive.after(sync_materials).in_set(crate::qa_playthrough::QaGameReady));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn game_canvas_capture_survives_call_but_load_revokes_it_before_any_successor_input() {
+        let source=r#"
+function paint(state,props,frame) {return []}
+screen hud() {return component("canvas","canvas",{"draw":"paint","capture_pointer":true,"width":100,"height":100,"accessible_label":"Gesture area"},[])}
+init {ui.open("hud",[],false,0)}
+scene label P
+"parent"
+jump done
+scene label C
+"child"
+return
+label done
+"#;
+        let mut game=rvn_core::Engine::from_program(rvn_parser::parse_program(source).unwrap(),crate::bevy_renderer::BevyRenderer::new(),16).unwrap();
+        game.step_until_interaction().unwrap();
+        let token=game.scene_resource_token(rvn_core::scene_resources::ResourceTaskKind::Canvas,"hud/canvas").unwrap();
+        let views=game.interface_views().unwrap();
+        let order=views[0].order;let epoch=game.interface_epoch();
+        let mut world=World::new();world.insert_resource(VnEngine(game));world.init_resource::<Screens>();world.resource_mut::<Screens>().views=views;
+        let mut pointer=PointerState::default();pointer.epoch=epoch;
+        pointer.captures.insert("mouse".into(),Capture{screen:"hud".into(),element:"canvas".into(),order,button:"left".into(),position:Vec2::new(4.0,7.0),resource_token:Some(token.clone())});
+        world.resource_mut::<VnEngine>().0.execute_timer_action("call C").unwrap();
+        world.resource_mut::<VnEngine>().0.step_until_interaction().unwrap();
+        let views=world.resource::<VnEngine>().0.interface_views().unwrap();world.resource_mut::<Screens>().views=views;
+        reconcile_capture_authority(&world,&mut pointer);
+        assert_eq!(pointer.captures["mouse"].resource_token,Some(token));
+        assert_eq!(pointer.captures["mouse"].position,Vec2::new(4.0,7.0));
+        assert!(!pointer.suppressed.contains("mouse"));
+        let save=rvn_core::save::SaveData::try_from_state(&world.resource::<VnEngine>().0.state,1,"child".into(),"main.rvn".into()).unwrap();
+        world.resource_mut::<VnEngine>().0.load_data(save).unwrap();
+        let views=world.resource::<VnEngine>().0.interface_views().unwrap();world.resource_mut::<Screens>().views=views;
+        reconcile_capture_authority(&world,&mut pointer);
+        assert!(!pointer.captures.contains_key("mouse"));assert!(pointer.suppressed.contains("mouse"));
+    }
     #[test]
     fn focused_canvases_do_not_swallow_game_save_load_and_menu_shortcuts() {
         for key in [KeyCode::Tab, KeyCode::Escape, KeyCode::F5, KeyCode::F6] {
@@ -1685,5 +2093,344 @@ mod tests {
         let combining = "\u{0301}".repeat(32_768);
         let problem = text_mask(&font, &combining, 512.0, 1.0).unwrap_err();
         assert!(problem.contains("64-megapixel glyph-rasterization"));
+    }
+}
+
+#[cfg(test)]
+mod scoped_canvas_input_contracts {
+    use super::*;
+    fn world()->World {
+        let source=r#"
+function paint(state,props,frame){return []}
+handler hit(event){set calls=calls+1}
+handler renew(event){ui.close("form") ui.open("form",[],false,0)}
+screen form(){return component("canvas","canvas",{"draw":"paint","events":{"focus":"renew","pointer_down":"hit"},"width":100,"height":100,"accessible_label":"Scoped gesture"},[])}
+init {set calls=0}
+label start
+ui.open("form",[],false,0)
+"ready"
+"#;
+        let mut engine=rvn_core::Engine::new(rvn_parser::parse(source).unwrap(),crate::bevy_renderer::BevyRenderer::new(),16).unwrap();engine.step_until_interaction().unwrap();
+        let views=engine.interface_views().unwrap();let mut world=World::new();world.insert_resource(VnEngine(engine));world.init_resource::<Screens>();world.resource_mut::<Screens>().views=views;world.init_resource::<ScriptErrorMessage>();world.init_resource::<NextState<VnState>>();world.init_resource::<Events<VnCommand>>();world
+    }
+    #[test]
+    fn scoped_canvas_focus_replacement_rejects_original_pointer_down_before_payload(){
+        let mut world=world();let source=world.resource::<VnEngine>().0.capture_ui_input_source("form").unwrap();
+        assert!(!dispatch(&mut world,source.clone(),UiInput{screen:"form".into(),element:"canvas".into(),kind:ScreenEventKind::Focus,value:None,key:None}));
+        assert_ne!(world.resource::<VnEngine>().0.state.ui.screens[0].order,source.order);
+        assert!(!world.resource::<VnEngine>().0.ui_input_source_current(&source));
+        let before=serde_json::to_value(&world.resource::<VnEngine>().0.state).unwrap();let history=world.resource::<VnEngine>().0.history.len();
+        assert!(!dispatch(&mut world,source,UiInput{screen:"form".into(),element:"canvas".into(),kind:ScreenEventKind::PointerDown,value:Some(Value::Float(f32::NAN)),key:Some("x".repeat(1024))}));
+        assert_eq!(serde_json::to_value(&world.resource::<VnEngine>().0.state).unwrap(),before);assert_eq!(world.resource::<VnEngine>().0.history.len(),history);assert_eq!(world.resource::<VnEngine>().0.state.vars["calls"],Value::Int(0));assert!(world.resource::<ScriptErrorMessage>().0.is_empty());
+    }
+    #[test]
+    fn scoped_canvas_pointer_cancel_cannot_bypass_reopened_instance_identity(){
+        let mut world=world();let source=world.resource::<VnEngine>().0.capture_ui_input_source("form").unwrap();
+        assert!(!dispatch(&mut world,source.clone(),UiInput{screen:"form".into(),element:"canvas".into(),kind:ScreenEventKind::Focus,value:None,key:None}));
+        assert_ne!(world.resource::<VnEngine>().0.state.ui.screens[0].order,source.order);
+        let before=serde_json::to_value(&world.resource::<VnEngine>().0.state).unwrap();
+        assert!(!dispatch(&mut world,source,UiInput{screen:"form".into(),element:"canvas".into(),kind:ScreenEventKind::PointerCancel,value:Some(Value::Float(f32::NAN)),key:None}));assert_eq!(serde_json::to_value(&world.resource::<VnEngine>().0.state).unwrap(),before);
+    }
+
+    #[test]
+    fn scoped_canvas_raw_press_cannot_acquire_a_new_instance_published_after_frame_capture(){
+        let mut world=world();let old=world.resource::<VnEngine>().0.capture_ui_input_source("form").unwrap();crate::programmable_ui::capture_frame_for_test(&mut world,[("form".into(),old.clone())].into_iter().collect());
+        world.resource_mut::<VnEngine>().0.interface_event(UiInput{screen:"form".into(),element:"canvas".into(),kind:ScreenEventKind::Focus,value:None,key:None}).unwrap();
+        let views=world.resource::<VnEngine>().0.interface_views().unwrap();world.resource_mut::<Screens>().views=views;let new=world.resource::<VnEngine>().0.capture_ui_input_source("form").unwrap();assert_ne!(new,old);assert!(world.resource::<VnEngine>().0.ui_input_source_current(&new));
+        let mut node=Node::default();let bevy::reflect::ReflectMut::Struct(fields)=node.reflect_mut()else{unreachable!()};fields.field_mut("calculated_size").unwrap().apply(&Vec2::splat(100.0));
+        let entity=world.spawn((node,Style::default(),GlobalTransform::default(),CanvasSurface{screen:"form".into(),element:"canvas".into(),drawing:CanvasDrawing::default(),extent:Vec2::splat(100.0),font:Handle::default(),opacity:1.0},crate::programmable_ui::ControlSource(new))).id();world.init_resource::<bevy::ui::UiStack>();world.resource_mut::<bevy::ui::UiStack>().uinodes=vec![entity];
+        let before=serde_json::to_value(&world.resource::<VnEngine>().0.state).unwrap();let mut pointer=PointerState::default();assert!(route_pointer(&mut world,&mut pointer,"mouse",ScreenEventKind::PointerDown,Vec2::ZERO,"left",Vec2::ZERO));
+        assert_eq!(serde_json::to_value(&world.resource::<VnEngine>().0.state).unwrap(),before);assert!(pointer.captures.is_empty());assert_eq!(world.resource::<VnEngine>().0.state.vars["calls"],Value::Int(0));assert!(world.resource::<ScriptErrorMessage>().0.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod scoped_canvas_physical_producer_contracts {
+    #[test]
+    fn preview_canvas_budget_is_checked_before_drawing_and_clip_snapshots_are_copied(){
+        let mut world=world(true);let entity=surface(&mut world);
+        crate::programmable_ui::publish_canvas_input_tokens_for_test(&mut world);
+        let source=world.resource::<VnEngine>().0.capture_ui_input_source("form").unwrap();
+        crate::programmable_ui::capture_frame_for_test(&mut world,[("form".into(),source)].into_iter().collect());
+        let before=serde_json::to_vec(&world.resource::<VnEngine>().0.state).unwrap();
+        let history=format!("{:?}",world.resource::<VnEngine>().0.history.entries());
+        assert!(capture_preview_canvas(&world).unwrap().0.0.pick(Vec2::ZERO).is_some());
+        let drawing=CanvasDrawing{primitives:(0..4).map(|_|rvn_ui::custom_canvas::CanvasPrimitive::Text{text:"x".repeat(65536),position:[0.0,0.0],color:[1.0;4],size:16.0}).collect()};drawing.validate().unwrap();
+        let source=world.get::<crate::programmable_ui::ControlSource>(entity).unwrap().clone();
+        let mut entities=vec![entity];
+        world.get_mut::<CanvasSurface>(entity).unwrap().drawing=drawing.clone();
+        for _ in 0..4 {let mut node=Node::default();let bevy::reflect::ReflectMut::Struct(fields)=node.reflect_mut()else{unreachable!()};fields.field_mut("calculated_size").unwrap().apply(&Vec2::splat(100.0));entities.push(world.spawn((node,Style::default(),GlobalTransform::default(),CanvasSurface{screen:"form".into(),element:"canvas".into(),drawing:drawing.clone(),extent:Vec2::splat(100.0),font:Handle::default(),opacity:1.0},source.clone())).id());}
+        world.resource_mut::<bevy::ui::UiStack>().uinodes=entities;
+        assert!(preview_canvas_cost(&world).is_none());assert!(capture_preview_canvas(&world).is_none());
+        assert_eq!(world.get::<CanvasSurface>(entity).unwrap().drawing,drawing);
+        assert_eq!(serde_json::to_vec(&world.resource::<VnEngine>().0.state).unwrap(),before);assert_eq!(format!("{:?}",world.resource::<VnEngine>().0.history.entries()),history);
+    }
+
+    #[test]
+    fn completed_image_canvas_keeps_empty_hit_when_same_interface_adds_a_canvas() {
+        let mut world=world(false);
+        let source=world.resource::<VnEngine>().0.capture_ui_input_source("form").unwrap();
+        crate::programmable_ui::capture_frame_for_test(&mut world,[("form".into(),source.clone())].into_iter().collect());
+        let (frame,_)=capture_preview_canvas(&world).unwrap();assert!(frame.0.pick(Vec2::ZERO).is_none());
+        event(&mut world,"form","trigger");surface(&mut world);
+        assert_eq!(world.resource::<VnEngine>().0.capture_ui_input_source("form"),Some(source));
+        let before=serde_json::to_vec(&world.resource::<VnEngine>().0.state).unwrap();
+        let history=format!("{:?}",world.resource::<VnEngine>().0.history.entries());
+        let window=world.spawn_empty().id();
+        frame.mouse(&mut world,MouseButtonInput{button:MouseButton::Left,state:ButtonState::Pressed,window},Vec2::ZERO);
+        world.run_system_once(capture_pointer_producers);world.run_system_once(input);
+        assert_eq!(serde_json::to_vec(&world.resource::<VnEngine>().0.state).unwrap(),before);
+        assert_eq!(format!("{:?}",world.resource::<VnEngine>().0.history.entries()),history);
+        assert_eq!(world.resource::<VnEngine>().0.state.vars["calls"],Value::Int(0));
+    }
+    #[test]
+    fn completed_image_canvas_mouse_uses_its_drawing_and_transform_after_same_instance_update() {
+        let mut world=world(true);let entity=surface(&mut world);
+        let source=world.resource::<VnEngine>().0.capture_ui_input_source("form").unwrap();
+        crate::programmable_ui::capture_frame_for_test(&mut world,[("form".into(),source)].into_iter().collect());
+        let (frame,_)=capture_preview_canvas(&world).unwrap();
+        event(&mut world,"controls","alter");
+        *world.get_mut::<GlobalTransform>(entity).unwrap()=GlobalTransform::from_translation(Vec3::new(100.0,0.0,0.0));
+        let drawing=world.resource::<Screens>().views.iter().find(|view|view.name=="form").unwrap().root.find("canvas").unwrap().drawing.clone().unwrap();
+        {let mut surface=world.get_mut::<CanvasSurface>(entity).unwrap();surface.extent=Vec2::splat(200.0);surface.drawing=drawing;}
+        let window=world.spawn_empty().id();
+        frame.mouse(&mut world,MouseButtonInput{button:MouseButton::Left,state:ButtonState::Pressed,window},Vec2::new(25.0,0.0));
+        world.run_system_once(capture_pointer_producers);world.run_system_once(input);
+        let game=&world.resource::<VnEngine>().0;
+        assert_eq!(game.state.vars["calls"],Value::Int(1));assert_eq!(game.state.vars["last_x"],Value::Float(75.0));
+        assert_eq!(game.state.vars["last_y"],Value::Float(50.0));assert_eq!(game.state.vars["last_hit"],Value::Str("old".into()));
+        assert_eq!(game.state.vars["region"],Value::Str("new".into()));assert!(world.resource::<ScriptErrorMessage>().0.is_empty());
+    }
+
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    fn world(visible: bool) -> World {
+        let source = r#"
+function paint(state,props,frame){return [canvas_hit(region,[0,0,100,100])]}
+handler reveal(event){set visible=true}
+handler alter(event){set region="new"}
+handler hit(event){set calls=calls+1 set last_x=event["value"]["x"] set last_y=event["value"]["y"] set last_hit=event["value"]["hit"]}
+handler moved(event){set moves=moves+1 set last_x=event["value"]["x"] set last_y=event["value"]["y"]}
+screen form(){
+    if visible {return component("canvas","canvas",{"draw":"paint","state":{},"capture_pointer":true,"events":{"pointer_down":"hit","pointer_move":"moved"},"width":100,"height":100,"accessible_label":"Physical gesture"},[])}
+    return component("trigger","button",{"events":{"click":"reveal"}},[])
+}
+screen controls(){return component("alter","button",{"events":{"click":"alter"}},[])}
+init{set visible=INITIAL set calls=0 set moves=0 set last_x=0 set last_y=0 set last_hit="" set region="old"}
+label start
+ui.open("form",[],false,0)
+ui.open("controls",[],false,0)
+"ready"
+"#;
+        let source=source.replace("INITIAL",if visible {"true"} else {"false"});
+        let mut engine=rvn_core::Engine::new(rvn_parser::parse(&source).unwrap(),crate::bevy_renderer::BevyRenderer::new(),16).unwrap();
+        engine.step_until_interaction().unwrap();
+        let views=engine.interface_views().unwrap();
+        let mut world=World::new();
+        world.insert_resource(VnEngine(engine));
+        world.init_resource::<Screens>();
+        world.resource_mut::<Screens>().views=views;
+        world.resource_mut::<Screens>().active=true;
+        world.init_resource::<ScriptErrorMessage>();
+        world.init_resource::<NextState<VnState>>();
+        world.insert_resource(State::new(VnState::Waiting));
+        world.init_resource::<crate::accessibility::Accessibility>();
+        world.init_resource::<ButtonInput<KeyCode>>();
+        world.init_resource::<PointerState>();
+        world.init_resource::<Events<VnCommand>>();
+        world.init_resource::<Events<MouseButtonInput>>();
+        world.init_resource::<Events<CursorMoved>>();
+        world.init_resource::<Events<TouchInput>>();
+        world.init_resource::<Events<MouseWheel>>();
+        world.init_resource::<Events<KeyboardInput>>();
+        world.init_resource::<Events<WindowFocused>>();
+        world.init_resource::<bevy::ui::UiStack>();
+        world
+    }
+    fn surface(world:&mut World)->Entity {
+        let source=world.resource::<VnEngine>().0.capture_ui_input_source("form").unwrap();
+        let drawing=world.resource::<Screens>().views.iter().find(|view|view.name=="form").unwrap().root.find("canvas").unwrap().drawing.clone().unwrap();
+        let mut node=Node::default();
+        let bevy::reflect::ReflectMut::Struct(fields)=node.reflect_mut() else {unreachable!()};
+        fields.field_mut("calculated_size").unwrap().apply(&Vec2::splat(100.0));
+        let entity=world.spawn((node,Style::default(),GlobalTransform::default(),CanvasSurface{screen:"form".into(),element:"canvas".into(),drawing,extent:Vec2::splat(100.0),font:Handle::default(),opacity:1.0},crate::programmable_ui::ControlSource(source))).id();
+        world.resource_mut::<bevy::ui::UiStack>().uinodes=vec![entity];
+        entity
+    }
+    fn raw_touch(world:&mut World,phase:TouchPhase,position:Vec2)->usize {
+        let window=world.spawn_empty().id();
+        world.resource_mut::<Events<TouchInput>>().send(TouchInput{phase,position,window,force:None,id:7}).id
+    }
+    fn publish_views(world:&mut World) {
+        let views=world.resource::<VnEngine>().0.interface_views().unwrap();
+        crate::programmable_ui::update_views(&mut world.resource_mut::<Screens>(),views);
+    }
+    fn event(world:&mut World,screen:&str,element:&str) {
+        world.resource_mut::<VnEngine>().0.interface_event(UiInput{screen:screen.into(),element:element.into(),kind:ScreenEventKind::Click,value:None,key:None}).unwrap();
+        publish_views(world);
+    }
+    #[test]
+    fn scoped_canvas_raw_event_keeps_empty_physical_hit_when_same_interface_adds_canvas() {
+        let mut world=world(false);
+        let old=world.resource::<VnEngine>().0.capture_ui_input_source("form").unwrap();
+        crate::programmable_ui::capture_frame_for_test(&mut world,[("form".into(),old.clone())].into_iter().collect());
+        let id=raw_touch(&mut world,TouchPhase::Started,Vec2::ZERO);
+        world.run_system_once(capture_pointer_producers);
+        let produced=world.resource::<CanvasPointerProducers>().touch[&id].clone();
+        assert!(produced.frame.pick(Vec2::ZERO).is_none());
+        event(&mut world,"form","trigger");
+        assert_eq!(world.resource::<VnEngine>().0.capture_ui_input_source("form"),Some(old));
+        surface(&mut world);
+        assert!(capture_physical_frame(&world).pick(Vec2::ZERO).is_some());
+        world.run_system_once(capture_pointer_producers);
+        assert!(std::sync::Arc::ptr_eq(&produced.frame,&world.resource::<CanvasPointerProducers>().touch[&id].frame));
+        let before=serde_json::to_value(&world.resource::<VnEngine>().0.state).unwrap();
+        let history=world.resource::<VnEngine>().0.history.len();
+        world.run_system_once(input);
+        assert_eq!(serde_json::to_value(&world.resource::<VnEngine>().0.state).unwrap(),before);
+        assert_eq!(world.resource::<VnEngine>().0.history.len(),history);
+        assert_eq!(world.resource::<VnEngine>().0.state.vars["calls"],Value::Int(0));
+        assert!(world.resource::<PointerState>().captures.is_empty());
+        assert!(world.resource::<ScriptErrorMessage>().0.is_empty());
+    }
+    #[test]
+    fn scoped_canvas_raw_event_uses_produced_geometry_and_hit_regions_after_same_instance_update() {
+        let mut world=world(true);
+        let entity=surface(&mut world);
+        let source=world.resource::<VnEngine>().0.capture_ui_input_source("form").unwrap();
+        crate::programmable_ui::capture_frame_for_test(&mut world,[("form".into(),source.clone())].into_iter().collect());
+        raw_touch(&mut world,TouchPhase::Started,Vec2::new(25.0,0.0));
+        world.run_system_once(capture_pointer_producers);
+        event(&mut world,"controls","alter");
+        assert_eq!(world.resource::<VnEngine>().0.capture_ui_input_source("form"),Some(source));
+        *world.get_mut::<GlobalTransform>(entity).unwrap()=GlobalTransform::from_translation(Vec3::new(100.0,0.0,0.0));
+        let new_drawing=world.resource::<Screens>().views.iter().find(|view|view.name=="form").unwrap().root.find("canvas").unwrap().drawing.clone().unwrap();
+        { let mut canvas=world.get_mut::<CanvasSurface>(entity).unwrap();canvas.extent=Vec2::splat(200.0);canvas.drawing=new_drawing; }
+        assert!(pick(&world,Vec2::new(25.0,0.0)).is_none());
+        world.run_system_once(input);
+        let game=&world.resource::<VnEngine>().0;
+        assert_eq!(game.state.vars["calls"],Value::Int(1));
+        assert_eq!(game.state.vars["last_x"],Value::Float(75.0));
+        assert_eq!(game.state.vars["last_y"],Value::Float(50.0));
+        assert_eq!(game.state.vars["last_hit"],Value::Str("old".into()));
+        assert_eq!(game.state.vars["region"],Value::Str("new".into()));
+        assert!(world.resource::<ScriptErrorMessage>().0.is_empty());
+    }
+    #[test]
+    fn scoped_canvas_captured_raw_move_keeps_outside_coordinates_from_its_producer_frame() {
+        let mut world=world(true);
+        let entity=surface(&mut world);
+        let source=world.resource::<VnEngine>().0.capture_ui_input_source("form").unwrap();
+        crate::programmable_ui::capture_frame_for_test(&mut world,[("form".into(),source)].into_iter().collect());
+        raw_touch(&mut world,TouchPhase::Started,Vec2::ZERO);
+        raw_touch(&mut world,TouchPhase::Moved,Vec2::new(150.0,0.0));
+        world.run_system_once(capture_pointer_producers);
+        *world.get_mut::<GlobalTransform>(entity).unwrap()=GlobalTransform::from_translation(Vec3::new(100.0,0.0,0.0));
+        world.run_system_once(input);
+        let game=&world.resource::<VnEngine>().0;
+        assert_eq!(game.state.vars["calls"],Value::Int(1));
+        assert_eq!(game.state.vars["moves"],Value::Int(1));
+        assert_eq!(game.state.vars["last_x"],Value::Float(200.0));
+        assert_eq!(game.state.vars["last_y"],Value::Float(50.0));
+        assert!(world.resource::<PointerState>().captures.contains_key("touch:7"));
+        assert!(world.resource::<ScriptErrorMessage>().0.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod scoped_canvas_keyboard_producer_contracts {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use rvn_core::scene_resources::{ResourceTaskKind,ResourceToken};
+
+    fn world(initial:i64)->World {
+        let source=r#"
+function paint(state,props,frame){return [canvas_hit("area",[0,0,100,100])]}
+handler keyed(event){set calls=calls+1}
+handler input_mode(event){set mode=1}
+handler canvas_mode(event){set mode=0}
+screen form(){
+ if mode==1 {return component("target","input",{"binding":"text"},[])}
+ return component("target","canvas",{"draw":"paint","state":{},"events":{"key":"keyed"},"width":100,"height":100},[])
+}
+screen controls(){return component("root","panel",{},[component("input","button",{"events":{"click":"input_mode"}},[]),component("canvas","button",{"events":{"click":"canvas_mode"}},[])])}
+init{set mode=INITIAL set calls=0 set text="original"}
+scene label P
+ui.open("form",[],false,0)
+ui.open("controls",[],false,0)
+"ready"
+"#.replace("INITIAL",&initial.to_string());
+        let mut engine=rvn_core::Engine::from_program(rvn_parser::parse_program(&source).unwrap(),crate::bevy_renderer::BevyRenderer::new(),16).unwrap();
+        engine.step_until_interaction().unwrap();engine.renderer.scene_batch=None;
+        let views=engine.interface_views().unwrap();let mut world=World::new();world.insert_resource(VnEngine(engine));world.init_resource::<Screens>();
+        {let mut screens=world.resource_mut::<Screens>();screens.views=views;screens.active=true;screens.keyboard_focus=Some(("form".into(),"target".into()));}
+        world.init_resource::<ScriptErrorMessage>();world.init_resource::<NextState<VnState>>();world.insert_resource(State::new(VnState::Waiting));
+        world.init_resource::<crate::accessibility::Accessibility>();world.init_resource::<ButtonInput<KeyCode>>();world.init_resource::<PointerState>();
+        world.init_resource::<Events<VnCommand>>();world.init_resource::<Events<MouseButtonInput>>();world.init_resource::<Events<CursorMoved>>();world.init_resource::<Events<TouchInput>>();world.init_resource::<Events<MouseWheel>>();world.init_resource::<Events<KeyboardInput>>();world.init_resource::<Events<WindowFocused>>();world.init_resource::<bevy::ui::UiStack>();
+        world.init_resource::<crate::scene_publication::ScenePresentation>();
+        capture(&mut world);crate::programmable_ui::publish_canvas_input_tokens_for_test(&mut world);world
+    }
+    fn sources(world:&World)->HashMap<String,UiInputSource> {
+        world.resource::<Screens>().views.iter().filter_map(|view|world.resource::<VnEngine>().0.capture_ui_input_source(&view.name).map(|source|(view.name.clone(),source))).collect()
+    }
+    fn capture(world:&mut World) {let sources=sources(world);crate::programmable_ui::capture_frame_for_test(world,sources);}
+    fn token(world:&World)->ResourceToken {world.resource::<VnEngine>().0.scene_resource_token(ResourceTaskKind::Canvas,"form/target").unwrap()}
+    fn mutate(world:&mut World,element:&str) {
+        world.resource_mut::<VnEngine>().0.interface_event(UiInput{screen:"controls".into(),element:element.into(),kind:ScreenEventKind::Click,value:None,key:None}).unwrap();
+        let views=world.resource::<VnEngine>().0.interface_views().unwrap();world.resource_mut::<Screens>().views=views;world.resource_mut::<VnEngine>().0.renderer.scene_batch=None;
+    }
+    fn key(world:&mut World,value:&str)->usize {
+        let window=world.spawn_empty().id();world.resource_mut::<Events<KeyboardInput>>().send(KeyboardInput{key_code:KeyCode::KeyK,logical_key:Key::Character(value.into()),state:ButtonState::Pressed,window}).id
+    }
+    fn state(world:&World)->serde_json::Value {serde_json::to_value(&world.resource::<VnEngine>().0.state).unwrap()}
+    fn history(world:&World)->serde_json::Value {serde_json::to_value(world.resource::<VnEngine>().0.history.entries().iter().map(|entry|(&entry.state,&entry.display)).collect::<Vec<_>>()).unwrap()}
+    fn positive_new_key(world:&mut World) {
+        let before=world.resource::<VnEngine>().0.history.len();key(world,"k");capture(world);world.run_system_once(input);
+        assert_eq!(world.resource::<VnEngine>().0.state.vars["calls"],Value::Int(1));assert_eq!(world.resource::<VnEngine>().0.history.len(),before+1);assert!(world.resource::<ScriptErrorMessage>().0.is_empty());
+    }
+    #[test]
+    fn scoped_canvas_keyboard_same_interface_renewal_cannot_adopt_a_new_canvas_token(){
+        for produced_before_model_change in [false,true] {
+            let mut world=world(0);let old_interface=world.resource::<VnEngine>().0.capture_ui_input_source("form").unwrap();let old_token=token(&world);
+            let id=key(&mut world,&"oversized payload ".repeat(40));
+            if produced_before_model_change {capture(&mut world);}
+            mutate(&mut world,"input");assert!(world.resource::<VnEngine>().0.scene_resource_token(ResourceTaskKind::Canvas,"form/target").is_none());mutate(&mut world,"canvas");
+            let new_token=token(&world);assert_ne!(old_token,new_token);assert_eq!(world.resource::<VnEngine>().0.capture_ui_input_source("form"),Some(old_interface));
+            // Even if Core changed before capture, the producer sees the old
+            // published appearance/token, never a fresh same-alias lookup.
+            capture(&mut world);
+            assert!(!crate::programmable_ui::queued_native_key_current(world.resource::<Screens>(),world.resource::<VnEngine>(),id));
+            crate::programmable_ui::publish_canvas_input_tokens_for_test(&mut world);capture(&mut world);
+            assert!(!crate::programmable_ui::queued_native_key_current(world.resource::<Screens>(),world.resource::<VnEngine>(),id));
+            let before=state(&world);let old_history=history(&world);world.run_system_once(input);
+            assert_eq!(state(&world),before);assert_eq!(history(&world),old_history);assert_eq!(world.resource::<VnEngine>().0.state.vars["calls"],Value::Int(0));assert!(world.resource::<ScriptErrorMessage>().0.is_empty());
+            positive_new_key(&mut world);
+        }
+    }
+    #[test]
+    fn scoped_canvas_keyboard_input_to_canvas_conversion_rejects_before_key_payload(){
+        let mut world=world(1);let old_interface=world.resource::<VnEngine>().0.capture_ui_input_source("form").unwrap();
+        let id=key(&mut world,&"invalid old input ".repeat(40));capture(&mut world);mutate(&mut world,"canvas");
+        assert_eq!(world.resource::<VnEngine>().0.capture_ui_input_source("form"),Some(old_interface));assert!(world.resource::<VnEngine>().0.scene_resource_token(ResourceTaskKind::Canvas,"form/target").is_some());
+        crate::programmable_ui::publish_canvas_input_tokens_for_test(&mut world);capture(&mut world);
+        assert!(!crate::programmable_ui::queued_native_key_current(world.resource::<Screens>(),world.resource::<VnEngine>(),id));
+        let before=state(&world);let old_history=history(&world);world.run_system_once(input);
+        assert_eq!(state(&world),before);assert_eq!(history(&world),old_history);assert_eq!(world.resource::<VnEngine>().0.state.vars["text"],Value::Str("original".into()));assert!(world.resource::<ScriptErrorMessage>().0.is_empty());
+        positive_new_key(&mut world);
+    }
+    #[test]
+    fn scoped_canvas_pointer_does_not_capture_an_unpublished_new_token_from_the_current_model(){
+        let mut world=world(0);let source=world.resource::<VnEngine>().0.capture_ui_input_source("form").unwrap();let old_token=token(&world);
+        let drawing=world.resource::<Screens>().views.iter().find(|view|view.name=="form").unwrap().root.drawing.clone().unwrap();
+        let mut node=Node::default();let bevy::reflect::ReflectMut::Struct(fields)=node.reflect_mut()else{unreachable!()};fields.field_mut("calculated_size").unwrap().apply(&Vec2::splat(100.0));
+        let entity=world.spawn((node,Style::default(),GlobalTransform::default(),CanvasSurface{screen:"form".into(),element:"target".into(),drawing,extent:Vec2::splat(100.0),font:Handle::default(),opacity:1.0},crate::programmable_ui::ControlSource(source))).id();world.resource_mut::<bevy::ui::UiStack>().uinodes=vec![entity];
+        mutate(&mut world,"input");mutate(&mut world,"canvas");assert_ne!(token(&world),old_token);
+        let window=world.spawn_empty().id();let id=world.resource_mut::<Events<TouchInput>>().send(TouchInput{phase:TouchPhase::Started,position:Vec2::ZERO,window,force:None,id:9}).id;
+        world.run_system_once(capture_pointer_producers);
+        assert!(world.resource::<CanvasPointerProducers>().touch[&id].frame.pick(Vec2::ZERO).is_none());
+        crate::programmable_ui::publish_canvas_input_tokens_for_test(&mut world);world.run_system_once(capture_pointer_producers);
+        assert!(world.resource::<CanvasPointerProducers>().touch[&id].frame.pick(Vec2::ZERO).is_none());
+        let before=state(&world);world.run_system_once(input);assert_eq!(state(&world),before);assert!(world.resource::<PointerState>().captures.is_empty());assert!(world.resource::<ScriptErrorMessage>().0.is_empty());
     }
 }

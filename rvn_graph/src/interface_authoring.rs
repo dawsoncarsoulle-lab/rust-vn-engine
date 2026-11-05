@@ -1,6 +1,9 @@
 //! A source-first designer view over the existing expression graph. Computed
 //! components are navigation placeholders, not snapshots of their current data.
 use crate::*;
+#[path = "widget_reorder_siblings1030.rs"]
+mod widget_reorder_siblings1030;
+pub use widget_reorder_siblings1030::WidgetSiblingPlacement;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,6 +152,7 @@ impl GraphDocument {
             let new = graph.add_node(old.kind, [old.position[0] + 40.0, old.position[1] + 80.0]);
             graph.nodes.get_mut(&new).unwrap().properties = old.properties;
             graph.nodes.get_mut(&new).unwrap().title_override = old.title_override;
+            graph.nodes.get_mut(&new).unwrap().annotation = old.annotation;
             for pin in old.pins {
                 let model = graph.pins[&pin].clone();
                 let cloned = graph
@@ -162,6 +166,8 @@ impl GraphDocument {
                     )
                     .map_err(|error| error.to_string())?;
                 graph.pins.get_mut(&cloned).unwrap().default_value = model.default_value;
+                graph.pins.get_mut(&cloned).unwrap().text_localization = model.text_localization;
+                graph.pins.get_mut(&cloned).unwrap().text_table_reference = model.text_table_reference;
                 if model.direction == PinDirection::Input {
                     if let Some(output) = producer(graph, pin)? {
                         graph
@@ -459,5 +465,225 @@ impl GraphDocument {
         .map_err(|error| error.to_string())?;
         *self = next;
         Ok(node)
+    }
+}
+
+// Widget authoring remains an edit of the real expression graph. These helpers
+// read authored slot dictionaries only; no runtime evaluation freezes values.
+fn widget_find(tree: &InterfaceAuthoringNode, node: NodeId) -> Option<&InterfaceAuthoringNode> {
+    if tree.node == node { Some(tree) }
+    else { tree.children.iter().find_map(|child| widget_find(child, node)) }
+}
+fn widget_parent(tree: &InterfaceAuthoringNode, node: NodeId) -> Option<(NodeId, usize)> {
+    tree.children.iter().position(|child| child.node == node).map(|index| (tree.node, index))
+        .or_else(|| tree.children.iter().find_map(|child| widget_parent(child, node)))
+}
+fn widget_property_pin(graph: &GraphDocument, node: NodeId, path: &[&str]) -> Result<Option<PinId>, String> {
+    if path.is_empty() { return Err("Expected a Widget property path".into()); }
+    let mut dictionary = if graph.nodes.get(&node).is_some_and(|node| node.kind == NodeKind::UiComponent) {
+        match producer(graph, graph.pin_by_key(node, "properties").ok_or("Missing Widget properties")?.id)? {
+            Some(output) => graph.pins[&output].node,
+            None => return Ok(None),
+        }
+    } else { node };
+    for (index, key) in path.iter().enumerate() {
+        let entries = fields(graph, dictionary)?.ok_or("Computed Widget properties must be edited in the graph")?;
+        let Some((_, _, pin)) = entries.iter().find(|(name, _, _)| name == key) else { return Ok(None); };
+        if index + 1 == path.len() { return Ok(Some(*pin)); }
+        dictionary = producer(graph, *pin)?.map(|output| graph.pins[&output].node)
+            .ok_or("Expected an authored Widget dictionary")?;
+    }
+    unreachable!()
+}
+fn widget_authored_value(graph: &GraphDocument, pin: PinId, active: &mut BTreeSet<PinId>, depth: usize) -> Result<serde_json::Value, String> {
+    if depth > 8 || !active.insert(pin) { return Err("Invalid Widget slot dictionary depth or cycle".into()); }
+    let value = if let Some(value) = literal(graph, pin) {
+        match value {
+            PropertyValue::String(value) => serde_json::Value::String(value),
+            PropertyValue::Int(value) => serde_json::json!(value),
+            PropertyValue::Float(value) if value.is_finite() => serde_json::json!(value),
+            _ => return Err("Widget slot expects authored text and finite numeric fields".into()),
+        }
+    } else {
+        let node = producer(graph, pin)?.map(|output| graph.pins[&output].node)
+            .ok_or("Widget slot field has no authored value")?;
+        let entries = fields(graph, node)?.ok_or("Computed Widget slots must remain graph expressions")?;
+        let mut result = serde_json::Map::new();
+        for (name, _, field) in entries {
+            result.insert(name, widget_authored_value(graph, field, active, depth + 1)?);
+        }
+        serde_json::Value::Object(result)
+    };
+    active.remove(&pin);
+    Ok(value)
+}
+fn widget_kind(node: &InterfaceAuthoringNode) -> Result<rvn_ui::programmable::ComponentKind, String> {
+    use rvn_ui::programmable::ComponentKind;
+    if node.computed || node.id.is_none() { return Err("Widget editing needs an authored component with a stable identity".into()); }
+    match node.kind.as_deref() {
+        Some("column") => Ok(ComponentKind::Column),
+        Some("row") => Ok(ComponentKind::Row),
+        Some("button") => Ok(ComponentKind::Button),
+        Some("text") => Ok(ComponentKind::Text),
+        _ => Err("This component kind has no admitted WidgetV1 authoring contract".into()),
+    }
+}
+fn widget_validate_slot(slot: &rvn_ui::programmable::ParentSlot, parent: rvn_ui::programmable::ComponentKind) -> Result<(), String> {
+    use rvn_ui::programmable::{ComponentKind, ParentSlot};
+    let padding = match (slot, parent) {
+        (ParentSlot::VerticalBox { padding, size, .. }, ComponentKind::Column)
+        | (ParentSlot::HorizontalBox { padding, size, .. }, ComponentKind::Row) => {
+            let weight = size.weight();
+            if !weight.is_finite() || !(0.0..=16384.0).contains(&weight) { return Err("Invalid Widget fill weight".into()); }
+            padding
+        }
+        (ParentSlot::Button { padding, .. }, ComponentKind::Button) => padding,
+        _ => return Err("Widget slot type differs from its actual parent".into()),
+    };
+    if [padding.left, padding.top, padding.right, padding.bottom].iter().any(|value| !value.is_finite() || value.abs() > 16384.0) {
+        return Err("Invalid Widget slot padding".into());
+    }
+    Ok(())
+}
+fn widget_slot(graph: &GraphDocument, node: NodeId, parent: rvn_ui::programmable::ComponentKind) -> Result<rvn_ui::programmable::ParentSlot, String> {
+    let pin = widget_property_pin(graph, node, &["parent_slot"])?.ok_or("Widget child has no authored parent slot")?;
+    let slot = serde_json::from_value(widget_authored_value(graph, pin, &mut BTreeSet::new(), 0)?)
+        .map_err(|error| format!("Invalid authored Widget slot: {error}"))?;
+    widget_validate_slot(&slot, parent)?;
+    Ok(slot)
+}
+fn widget_context(graph: &GraphDocument, returned: NodeId) -> Result<InterfaceAuthoringNode, String> {
+    if !matches!(graph.kind, GraphKind::Screen { .. }) { return Err("Widget authoring requires its real Screen graph".into()); }
+    let tree = graph.interface_tree(returned)?;
+    widget_kind(&tree)?;
+    let marker = widget_property_pin(graph, tree.node, &["layout_contract"])?.ok_or("Widget authoring requires an explicit root layout contract")?;
+    if literal(graph, marker) != Some(PropertyValue::String("widget_v1".into())) {
+        return Err("Widget authoring requires the authored WidgetV1 root contract".into());
+    }
+    // An ambiguous reused component cannot acquire two independent parents.
+    // Shared style/value producers are not component identities and stay legal.
+    fn unique(tree: &InterfaceAuthoringNode, nodes: &mut BTreeSet<NodeId>, ids: &mut BTreeSet<String>) -> Result<(), String> {
+        if !nodes.insert(tree.node) || tree.id.as_ref().is_some_and(|id| !ids.insert(id.clone())) {
+            return Err("Widget tree has ambiguous component ownership or identity".into());
+        }
+        for child in &tree.children { unique(child, nodes, ids)?; }
+        Ok(())
+    }
+    unique(&tree, &mut BTreeSet::new(), &mut BTreeSet::new())?;
+    Ok(tree)
+}
+fn widget_owned_branch(graph: &GraphDocument, tree: &InterfaceAuthoringNode, target: NodeId) -> Result<(), String> {
+    if widget_find(tree, target).is_none() { return Err("Widget component is outside the returned definition".into()); }
+    if graph.nodes[&tree.node].pins.iter().filter_map(|pin| graph.pins.get(pin))
+        .filter(|pin| pin.direction == PinDirection::Output && !pin.value_type.is_execution())
+        .any(|pin| graph.edges.values().filter(|edge| edge.output == pin.id).count() > 1) {
+        return Err("Shared component ownership must be resolved in the graph before editing its parent relation".into());
+    }
+    if tree.node != target {
+        let branch = tree.children.iter().find(|child| widget_find(child, target).is_some()).unwrap();
+        widget_owned_branch(graph, branch, target)?;
+    }
+    Ok(())
+}
+fn widget_write_slot(graph: &mut GraphDocument, node: NodeId, slot: &rvn_ui::programmable::ParentSlot) -> Result<(), String> {
+    // The caller has already proved that the old slot is authored. Copy-on-
+    // write dictionary operations preserve all other consumers and expressions.
+    graph.interface_componentize(node)?;
+    graph.remove_dictionary_entry(node, "properties", &["parent_slot"])?;
+    fn write(graph: &mut GraphDocument, node: NodeId, path: &mut Vec<String>, value: &serde_json::Value) -> Result<(), String> {
+        match value {
+            serde_json::Value::Object(fields) => {
+                for (key, value) in fields { path.push(key.clone()); write(graph, node, path, value)?; path.pop(); }
+            }
+            serde_json::Value::String(value) => graph.set_component_property(node, &path.iter().map(String::as_str).collect::<Vec<_>>(), PropertyValue::String(value.clone()))?,
+            serde_json::Value::Number(value) => graph.set_component_property(node, &path.iter().map(String::as_str).collect::<Vec<_>>(), PropertyValue::Float(value.as_f64().ok_or("Invalid Widget slot number")?))?,
+            _ => return Err("Invalid typed Widget slot representation".into()),
+        }
+        Ok(())
+    }
+    write(graph, node, &mut vec!["parent_slot".into()], &serde_json::to_value(slot).map_err(|error| error.to_string())?)
+}
+fn widget_validate_edit(graph: &GraphDocument, returned: NodeId) -> Result<(), String> {
+    let _ = widget_context(graph, returned)?;
+    if let Some(error) = graph.validate().into_iter().find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error) {
+        return Err(error.message);
+    }
+    Ok(())
+}
+
+impl GraphDocument {
+    /// Read the same authored parent-slot contract used by its atomic setter.
+    /// Dynamic slot expressions remain connected and require graph editing.
+    pub fn interface_widget_parent_slot(&self, returned: NodeId, node: NodeId) -> Result<rvn_ui::programmable::ParentSlot, String> {
+        let tree = widget_context(self, returned)?;
+        let child = widget_find(&tree, node).ok_or("Widget child is absent")?;
+        widget_kind(child)?;
+        let (parent, _) = widget_parent(&tree, node).ok_or("The Widget root has no parent slot")?;
+        let parent = widget_kind(widget_find(&tree, parent).unwrap())?;
+        widget_slot(self, node, parent)
+    }
+
+    /// Set a child's real typed slot in its Screen expression graph. Computed
+    /// slot fields are protected; dynamic content/style expressions stay live.
+    /// This publishes one validated clone, with no separate Designer history.
+    pub fn interface_widget_set_parent_slot(&mut self, returned: NodeId, node: NodeId, slot: rvn_ui::programmable::ParentSlot) -> Result<(), String> {
+        let tree = widget_context(self, returned)?;
+        let child = widget_find(&tree, node).ok_or("Widget child is absent")?;
+        widget_kind(child)?;
+        let (parent, _) = widget_parent(&tree, node).ok_or("The Widget root has no parent slot")?;
+        let parent = widget_kind(widget_find(&tree, parent).unwrap())?;
+        widget_validate_slot(&slot, parent)?;
+        if widget_slot(self, node, parent)? == slot { return Ok(()); }
+        widget_owned_branch(self, &tree, node)?;
+        let mut next = self.clone();
+        widget_write_slot(&mut next, node, &slot)?;
+        widget_validate_edit(&next, returned)?;
+        *self = next;
+        Ok(())
+    }
+
+    /// Widget-only reparenting. A receiving Button refuses an occupied or
+    /// computed child collection before detachment. A successful move replaces
+    /// only the moved child's slot with the receiving parent's typed defaults.
+    /// The historical interface_reparent contract remains unchanged.
+    pub fn interface_widget_reparent(&mut self, returned: NodeId, node: NodeId, new_parent: NodeId) -> Result<NodeId, String> {
+        use rvn_ui::programmable::{ComponentKind, ParentSlot};
+        let tree = widget_context(self, returned)?;
+        let child = widget_find(&tree, node).ok_or("Widget child is absent")?;
+        widget_kind(child)?;
+        if widget_find(child, new_parent).is_some() { return Err("Widget cannot move into itself or a descendant".into()); }
+        let target = widget_find(&tree, new_parent).ok_or("Widget target is absent")?;
+        let target_kind = widget_kind(target)?;
+        let (old_parent, index) = widget_parent(&tree, node).ok_or("The Widget root cannot be reparented")?;
+        // A same-parent request is an exact no-op, preserving its actual slot.
+        if old_parent == new_parent { return Ok(node); }
+        if target.computed_children.is_some() { return Err("Computed Widget children must remain graph expressions".into()); }
+        if target_kind == ComponentKind::Button && !target.children.is_empty() { return Err("Occupied Widget Button refuses AddChild before detachment".into()); }
+        let old_kind = widget_kind(widget_find(&tree, old_parent).unwrap())?;
+        let _ = widget_slot(self, node, old_kind)?;
+        widget_owned_branch(self, &tree, node)?;
+        widget_owned_branch(self, &tree, new_parent)?;
+        // Copying a shared old collection while changing its child's slot
+        // would also require a new component identity. Refuse that ambiguous
+        // ownership instead of altering another consumer or duplicating its ID.
+        let mut old = self.clone();
+        old.interface_componentize(old_parent)?;
+        let children = old.pin_by_key(old_parent, "children").ok_or("Missing Widget children")?.id;
+        if let Some(output) = producer(&old, children)? {
+            if old.edges.values().filter(|edge| edge.output == output).count() > 1 {
+                return Err("Shared child collection must be resolved in the graph before changing its child's parent slot".into());
+            }
+        }
+        let slot = ParentSlot::for_parent(target_kind)?;
+        let mut next = self.clone();
+        next.interface_componentize(old_parent)?;
+        next.interface_componentize(new_parent)?;
+        let owned = next.own_list_input_node(old_parent, "children", index)?;
+        next.remove_list_input(old_parent, "children", index)?;
+        widget_write_slot(&mut next, owned, &slot)?;
+        next.append_list_input(new_parent, "children", owned, "value")?;
+        widget_validate_edit(&next, returned)?;
+        *self = next;
+        Ok(owned)
     }
 }

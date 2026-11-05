@@ -77,6 +77,7 @@ fn copy_producer(graph: &mut GraphDocument, consumer: PinId) -> Result<Option<No
     let new = graph.add_node(old.kind, [old.position[0], old.position[1] + 120.0]);
     graph.nodes.get_mut(&new).unwrap().properties = old.properties;
     graph.nodes.get_mut(&new).unwrap().title_override = old.title_override;
+    graph.nodes.get_mut(&new).unwrap().annotation = old.annotation;
     let mut replacement = None;
     for id in old.pins {
         let old = graph.pins[&id].clone();
@@ -91,6 +92,8 @@ fn copy_producer(graph: &mut GraphDocument, consumer: PinId) -> Result<Option<No
             )
             .map_err(|error| error.to_string())?;
         graph.pins.get_mut(&new_pin).unwrap().default_value = old.default_value;
+        graph.pins.get_mut(&new_pin).unwrap().text_localization = old.text_localization;
+        graph.pins.get_mut(&new_pin).unwrap().text_table_reference = old.text_table_reference;
         if id == output {
             replacement = Some(new_pin);
         }

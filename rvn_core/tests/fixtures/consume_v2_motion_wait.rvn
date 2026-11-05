@@ -1,0 +1,15 @@
+function target() {local draw = random(1, 1) return "background"}
+function entrance() {local draw = random(1, 1) return motion_tween(1, {}, {"x":100}, "linear")}
+scene label start
+scene "test.png"
+flow.consume_v2("scene:start", "play") {
+    capture "target" = target()
+    capture "definition" = entrance()
+    motion.play(__rvn_captured_v1("target"), __rvn_captured_v1("definition"))
+}
+flow.consume_v2("scene:start", "wait") {
+    capture "target" = target()
+    motion.wait(__rvn_captured_v1("target"))
+}
+flow.consume_v2("scene:start", "finished") {set result = 12}
+"done"

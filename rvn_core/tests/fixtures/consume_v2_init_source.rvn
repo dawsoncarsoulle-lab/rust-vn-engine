@@ -1,0 +1,18 @@
+init {
+    set order = 0
+    flow.consume_v2("same_source", "init_sequence") {
+        flow.sequence() {
+            {flow.consume_v2("same_source", "first") {
+                inspect "i" = __rvn_string_table_text_name(__rvn_literal_name("asset:Table"), "hello")
+                set order = order * 10 + 1
+            }}
+            {flow.consume_v2("same_source", "second") {
+                inspect "i" = __rvn_invariant_text("literal")
+                set retained = __rvn_terminal_v1("i", "table_id")
+            }}
+        }
+    }
+}
+scene label start
+flow.consume_v2("scene:start", "first") {local result = order}
+"done"

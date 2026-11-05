@@ -23,6 +23,12 @@ use serde::{Deserialize, Serialize};
 /// Un nœud d'expression.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Expr {
+    /// Live read of the same admitted instance cell, never a frozen capture.
+    StandardMacroData {
+        site: Box<crate::scheduled_source::standard_macro_contract::Site>,
+        output: crate::scheduled_source::standard_macro_contract::DataOutput,
+        pin: u64,
+    },
     // ── Littéraux ─────────────────────────────────────────────────────────────
     Int(i64),
     Float(f32),
@@ -49,6 +55,9 @@ pub enum Expr {
         name: String,
         args: Vec<Expr>,
     },
+    /// Qualified value call. A caller identity is deliberately absent: the real
+    /// computation/debugger frame supplies private scope, never source claims.
+    LibraryCall { call: crate::function_library_program1023::QualifiedLibraryCall },
     /// List literal: [1, 2, "three"]
     ListLit(Vec<Expr>),
     /// Index access: arr[0]

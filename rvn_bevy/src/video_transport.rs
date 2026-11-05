@@ -1,1 +1,1 @@
-pub(crate) use rvn_media::transport::{Packet, Worker};
+pub(crate) use rvn_media::transport::{Packet, Worker,DecodedProof};

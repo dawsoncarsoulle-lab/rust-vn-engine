@@ -19,6 +19,10 @@ pub struct InputSaveContext<'w> {
     paths: Res<'w, ProjectPaths>,
     confirmation: ResMut<'w, crate::systems::save_menu::SaveConfirmation>,
     thumbnails: ResMut<'w, crate::save_thumbnails::SaveThumbnails>,
+    reveal_binding: Option<Res<'w,crate::display_reveal::DialogueRevealBinding>>,
+    requests: Option<ResMut<'w,crate::checkpoint_requests::CheckpointRequests>>,
+    preview_receipts: Option<ResMut<'w,crate::editor_preview_input::Receipts>>,
+    input:crate::runtime_restart::InputAccess<'w>,
 }
 
 /// The core stack includes the currently displayed narrative anchor. The game
@@ -29,6 +33,11 @@ pub(crate) fn can_rollback<R:rvn_core::Renderer>(engine:&rvn_core::Engine<R>)->b
 }
 pub(crate) fn rollback_game<R:rvn_core::Renderer>(engine:&mut rvn_core::Engine<R>)->bool {
     if !can_rollback(engine){return false;}
+    if engine.state.game_tasks.is_some(){return engine.preview_game_audio_rollback_source().ok().flatten().is_some_and(|source|engine.rollback_from_audio_source(&source).unwrap_or(false));}
+    if engine.state.scene_execution.is_some() {
+        return engine.preview_game_audio_rollback().ok().flatten()
+            .is_some_and(|(source,_)|engine.rollback_from_audio_source(&source).unwrap_or(false));
+    }
     let current=if engine.history.entries().last().is_some_and(|entry|entry.display.is_some()&&entry.state.pc==engine.state.pc) {
         engine.history.pop()
     } else {None};
@@ -39,6 +48,8 @@ pub(crate) fn rollback_game<R:rvn_core::Renderer>(engine:&mut rvn_core::Engine<R
 }
 pub(crate) fn present_rollback(engine:&mut VnEngine,render:&mut VnRenderState,imagemap:&mut ImagemapState,
     focus:&mut ChoiceFocus,typing:&mut TypewriterState,events:&mut EventWriter<VnCommand>) {
+    // Modern restore is presented only by the approved complete batch.
+    if engine.0.state.scene_execution.is_some()||engine.0.state.game_tasks.is_some(){return;}
     render.choice_options.clear();imagemap.clear();focus.clear();typing.skip();
     let mut pending=engine.0.renderer.take_pending();
     for command in &mut pending {
@@ -51,6 +62,31 @@ pub(crate) fn present_rollback(engine:&mut VnEngine,render:&mut VnRenderState,im
     for command in pending{events.send(command);}
 }
 
+pub(crate) fn story_keyboard_systems() -> bevy::ecs::schedule::SystemConfigs {
+    (
+        input_system.run_if(crate::scene_publication::story_ready).run_if(in_state(VnState::Waiting)),
+        finished_quick_load_system.run_if(crate::scene_publication::story_ready).run_if(in_state(VnState::Finished)),
+    ).into_configs()
+}
+
+/// Completion has no narrative interaction. Only reload may use this lane;
+/// its receipt remains bound to the current completed image and Core position.
+pub(crate) fn finished_quick_load_system(
+    keys: Res<ButtonInput<KeyCode>>,
+    preview: crate::editor_preview_input::StoryContext,
+    programmable: Res<crate::programmable_ui::Screens>,
+    ui: Query<&Interaction, Or<(With<crate::menu_documents::MenuElement>,
+        With<crate::menu_documents::UiInputBlocker>, With<crate::menu_documents::Scrollbar>)>>,
+    mut events: EventWriter<PlayerInput>,
+    mut receipts: ResMut<crate::editor_preview_input::Receipts>,
+) {
+    if !keys.just_pressed(KeyCode::F6) || programmable.keyboard_consumed || programmable.pointer_consumed
+        || ui.iter().any(|interaction| *interaction == Interaction::Pressed) { return; }
+    let Some(source) = preview.terminal_load_source() else { return; };
+    let id = events.send(PlayerInput::QuickLoad).id;
+    receipts.remember_terminal_load(id, source);
+}
+
 pub fn input_system(
     cameras: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -58,7 +94,7 @@ pub fn input_system(
     mut scroll_events: EventReader<bevy::input::mouse::MouseWheel>,
     windows: Query<&Window>,
     render_state: Res<VnRenderState>,
-    imagemap_state: Res<ImagemapState>,
+    context:(crate::editor_preview_input::StoryContext,crate::runtime_restart::InputAccess),
     tw_state: Res<TypewriterState>,
     mut choice_focus: ResMut<ChoiceFocus>,
     mut skip_mode: ResMut<SkipMode>,
@@ -75,6 +111,9 @@ pub fn input_system(
     custom_menus: Res<crate::menu_documents::Menus>,
     programmable: Res<crate::programmable_ui::Screens>,
 ) {
+    let(preview,input)=context;
+    let imagemap_state=preview.imagemap();
+    if !preview.permitted() || !input.available() {scroll_events.clear();return;}
     if programmable.pointer_consumed || programmable.keyboard_consumed {
         scroll_events.clear();
         return;
@@ -123,7 +162,8 @@ pub fn input_system(
                     && cursor.cmplt(min + node.size()).all()
             })
         });
-    for event in scroll_events.read() {
+    for (event,id) in scroll_events.read_with_id() {
+        if !input.accepts::<bevy::input::mouse::MouseWheel>(id.id){continue;}
         if event.y > 0.0 && !over_scroll {
             scrolled_up = true;
         }
@@ -143,7 +183,8 @@ pub fn input_system(
                     let world = cameras.get_single().ok().and_then(|(camera, transform)| {
                         camera.viewport_to_world_2d(transform, pos)
                     });
-                    if let Some(idx) = world.and_then(|p| imagemap_state.hit_test_world(p)) {
+                    let selected=preview.pointer_hit().unwrap_or_else(||world.and_then(|p|imagemap_state.hit_test_world(p)));
+                    if let Some(idx)=selected {
                         player_events.send(PlayerInput::Choose(idx));
                     }
                 }
@@ -158,6 +199,9 @@ pub fn input_system(
         if !custom_menus.choices_interactive() {
             choice_focus.clear();
             return;
+        }
+        if mouse.just_pressed(MouseButton::Left) {
+            if let Some(index)=preview.choice_hit().filter(|index|*index<n) {choice_focus.clear();player_events.send(PlayerInput::Choose(index));return;}
         }
         let digit_keys = [
             (KeyCode::Digit1, 0usize),
@@ -269,7 +313,11 @@ pub fn player_input_system(
         events.clear();
         return;
     }
-    for input in events.read() {
+    for (input,id) in events.read_with_id() {
+        if !saves.input.accepts::<PlayerInput>(id.id){continue;}
+        if saves.preview_receipts.as_deref_mut().is_some_and(|receipts|!receipts.admit(id.id,&engine,input)){continue;}
+        if engine.0.renderer.scene_batch_pending() || saves.requests.as_ref().is_some_and(|requests|requests.blocked()) { break; }
+        if engine.0.renderer.scene_frame_failed && matches!(input,PlayerInput::Advance|PlayerInput::Choose(_)|PlayerInput::SkipTypewriter|PlayerInput::Rollback) {continue;}
         if saves.confirmation.active() {
             continue;
         }
@@ -281,8 +329,18 @@ pub fn player_input_system(
         {
             continue;
         }
+        if matches!(input,PlayerInput::Advance|PlayerInput::Choose(_)|PlayerInput::QuickSave|PlayerInput::SkipTypewriter) {
+            if let Err(error)=crate::display_reveal::flush(&mut engine,&tw_state,saves.reveal_binding.as_deref()) {
+                engine.0.renderer.scene_frame_failed=true;error_msg.0=error;next_state.set(VnState::Error);return;
+            }
+        }
         match input {
             PlayerInput::Advance => {
+                if crate::editor_debugger::enabled(&engine){
+                    let Some(source)=engine.0.preview_input_source()else{continue;};
+                    if let Err(error)=crate::editor_debugger::player(&engine,rvn_core::engine::DebugOperation::Advance(source),false){error_msg.0=error;next_state.set(VnState::Error);return;}
+                    break;
+                }
                 if let Err(e) = engine.0.advance_dialogue() {
                     let script_err = ScriptError::from_runtime(&e);
                     error!("{script_err}");
@@ -295,6 +353,14 @@ pub fn player_input_system(
             }
 
             PlayerInput::Choose(idx) => {
+                if crate::editor_debugger::enabled(&engine){
+                    let Some(source)=engine.0.preview_input_source()else{continue;};
+                    let operation=if engine.0.displayed_interaction().ok().flatten().is_some_and(|interaction|matches!(interaction,rvn_core::Interaction::Imagemap{..})){
+                        rvn_core::engine::DebugOperation::Hotspot{source,index:*idx}
+                    }else{rvn_core::engine::DebugOperation::Choice{source,index:*idx}};
+                    if let Err(error)=crate::editor_debugger::player(&engine,operation,true){error_msg.0=error;next_state.set(VnState::Error);return;}
+                    break;
+                }
                 if let Err(e) = engine.0.submit_selection(*idx) {
                     let script_err = ScriptError::from_runtime(&e);
                     error!("{script_err}");
@@ -314,9 +380,15 @@ pub fn player_input_system(
                 if let Ok(mut text) = dialogue_text_query.get_single_mut() {
                     apply_visible_sections(&mut text, &tw_state);
                 }
+                if let Err(error)=crate::display_reveal::flush(&mut engine,&tw_state,saves.reveal_binding.as_deref()) {
+                    engine.0.renderer.scene_frame_failed=true;error_msg.0=error;next_state.set(VnState::Error);return;
+                }
             }
 
             PlayerInput::Rollback => {
+                match crate::checkpoint_requests::defer_rollback(&engine,saves.requests.as_deref_mut()) {
+                    Ok(true)=>return,Ok(false)=>{},Err(error)=>{error_msg.0=error;next_state.set(VnState::Error);return;}
+                }
                 if rollback_game(&mut engine.0) {
                     present_rollback(&mut engine,&mut render_state,&mut imagemap_state,&mut choice_focus,&mut tw_state,&mut vn_events);
                     next_state.set(VnState::Waiting);
@@ -349,8 +421,11 @@ pub fn player_input_system(
                     crate::systems::save_menu::SUPPORTED_SLOTS,
                 ) {
                     Ok(mgr) => {
-                        if let Err(e) = mgr.save_quicksave(
-                            &engine.0.state,
+                        match crate::checkpoint_requests::defer_save(&engine,saves.requests.as_deref_mut(),
+                            crate::checkpoint_requests::SaveDestination::Quick,"Quicksave".into(),"script.rvn".into(),mgr.load_quicksave().ok()) {
+                            Ok(true)=>return,Ok(false)=>{},Err(error)=>{error_msg.0=error;next_state.set(VnState::Error);return;}
+                        }
+                        if let Err(e) = engine.0.save_quicksave(&mgr,
                             "Quicksave".to_string(),
                             "script.rvn".to_string(),
                         ) {
@@ -403,6 +478,10 @@ pub fn player_input_system(
                 ) {
                     Ok(mgr) => match mgr.load_quicksave() {
                         Ok(data) => {
+                            let resume=LastResumeTarget::quicksave(data.timestamp);
+                            match crate::checkpoint_requests::defer_load(&engine,saves.requests.as_deref_mut(),&data,Some(resume),true) {
+                                Ok(true)=>return,Ok(false)=>{},Err(error)=>{error_msg.0=error;next_state.set(VnState::Error);return;}
+                            }
                             match engine.0.load_data(data) {
                                 Ok(rvn_core::engine::LoadCompatibility::LegacyUnchecked) => warn!("Ancienne sauvegarde : compatibilité après modification de l’histoire non vérifiable"),
                                 Ok(_) => {},

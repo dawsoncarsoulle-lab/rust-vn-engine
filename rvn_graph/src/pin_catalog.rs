@@ -62,8 +62,16 @@ fn transition() -> PinDefinition {
     )
 }
 
+/// Extra real outputs of the explicitly selected demand contract only.
+/// Historical ForEach catalogue/schema/pins are unchanged.
+pub(crate) fn native_loop_output_definitions() -> Vec<PinDefinition> {
+    vec![output("array_index", "Array Index", ValueType::Int),
+         output("array_element", "Array Element", ValueType::Any)]
+}
+
 pub(crate) fn pin_definitions(kind: NodeKind) -> Vec<PinDefinition> {
     use NodeKind as Kind;
+    if let Some(pins) = table_pin_definitions(kind, crate::StringTableQueryContract::NameV2) { return pins; }
     if let Some((_, keys)) = kind.menu_constructor() {
         let mut pins: Vec<_> = keys.iter().map(|key| match (kind, *key) {
             (_, "slot" | "index" | "token") | (Kind::MenuSavePage, "page") => input_default(key, key, ValueType::Int, PropertyValue::Int(if *key == "slot" || *key == "page" {1} else {0})),
@@ -78,6 +86,35 @@ pub(crate) fn pin_definitions(kind: NodeKind) -> Vec<PinDefinition> {
         pins.push(output("request", "Demande", ValueType::MenuRequest)); return pins;
     }
     match kind {
+        Kind::WidgetClassValue => vec![output("value", "Classe", ValueType::WidgetClass)],
+        Kind::WidgetObjectClass => vec![input("object", "Object", ValueType::WidgetObject), output("value", "Return Value", ValueType::WidgetClass)],
+        Kind::WidgetAddToViewport => {let mut pins=exec_in_out();pins.extend([input("object","Target",ValueType::WidgetObject),input_default("z_order","ZOrder",ValueType::Int,PropertyValue::Int(0))]);pins},
+        Kind::WidgetRemoveFromParent => {let mut pins=exec_in_out();pins.push(input("object","Target",ValueType::WidgetObject));pins},
+        Kind::WidgetCreate => {
+            let mut pins = exec_in_out();
+            pins.extend([
+                input("class", "Classe", ValueType::WidgetClass),
+                input_default("arguments", "Arguments", ValueType::List(Box::new(ValueType::Any)), PropertyValue::StringList(vec![])),
+                output("value_out", "Valeur de retour", ValueType::WidgetObject),
+            ]);
+            pins
+        }
+        Kind::TextFromStringTable => vec![
+            input_default("table", "Table Id", ValueType::Name, PropertyValue::Name(crate::NameDefault::default())),
+            input_default("key", "Key", ValueType::String, PropertyValue::String(String::new())),
+            output("result", "Return Value", ValueType::InterpolatedText),
+        ],
+        Kind::GetStringTableIdAndKey => vec![
+            input("text", "Text", ValueType::InterpolatedText),
+            output("valid", "Return Value", ValueType::Bool),
+            output("table_id", "Table Id", ValueType::Name),
+            output("key", "Key", ValueType::String),
+        ],
+        Kind::StringTableId => vec![input_default("asset", "Table de chaînes", ValueType::Asset(AssetKind::StringTable), PropertyValue::String(String::new())), output("result", "Return Value", ValueType::String)],
+        Kind::StringTableAsset => vec![output("value", "", ValueType::Asset(AssetKind::StringTable))],
+        Kind::StringTableRegistered | Kind::StringTableEntryRegistered
+        | Kind::StringTableNamespace | Kind::StringTableSource | Kind::StringTableMetadata
+        | Kind::RegisteredStringTables | Kind::StringTableKeys | Kind::StringTableMetadataIds => unreachable!("Table query handled above"),
         Kind::MenuExecute => vec![input("exec_in", "", ValueType::Execution),
             input("request", "Demande", ValueType::MenuRequest), output("exec_out", "", ValueType::Execution)],
         Kind::MenuAction | Kind::MenuStartScene | Kind::MenuOpenPage | Kind::MenuSlot | Kind::MenuProtect
@@ -632,9 +669,27 @@ pub(crate) fn pin_definitions(kind: NodeKind) -> Vec<PinDefinition> {
             input("exec_in", "", ValueType::Execution),
             output("exec_out", "", ValueType::Execution),
         ],
+        Kind::UnitCall => exec_in_out(),
+        Kind::UnitReturn => vec![input("exec_in", "", ValueType::Execution)],
         Kind::FunctionReturn => vec![
             input("exec_in", "", ValueType::Execution),
             input("value", "Valeur retournée", ValueType::Any),
+        ],
+        Kind::DoOnce|Kind::DoN|Kind::FlipFlop|Kind::Gate=>crate::standard_macros_1020::pins(kind),
+        Kind::Sequence => vec![
+            input("exec_in", "", ValueType::Execution),
+            output("then_0", "Puis 0", ValueType::Execution),
+            output("then_1", "Puis 1", ValueType::Execution),
+            output("completed", "Après toutes les sorties", ValueType::Execution),
+        ],
+        Kind::ForLoopWithBreak => vec![
+            input("exec_in", "", ValueType::Execution),
+            input_default("first", "Premier indice", ValueType::Int, PropertyValue::Int(0)),
+            input_default("last", "Dernier indice inclus", ValueType::Int, PropertyValue::Int(0)),
+            {let mut p=input("break", "Arrêter la boucle", ValueType::Execution);p.cardinality=PinCardinality::Many;p},
+            output("body", "Corps de boucle", ValueType::Execution),
+            output("index", "Indice", ValueType::Int),
+            output("completed", "Terminé", ValueType::Execution),
         ],
         Kind::While => vec![
             input("exec_in", "", ValueType::Execution),
@@ -727,7 +782,7 @@ pub(crate) fn pin_definitions(kind: NodeKind) -> Vec<PinDefinition> {
                 "condition",
                 "Condition",
                 ValueType::Bool,
-                PropertyValue::Bool(false),
+                PropertyValue::Bool(true),
             ),
             output("then", "Vrai", ValueType::Execution),
             output("else", "Faux", ValueType::Execution),
@@ -1035,9 +1090,21 @@ pub(crate) fn pin_definitions(kind: NodeKind) -> Vec<PinDefinition> {
         | Kind::TransitionWipe
         | Kind::TransitionBlur => vec![output("value", "", ValueType::Transition)],
         Kind::VariableGet => vec![output("value", "", ValueType::Any)],
+        Kind::ConvertBoolToInt => vec![
+            input_default("value", "", ValueType::Bool, PropertyValue::Bool(false)),
+            output("result", "", ValueType::Int),
+        ],
+        Kind::ConvertBoolToFloat => vec![
+            input_default("value", "", ValueType::Bool, PropertyValue::Bool(false)),
+            output("result", "", ValueType::Float),
+        ],
         Kind::ConvertIntToFloat => vec![
             input("value", "", ValueType::Int),
             output("result", "", ValueType::Float),
+        ],
+        Kind::ConvertIntToBool => vec![
+            input_default("value", "", ValueType::Int, PropertyValue::Int(0)),
+            output("result", "", ValueType::Bool),
         ],
         Kind::ConvertNumberToText => vec![
             input("value", "", ValueType::Float),
@@ -1054,6 +1121,14 @@ pub(crate) fn pin_definitions(kind: NodeKind) -> Vec<PinDefinition> {
         Kind::ConvertTextToString => vec![
             input("value", "Texte en entrée", ValueType::InterpolatedText),
             output("result", "Valeur de retour", ValueType::String),
+        ],
+        Kind::ConvertStringToName => vec![
+            input_default("value", "", ValueType::String, PropertyValue::String(String::new())),
+            output("result", "", ValueType::Name),
+        ],
+        Kind::ConvertNameToString => vec![
+            input_default("value", "", ValueType::Name, PropertyValue::Name(crate::NameDefault::default())),
+            output("result", "", ValueType::String),
         ],
         Kind::LabelValue => vec![output("value", "Label", ValueType::Label)],
         Kind::PositionValue => vec![output("value", "Position", ValueType::Position)],
@@ -1133,4 +1208,19 @@ pub(crate) fn pin_definitions(kind: NodeKind) -> Vec<PinDefinition> {
         ],
         Kind::BranchEnd => vec![input("exec_in", "", ValueType::Execution)],
     }
+}
+
+pub(crate) fn table_pin_definitions(kind: NodeKind, contract: crate::StringTableQueryContract) -> Option<Vec<PinDefinition>> {
+    if kind == NodeKind::StringTableId {
+        return Some(vec![input_default("asset", "Table de chaînes", ValueType::Asset(AssetKind::StringTable), PropertyValue::String(String::new())),
+            output("result", "Return Value", if contract == crate::StringTableQueryContract::NameV2 { ValueType::Name } else { ValueType::String })]);
+    }
+    let (_, keys, result) = kind.string_table_query_with_contract(contract)?;
+    let mut pins: Vec<_> = keys.iter().map(|key| {
+        let ty = contract.input_type(key);
+        let value = if ty == ValueType::Name { PropertyValue::Name(crate::NameDefault::default()) } else { PropertyValue::String(String::new()) };
+        input_default(key, match *key { "table" => "Identifiant de table", "key" => "Clé", _ => "Identifiant de métadonnée" }, ty, value)
+    }).collect();
+    pins.push(output("result", "Return Value", result));
+    Some(pins)
 }

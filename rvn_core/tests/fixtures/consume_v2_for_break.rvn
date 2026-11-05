@@ -1,0 +1,26 @@
+function first() {local draw=random(1,1) return 1}
+function last() {local draw=random(1,1) return 3}
+function collection() {local draw=random(1,1) return [1,2,3]}
+scene label start
+local total=0
+flow.consume_v2("scene:start","range") {
+    capture "first"=first()
+    capture "last"=last()
+    flow.for_loop(i,__rvn_captured_v1("first"),__rvn_captured_v1("last")) {
+        flow.consume_v2("scene:start","while") {
+            capture "check"=random(1,1)
+            while true {
+                flow.consume_v2("scene:start","each") {
+                    capture "items"=collection()
+                    for item in __rvn_captured_v1("items") {
+                        flow.consume_v2("scene:start","increment") {capture "draw"=random(1,1) local total=total+item}
+                        if item==2 {flow.break()}
+                    }
+                }
+                set total=999
+            }
+        }
+        set total=999
+    }
+}
+"done"

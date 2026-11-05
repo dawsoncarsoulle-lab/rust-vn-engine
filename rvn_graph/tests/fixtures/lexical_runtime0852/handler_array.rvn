@@ -1,0 +1,10 @@
+function supplier0852(){local draw=random(1,1) return [11,22,33]}
+function first0852(){local draw=random(1,1) return 0}
+function last0852(){local draw=random(1,1) return 2}
+init{set observed0852=0}
+handler target0852(event){local seen=0 for item in supplier0852(){set seen=item} set observed0852=seen}
+screen panel(marker){return component("root","column",{},[component("act","button",{"text":marker,"events":{"click":"target0852"}},[])])}
+scene label start
+ui.open("panel",["actual handler"],false,1)
+"Ready0852"
+return

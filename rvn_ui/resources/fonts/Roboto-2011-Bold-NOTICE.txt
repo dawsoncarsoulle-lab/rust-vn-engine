@@ -1,0 +1,14 @@
+Roboto Bold, version 1.00000; 2011.
+Font data copyright Google 2011 (embedded font notice).
+Font data copyright Google 2012 (distributed license notice).
+Roboto is a trademark of Google.
+
+Licensed under Apache License 2.0; see Roboto-2011-Bold-LICENSE.txt.
+The font is redistributed unchanged, renamed as a resource file only.
+SHA-256: 24571503140760240924DCD1238F77E7CD0454C0D8B0793990CEFA2FAD71471F
+
+Source: locally installed UE 5.8 Engine/Content/Slate/Fonts/Roboto-Bold.ttf.
+Its Roboto.tps maps this third-party font directory to ROBOTO_License.txt.
+No separate Roboto NOTICE file is present in that distributed font directory.
+This attribution applies only to this third-party font, not Unreal code or other assets.
+Include this notice and Roboto-2011-Bold-LICENSE.txt when distributing the font.

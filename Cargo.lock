@@ -3840,12 +3840,15 @@ dependencies = [
  "getrandom 0.3.4",
  "js-sys",
  "libloading 0.8.9",
+ "rodio",
  "rvn_core",
+ "rvn_graph",
  "rvn_media",
  "rvn_parser",
  "rvn_ui",
  "serde",
  "serde_json",
+ "sha2",
  "toml",
  "uuid",
  "wasm-bindgen",
@@ -3869,6 +3872,7 @@ dependencies = [
  "rvn_parser",
  "rvn_ui",
  "serde",
+ "serde_json",
  "sha2",
  "toml",
 ]
@@ -3878,10 +3882,14 @@ name = "rvn_core"
 version = "0.1.0"
 dependencies = [
  "js-sys",
+ "rodio",
+ "rvn_graph",
+ "rvn_media",
  "rvn_parser",
  "rvn_ui",
  "serde",
  "serde_json",
+ "sha2",
  "web-sys",
 ]
 
@@ -3889,11 +3897,13 @@ dependencies = [
 name = "rvn_graph"
 version = "0.1.0"
 dependencies = [
+ "logos",
  "rvn_core",
  "rvn_parser",
  "rvn_ui",
  "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]
@@ -3915,6 +3925,19 @@ version = "0.1.0"
 dependencies = [
  "ffmpeg-next",
  "rvn_ui",
+ "serde",
+ "sha2",
+]
+
+[[package]]
+name = "rvn_native_source_binding"
+version = "0.1.0"
+dependencies = [
+ "rvn_core",
+ "rvn_graph",
+ "rvn_parser",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3923,6 +3946,7 @@ version = "0.1.0"
 dependencies = [
  "logos",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

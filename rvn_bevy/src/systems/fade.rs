@@ -11,18 +11,24 @@ const SLIDE_DISTANCE: f32 = 1920.0;
 pub fn fade_system(
     mut commands: Commands,
     time: Res<Time>,
-    mut query: Query<(Entity, &mut FadeAnim, &mut Sprite, &mut Transform)>,
+    mut query: Query<(Entity, &mut FadeAnim, &mut Sprite, &mut Transform,Option<&crate::scene_effects::FadeLease>,Option<&crate::scene_effects::OwnedFadeBase>),Without<crate::scene_retired::RetiredProjection>>,
     mut next_state: ResMut<NextState<VnState>>,
     mut render_state: ResMut<VnRenderState>,
-    layered: Query<(), With<crate::layered_characters::LayeredFade>>,
+    layered: Query<(), (With<crate::layered_characters::LayeredFade>,Without<crate::scene_retired::RetiredProjection>)>,
     accessibility: Res<crate::accessibility::Accessibility>,
+    engine:Option<Res<crate::resources::VnEngine>>,
+    state:Option<Res<State<VnState>>>,
 ) {
     if accessibility.blocked {
         return;
     }
     let mut any_running = false;
 
-    for (entity, mut anim, mut sprite, mut transform) in query.iter_mut() {
+    for (entity, mut anim, mut sprite, mut transform,lease,base) in query.iter_mut() {
+        // Narrative effects are sampled after the single Core frame. This
+        // legacy system owns neither their elapsed nor their completion.
+        if lease.is_some() {any_running=true;continue;}
+        if !crate::scene_effects::allowed(engine.as_deref(),state.as_deref(),lease.map(|lease|&lease.0)) {any_running=true;continue;}
         anim.elapsed_secs += time.delta_seconds();
         let t = if accessibility.settings.reduced_motion {
             1.0
@@ -30,14 +36,14 @@ pub fn fade_system(
             (anim.elapsed_secs / anim.duration_secs).clamp(0.0, 1.0)
         };
         let alpha = anim.from + (anim.to - anim.from) * t;
-        sprite.color.set_alpha(alpha);
+        sprite.color.set_alpha(base.map(|base|base.alpha).unwrap_or(1.0)*alpha);
 
         // Apply transform-based effects for non-fade transitions.
         // On fade-in (from=0 → to=1): entity starts offset/zoomed and settles.
         // On fade-out (from=1 → to=0): entity starts normal and drifts out.
         let is_in = anim.to > anim.from;
         let progress = if is_in { 1.0 - t } else { t };
-        match anim.kind {
+        if let Some(base)=base {crate::scene_effects::apply_visual_pose(&anim,&base.transform,&mut transform,t);} else {match anim.kind {
             TransitionKind::SlideLeft => {
                 transform.translation.x = SLIDE_DISTANCE * progress;
             }
@@ -61,11 +67,11 @@ pub fn fade_system(
             // Fade, Dissolve, Wipe, Blur use alpha only (no transform change).
             // Wipe and Blur could be enhanced with custom shaders in the future.
             _ => {}
-        }
+        }}
 
         if t >= 1.0 {
             // Reset transform to identity position/scale on completion.
-            if !matches!(anim.kind, TransitionKind::Fade | TransitionKind::Dissolve) {
+            if base.is_none() && !matches!(anim.kind, TransitionKind::Fade | TransitionKind::Dissolve) {
                 transform.scale = Vec3::splat(1.0);
             }
             commands.entity(entity).remove::<FadeAnim>();

@@ -70,6 +70,9 @@ impl GraphDocument {
         return_node: NodeId,
         node: NodeId,
     ) -> Result<InterfaceClipboard, String> {
+        if !self.inspector_evaluation.is_legacy() {
+            return Err("NativeFrameV1 clipboard requires a source-authoritative identity/provenance remapper; private preparation refused".into());
+        }
         // Validate the screen's return, but read this expression independently:
         // a dynamic parent collection need not hide an authored leaf from copy.
         self.interface_tree(return_node)?;
@@ -254,7 +257,18 @@ impl GraphDocument {
                 ));
             }
         }
+        let table_references = clip.pins.values().any(|pin| pin.text_table_reference.is_some());
+        if table_references && self.text_owner.is_none() {
+            return Err("Adopt the target asset identity before pasting table Text references".into());
+        }
         let mut next = self.clone();
+        if table_references { next.schema_version = next.schema_version.max(crate::GRAPH_TABLE_TEXT_SCHEMA_VERSION); }
+        if clip.nodes.values().any(|node| node.string_table_contract == Some(crate::StringTableQueryContract::NameV2)) {
+            next.schema_version = next.schema_version.max(crate::GRAPH_NAME_TABLE_SCHEMA_VERSION);
+        }
+        if clip.nodes.values().any(|node| matches!(node.kind, NodeKind::TextFromStringTable | NodeKind::GetStringTableIdAndKey)) {
+            next.schema_version = next.schema_version.max(crate::GRAPH_NAME_TEXT_SCHEMA_VERSION);
+        }
         let same = self.graph_id == clip.source_id && self.kind == clip.source_kind;
         fn reusable(
             graph: &GraphDocument,
@@ -344,6 +358,7 @@ impl GraphDocument {
             let new_model = next.nodes.get_mut(&new).unwrap();
             new_model.properties = model.properties.clone();
             new_model.title_override = model.title_override.clone();
+            new_model.annotation = model.annotation.clone();
             for id in &model.pins {
                 let pin = &clip.pins[id];
                 let new_pin = next
@@ -357,6 +372,8 @@ impl GraphDocument {
                     )
                     .map_err(|error| error.to_string())?;
                 next.pins.get_mut(&new_pin).unwrap().default_value = pin.default_value.clone();
+                next.pins.get_mut(&new_pin).unwrap().text_localization = pin.text_localization.clone();
+                next.pins.get_mut(&new_pin).unwrap().text_table_reference = pin.text_table_reference.clone();
                 pin_map.insert(*id, new_pin);
             }
         }
@@ -389,6 +406,9 @@ impl GraphDocument {
         let root = node_map[&clip.root];
         next.interface_componentize(parent)?;
         next.append_list_input(parent, "children", root, "value")?;
+        next.adopt_nominal_enum_schema1026();
+        next.validate_nominal_enum_shape1026()?;
+        if table_references { next.validate_narrative_metadata()?; }
         *self = next;
         Ok(root)
     }

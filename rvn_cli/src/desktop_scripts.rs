@@ -53,6 +53,17 @@ pub(crate) fn collect(project: &Path, main_script: &Path, saves: &Path) -> Resul
     };
     let main = collector.resolve(&root, main_script)?;
     collector.visit(&main)?;
+    // Validate the frozen source closure under its resolved scene context.
+    // Discovery permits imported scene locals, while a legacy-only closure
+    // retains the original refusal of narrative `local`.
+    let context = if collector.files.values().any(|bytes| {
+        rvn_parser::parse_for_context_discovery(std::str::from_utf8(bytes).expect("visited UTF-8 source"))
+            .is_ok_and(|script| script.iter().any(|statement|matches!(statement,Statement::SceneLabel{..})))
+    }) { rvn_parser::NarrativeContext::ExplicitScenes } else { rvn_parser::NarrativeContext::Legacy };
+    for (path, bytes) in &collector.files {
+        rvn_parser::parse_with_context(std::str::from_utf8(bytes)?,context)
+            .map_err(|error| anyhow::anyhow!("RVN parse error in '{}' : {error}",path.display()))?;
+    }
     Ok(Scripts {
         files: collector.files,
         directories: collector.directories,
@@ -237,7 +248,7 @@ impl Collector {
             .with_context(|| format!("unable to read RVN import '{}'", path.display()))?;
         let source = std::str::from_utf8(&bytes)
             .with_context(|| format!("RVN import is not UTF-8: '{}'", path.display()))?;
-        let script = rvn_parser::parse(source)
+        let script = rvn_parser::parse_for_context_discovery(source)
             .map_err(|error| anyhow::anyhow!("RVN parse error in '{}': {error}", path.display()))?;
         self.stack.push(path.to_path_buf());
         let base = path.parent().context("missing imported script parent")?;
@@ -319,6 +330,39 @@ mod tests {
     }
 
     #[test]
+    fn exported_explicit_scene_imports_keep_bytes_origins_locals_and_v10_after_source_removal() {
+        let fixture=Fixture::new();
+        let main="use \"scripts/child.rvn\"\r\nscene label start\r\nlocal score=2\r\ncall child\r\n\"Parent [score]\"\r\n";
+        let child="scene label child\nlocal score=7\n\"Enfant [score]\"\nreturn\n";
+        fixture.write("main.rvn",main);
+        fixture.write("scripts/child.rvn",child);
+        fixture.write("rvn.toml","[project]\nmain_script='main.rvn'\nstart_label='start'\n");
+        fs::create_dir_all(fixture.project.join("assets")).unwrap();
+        fs::create_dir_all(fixture.project.join("locales")).unwrap();
+        let cfg=crate::load_project_config(&fixture.project).unwrap();
+        crate::copy_project_files(&fixture.project,&fixture.output,&cfg).unwrap();
+        let data=fixture.output.join("data");
+        assert_eq!(fs::read(data.join("main.rvn")).unwrap(),main.as_bytes());
+        assert_eq!(fs::read(data.join("scripts/child.rvn")).unwrap(),child.as_bytes());
+        fixture.remove_original();
+        let program=rvn_parser::parse_file_program_with_uses(data.join("main.rvn")).unwrap();
+        assert_eq!(program.context,rvn_parser::NarrativeContext::ExplicitScenes);
+        assert!(program.origins.iter().any(|origin|origin.source.as_ref().is_some_and(|path|path.ends_with("scripts/child.rvn"))));
+        let mut game=rvn_core::Engine::from_program(program,rvn_core::TerminalRenderer,32).unwrap();
+        game.enter_label("start").unwrap();
+        assert!(matches!(game.step_until_interaction().unwrap(),Some(rvn_core::Interaction::Dialogue{text,..}) if text=="Enfant 7"));
+        let save=rvn_core::save::SaveData::from_state(&game.state,1,"child".into(),"main.rvn".into());
+        assert_eq!(save.format_version,rvn_core::save::SCENE_SAVE_FORMAT_VERSION);
+        let save=serde_json::from_slice(&serde_json::to_vec(&save).unwrap()).unwrap();
+        game.advance_dialogue().unwrap();
+        assert!(matches!(game.step_until_interaction().unwrap(),Some(rvn_core::Interaction::Dialogue{text,..}) if text=="Parent 2"));
+        game.load_data(save).unwrap();
+        assert!(matches!(game.displayed_interaction().unwrap(),Some(rvn_core::Interaction::Dialogue{text,..}) if text=="Enfant 7"));
+        game.advance_dialogue().unwrap();
+        assert!(matches!(game.step_until_interaction().unwrap(),Some(rvn_core::Interaction::Dialogue{text,..}) if text=="Parent 2"));
+    }
+
+    #[test]
     fn root_and_nested_desktop_scripts_run_without_original_sources() {
         // Cover authored root main, generated Blueprint root main, and the
         // established scripts/main path. The final import is relative to its
@@ -367,12 +411,10 @@ mod tests {
             fixture.remove_original();
             let copied_cfg = crate::load_project_config(&data).unwrap();
             let script =
-                rvn_parser::parse_file_with_uses(data.join(&copied_cfg.project.main_script))
+                rvn_parser::parse_file_program_with_uses(data.join(&copied_cfg.project.main_script))
                     .unwrap();
-            let mut engine = rvn_core::Engine::new(script, rvn_core::TerminalRenderer, 32).unwrap();
-            engine.state.pc = engine.script.iter().position(|statement| {
-                matches!(statement, Statement::Label { name } if Some(name) == copied_cfg.project.start_label.as_ref())
-            }).unwrap();
+            let mut engine = rvn_core::Engine::from_program(script, rvn_core::TerminalRenderer, 32).unwrap();
+            engine.enter_label(copied_cfg.project.start_label.as_deref().unwrap()).unwrap();
             assert!(
                 matches!(engine.step_until_interaction().unwrap(), Some(rvn_core::Interaction::Dialogue { text, .. }) if text == "Été à Montréal 🍃")
             );

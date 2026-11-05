@@ -12,9 +12,10 @@ use std::collections::BTreeMap;
 use wasm_bindgen::prelude::*;
 #[wasm_bindgen(inline_js = r#"
 const players=new Map();
-function dispose(player){player.video.pause();player.video.removeAttribute('src');player.video.load();player.video.remove();if(player.mask){player.mask.pause();player.mask.removeAttribute('src');player.mask.load();player.mask.remove();}for(const url of player.blobs||[])URL.revokeObjectURL(url);player.button?.remove();player.aborter.abort();}
+function current(player,nonce){return players.get(player.id)===player&&player.nonce===nonce;}
+function dispose(player){player.events?.abort();player.video.pause();player.video.removeAttribute('src');player.video.load();player.video.remove();if(player.mask){player.mask.pause();player.mask.removeAttribute('src');player.mask.load();player.mask.remove();}for(const url of player.blobs||[])URL.revokeObjectURL(url);player.button?.remove();player.aborter.abort();}
 function url(path){return new URL('assets/'+path.split('/').map(encodeURIComponent).join('/'),document.baseURI).href;}
-async function validate(player,path,mask,check){
+async function validate(player,path,mask,check,nonce){
     const response=await fetch(url(path),{headers:{Range:'bytes=0-1048575'},signal:player.aborter.signal});
     if(!response.ok)throw new Error(`Video resource ${path}: HTTP ${response.status}`);
     if(Number(response.headers.get('Content-Length'))>1073741824)throw new Error('Video exceeds the 1 GiB limit');
@@ -32,7 +33,7 @@ async function validate(player,path,mask,check){
         if(Number(whole.headers.get('Content-Length'))>limit)throw new Error('HTTP byte-range support is required for videos above 64 MiB');
         const stream=whole.body.getReader(),chunks=[];let total=0;
         try{while(true){const item=await stream.read();if(item.done)break;total+=item.value.length;if(total>limit)throw new Error('HTTP byte-range support is required for videos above 64 MiB');chunks.push(item.value);}}finally{await stream.cancel();}
-        if(players.get(player.id)!==player)return;
+        if(!current(player,nonce))return;
         const local=URL.createObjectURL(new Blob(chunks,{type:'video/webm'}));player.blobs.push(local);(mask?player.mask:player.video).src=local;
     }
 }
@@ -40,41 +41,69 @@ function media(path,muted){const video=document.createElement('video');video.pre
 function resumeButton(player){
     if(player.button)return;
     const button=document.createElement('button');button.textContent=player.resumeLabel;button.setAttribute('aria-label',player.resumeLabel);button.style.cssText='position:fixed;left:50%;top:45%;transform:translate(-50%,-50%);padding:16px 24px;background:#12344d;color:white;border:2px solid #4ccaff;border-radius:8px;z-index:20000;font:18px sans-serif;cursor:pointer;';
-    button.addEventListener('click',event=>{event.stopPropagation();player.blocked=false;player.ended=false;player.failed=false;player.notice={kind:'resume',epoch:player.epoch};begin(player);});document.body.appendChild(button);player.button=button;
+    const nonce=player.nonce;
+    button.addEventListener('click',event=>{event.stopPropagation();if(!current(player,nonce))return;player.blocked=false;player.ended=false;player.failed=false;player.notice={kind:'resume',epoch:player.epoch,nonce};begin(player);});document.body.appendChild(button);player.button=button;
 }
 function begin(player){
-    if(!player.validated||player.starting||player.failed||player.ended)return;
+    if(!player.validated||player.starting||player.failed||player.ended||player.wanted!==null)return;
+    const nonce=player.nonce;
     player.starting=true;
-    Promise.all([player.video.play(),...(player.mask?[player.mask.play()]:[])]).then(()=>{if(players.get(player.id)!==player)return;player.starting=false;player.blocked=false;player.button?.remove();player.button=null;}).catch(error=>{
-        if(players.get(player.id)!==player)return;player.starting=false;player.video.pause();player.mask?.pause();
+    Promise.all([player.video.play(),...(player.mask?[player.mask.play()]:[])]).then(()=>{if(!current(player,nonce))return;player.starting=false;player.blocked=false;player.button?.remove();player.button=null;}).catch(error=>{
+        if(!current(player,nonce))return;player.starting=false;player.video.pause();player.mask?.pause();
         if(error.name==='NotAllowedError'){
-            player.blocked=true;player.notice={kind:'blocked',message:'The browser requires a click to start video audio',epoch:player.epoch};
+            player.blocked=true;player.notice={kind:'blocked',message:'The browser requires a click to start video audio',epoch:player.epoch,nonce:player.nonce};
             resumeButton(player);
-        }else if(error.name!=='AbortError'){player.failed=true;player.notice={kind:'error',message:String(error.message).slice(0,4000),epoch:player.epoch};}
+        }else if(error.name!=='AbortError'){player.failed=true;player.notice={kind:'error',message:String(error.message).slice(0,4000),epoch:player.epoch,nonce:player.nonce};}
     });
+}
+function settleSeek(player,nonce){
+    if(!current(player,nonce)||player.wanted===null||player.video.seeking||player.mask?.seeking)return;
+    if(Math.abs(player.video.currentTime-player.wanted)>0.001||(player.mask&&Math.abs(player.mask.currentTime-player.wanted)>0.001))return;
+    player.wanted=null;player.seekNonce=null;
+}
+function bindProjection(player,check){
+    const nonce=player.nonce;
+    player.events?.abort();player.events=new AbortController();const options={signal:player.events.signal};
+    const fail=()=>{if(current(player,nonce)&&player.playback==='playing'&&(player.video.error||player.mask?.error)){player.failed=true;player.notice={kind:'error',message:'Browser video resource or codec could not be loaded',epoch:player.epoch,nonce};}};
+    player.video.addEventListener('error',fail,options);player.mask?.addEventListener('error',fail,options);
+    player.video.addEventListener('ended',()=>{const video=player.video;if(current(player,nonce)&&player.playback==='playing'&&!video.loop&&video.ended&&!video.seeking&&player.wanted===null&&Number.isFinite(video.duration)&&Math.abs(video.currentTime-video.duration)<=0.1){player.ended=true;player.notice={kind:'end',epoch:player.epoch,nonce};}},options);
+    const seeked=()=>{if(player.seekNonce===nonce)settleSeek(player,nonce);};
+    player.video.addEventListener('seeked',seeked,options);player.mask?.addEventListener('seeked',seeked,options);
+    if(!player.validated){
+        player.aborter.abort();player.aborter=new AbortController();
+        Promise.all([validate(player,player.source,false,check,nonce),...(player.mask?[validate(player,player.maskSource,true,check,nonce)]:[])]).then(()=>{if(current(player,nonce))player.validated=true;}).catch(error=>{if(error.name!=='AbortError'&&current(player,nonce)){player.failed=true;player.notice={kind:'error',message:String(error.message).slice(0,4000),epoch:player.epoch,nonce};}});
+    }
 }
 export function rvn_video_sync(description,active,volume,resumeLabel,check){
     const views=JSON.parse(description),seen=new Set();
     for(const view of views){
         seen.add(view.id);let player=players.get(view.id);
-        if(player&&(player.source!==view.source||player.maskSource!==view.mask)){dispose(player);players.delete(view.id);player=null;}
+        if(player&&(player.source!==view.source||player.maskSource!==view.mask||player.identity!==view.identity)){dispose(player);players.delete(view.id);player=null;}
         if(!player){
             const video=media(view.source,false),mask=view.mask?media(view.mask,true):null;
             const canvas=document.createElement('canvas'),context=canvas.getContext('2d',{willReadFrequently:true});
-            player={id:view.id,source:view.source,maskSource:view.mask,video,mask,canvas,context,aborter:new AbortController(),blobs:[],epoch:view.epoch,lastReport:view.position,wanted:view.position,validated:false,notice:null,failed:view.playback==='failed',ended:view.playback==='ended',blocked:view.playback==='blocked',starting:false,button:null,resumeLabel};players.set(view.id,player);
-            const fail=()=>{if(players.get(view.id)===player){player.failed=true;player.notice={kind:'error',message:'Browser video resource or codec could not be loaded',epoch:player.epoch};}};
-            video.addEventListener('error',fail);mask?.addEventListener('error',fail);
-            video.addEventListener('ended',()=>{if(players.get(view.id)===player&&!video.loop){player.ended=true;player.notice={kind:'end',epoch:player.epoch};}});
-            Promise.all([validate(player,view.source,false,check),...(view.mask?[validate(player,view.mask,true,check)]:[])]).then(()=>{if(players.get(view.id)===player)player.validated=true;}).catch(error=>{if(error.name!=='AbortError'&&players.get(view.id)===player){player.failed=true;player.notice={kind:'error',message:String(error.message).slice(0,4000),epoch:player.epoch};}});
+            player={id:view.id,identity:view.identity,source:view.source,maskSource:view.mask,video,mask,canvas,context,aborter:new AbortController(),events:null,blobs:[],epoch:view.epoch,nonce:view.nonce,playback:view.playback,lastReport:view.position,wanted:view.position,seekNonce:null,validated:false,notice:null,failed:view.playback==='failed',ended:view.playback==='ended',blocked:view.playback==='blocked',starting:false,button:null,resumeLabel};players.set(view.id,player);
+            bindProjection(player,check);
+        }else if(player.nonce!==view.nonce){
+            // Keep the user-authorized element for renewal of the same exact
+            // resource. Every asynchronous completion still belongs to the
+            // nonce captured when that operation was started.
+            player.nonce=view.nonce;player.epoch=view.epoch;player.notice=null;player.starting=false;player.seekNonce=null;player.wanted=view.position;player.lastReport=view.position;
+            player.failed=view.playback==='failed';player.ended=view.playback==='ended';player.blocked=view.playback==='blocked';
+            player.button?.remove();player.button=null;bindProjection(player,check);
         }
         if(player.playback==='blocked'&&view.playback==='playing'){player.blocked=false;}
         player.playback=view.playback;player.epoch=view.epoch;player.resumeLabel=resumeLabel;player.video.loop=view.looping;if(player.mask)player.mask.loop=view.looping;
         player.video.volume=Math.max(0,Math.min(1,view.volume*volume));
         if(Math.abs(view.position-player.lastReport)>0.000001){player.wanted=view.position;player.ended=false;player.failed=false;player.notice=null;player.lastReport=view.position;}
-        if(player.validated&&player.video.readyState>=1&&(!player.mask||player.mask.readyState>=1)&&player.wanted!==null){player.video.currentTime=player.wanted;if(player.mask){player.mask.currentTime=player.wanted;}player.wanted=null;}
-        const running=active&&!document.hidden&&view.playback==='playing';
+        if(player.validated&&player.video.readyState>=1&&(!player.mask||player.mask.readyState>=1)&&player.wanted!==null&&player.seekNonce===null){
+            if(!player.video.seeking&&!player.mask?.seeking&&Math.abs(player.video.currentTime-player.wanted)<=0.001&&(!player.mask||Math.abs(player.mask.currentTime-player.wanted)<=0.001))settleSeek(player,player.nonce);
+            else {player.seekNonce=player.nonce;player.video.currentTime=player.wanted;if(player.mask)player.mask.currentTime=player.wanted;}
+        }
+        const admitted=typeof view.active==='boolean'?view.active:active;
+        const running=admitted&&!document.hidden&&view.playback==='playing';
         if(view.playback==='blocked'){player.blocked=true;resumeButton(player);}
-        if(player.button){player.button.hidden=!active||document.hidden||view.playback!=='blocked';player.button.textContent=resumeLabel;player.button.setAttribute('aria-label',resumeLabel);}
+        if(player.button){player.button.hidden=!admitted||document.hidden||view.playback!=='blocked';player.button.textContent=resumeLabel;player.button.setAttribute('aria-label',resumeLabel);}
         if(!running){player.video.pause();player.mask?.pause();if(view.playback!=='blocked'){player.button?.remove();player.button=null;}}
         else if(player.video.paused&&!player.blocked){begin(player);}
         if(player.mask?.readyState>=1&&Math.abs(player.mask.currentTime-player.video.currentTime)>0.05){player.mask.currentTime=player.video.currentTime;}
@@ -86,15 +115,19 @@ export function rvn_video_reports(){
     for(const player of players.values()){
         const video=player.video;
         if(player.validated&&video.readyState>=1){
-            if(!Number.isFinite(video.duration)||video.duration<=0||video.duration>86400||video.videoWidth>3840||video.videoHeight>2160){player.failed=true;player.notice={kind:'error',message:'Video dimensions or duration exceed the runtime limits',epoch:player.epoch};}
-            else if(player.mask?.readyState>=1&&(!Number.isFinite(player.mask.duration)||player.mask.duration+0.1<video.duration)){player.failed=true;player.notice={kind:'error',message:'Video mask ends before the video',epoch:player.epoch};}
-            else if(!player.failed&&player.wanted===null&&!video.seeking){player.lastReport=video.currentTime;output.push({id:player.id,epoch:player.epoch,kind:player.ended?'metadata':'position',seconds:video.currentTime,duration:video.duration,width:video.videoWidth,height:video.videoHeight});}
+            if(!Number.isFinite(video.duration)||video.duration<=0||video.duration>86400||video.videoWidth>3840||video.videoHeight>2160){player.failed=true;player.notice={kind:'error',message:'Video dimensions or duration exceed the runtime limits',epoch:player.epoch,nonce:player.nonce};}
+            else if(player.mask?.readyState>=1&&(!Number.isFinite(player.mask.duration)||player.mask.duration+0.1<video.duration)){player.failed=true;player.notice={kind:'error',message:'Video mask ends before the video',epoch:player.epoch,nonce:player.nonce};}
+            else if(!player.failed&&player.wanted===null&&!video.seeking&&!player.mask?.seeking){player.lastReport=video.currentTime;output.push({id:player.id,epoch:player.epoch,nonce:player.nonce,kind:player.ended?'metadata':'position',seconds:video.currentTime,duration:video.duration,width:video.videoWidth,height:video.videoHeight});}
         }
-        if(player.notice){output.push({id:player.id,...player.notice});player.notice=null;}
+        if(player.notice){output.push({id:player.id,...player.notice});}
     }return JSON.stringify(output);
 }
-export function rvn_video_pixels(id){
-    const player=players.get(id);if(!player||!player.validated||player.video.readyState<2||player.video.seeking||player.wanted!==null)return new Uint8Array();
+export function rvn_video_ack(id,nonce,kind){
+    const player=players.get(id);
+    if(player&&player.nonce===nonce&&player.notice?.nonce===nonce&&player.notice.kind===kind)player.notice=null;
+}
+export function rvn_video_pixels(id,nonce){
+    const player=players.get(id);if(!player||player.nonce!==nonce||!player.validated||player.video.readyState<2||player.video.seeking||player.wanted!==null)return new Uint8Array();
     const video=player.video,w=video.videoWidth,h=video.videoHeight;if(!w||!h||w>3840||h>2160)throw new Error('Invalid browser video dimensions');
     player.canvas.width=w;player.canvas.height=h;player.context.drawImage(video,0,0,w,h);
     const pixels=player.context.getImageData(0,0,w,h).data;
@@ -102,6 +135,10 @@ export function rvn_video_pixels(id){
     return new Uint8Array(pixels.buffer);
 }
 document.addEventListener('visibilitychange',()=>{if(document.hidden)for(const player of players.values()){player.video.pause();player.mask?.pause();}});
+export function rvn_video_retire(description){
+    const views=JSON.parse(description);
+    for(const [id,player]of players){const view=views.find(view=>view.id===id);if(!view||view.identity!==player.identity){dispose(player);players.delete(id);}else if(view.nonce!==player.nonce){player.video.pause();player.mask?.pause();player.events?.abort();player.button?.remove();player.button=null;}}
+}
 "#)]
 extern "C" {
     #[wasm_bindgen(catch)]
@@ -114,13 +151,16 @@ extern "C" {
     ) -> Result<(), JsValue>;
     #[wasm_bindgen(catch)]
     fn rvn_video_reports() -> Result<String, JsValue>;
+    fn rvn_video_ack(id:&str,nonce:&str,kind:&str);
     #[wasm_bindgen(catch)]
-    fn rvn_video_pixels(id: &str) -> Result<Vec<u8>, JsValue>;
+    fn rvn_video_pixels(id: &str, nonce: &str) -> Result<Vec<u8>, JsValue>;
+    #[wasm_bindgen(catch)]
+    fn rvn_video_retire(description: &str) -> Result<(), JsValue>;
 }
 pub struct WebVideoPlugin;
 impl Plugin for WebVideoPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Textures>()
+        app.init_resource::<Textures>().init_resource::<Projections>()
             .add_systems(
                 PostUpdate,
                 crate::video_visual::cinematic_visibility
@@ -130,8 +170,8 @@ impl Plugin for WebVideoPlugin {
             .add_systems(
                 Update,
                 (
-                    tick.before(crate::systems::stepping_system),
-                    crate::video_visual::cinematic_input
+                    tick.run_if(crate::scene_publication::ready).in_set(crate::scene_publication::HostClockSet),
+                    crate::video_visual::cinematic_input.run_if(crate::scene_publication::ready)
                         .before(crate::systems::player_input_system),
                 ),
             );
@@ -139,18 +179,44 @@ impl Plugin for WebVideoPlugin {
 }
 #[derive(Resource, Default)]
 struct Textures(BTreeMap<String, Texture>);
+#[derive(Resource,Default)]
+struct Projections(crate::video_visual::VideoProjections);
+pub(crate) fn install_scene(world:&mut World,views:Vec<rvn_core::video::VideoView>) {
+    if !world.contains_resource::<Projections>() {world.init_resource::<Projections>();}
+    if let Err(error)=world.resource_mut::<Projections>().0.reconcile(&views) {fail(world,error);return;}
+    let identities:Vec<_>=views.iter().map(|view|serde_json::json!({"id":view.id,"nonce":world.resource::<Projections>().0.nonce(view),"identity":world.resource::<Projections>().0.resource_nonce(view)})).collect();
+    if let Err(error)=rvn_video_retire(&serde_json::to_string(&identities).unwrap()) {fail(world,error);}
+    if let Some(mut textures) = world.remove_resource::<Textures>() {
+        for view in &views {
+            if !crate::video_visual::projection_visible(view) {
+                if let Some(texture) = textures.0.get_mut(&view.id) {
+                    crate::video_visual::retire_visual(world, &mut texture.entity, &mut texture.caption);
+                }
+            }
+        }
+        world.insert_resource(textures);
+    }
+}
 struct Texture {
     image: Handle<Image>,
     entity: Option<Entity>,
     caption: Option<Entity>,
     clip: rvn_ui::video::VideoClip,
+    nonce: String,
     width: u32,
     height: u32,
+}
+#[derive(Resource,Default)]
+struct PendingFrameErrors(BTreeMap<String,(rvn_core::video::VideoView,crate::scene_publication::PendingVideoTerminal)>);
+fn retain_frame_error(world:&mut World,pending:&mut PendingFrameErrors,view:&rvn_core::video::VideoView,error:String) {
+    let (_,terminal)=pending.0.entry(view.id.clone()).or_insert_with(||(view.clone(),default()));
+    terminal.retain(Feedback::Error(error));terminal.submit(world,view);
 }
 #[derive(serde::Deserialize)]
 struct Report {
     id: String,
-    epoch: u64,
+    epoch: String,
+    nonce: String,
     kind: String,
     seconds: Option<f64>,
     duration: Option<f64>,
@@ -175,13 +241,13 @@ fn tick(world: &mut World) {
             return;
         }
     };
-    let active = !world
+    let active = if world.resource::<VnEngine>().0.state.scene_execution.is_some() {crate::scene_publication::game_active(world)} else {!world
         .resource::<crate::accessibility::Accessibility>()
         .blocked
         && matches!(
             world.resource::<State<VnState>>().get(),
             VnState::Stepping | VnState::Waiting | VnState::Animating
-        );
+        )};
     let label = world
         .resource::<VnEngine>()
         .0
@@ -195,7 +261,8 @@ fn tick(world: &mut World) {
             }
         })
         .unwrap_or("Click to play video");
-    let descriptions:Vec<_>=views.iter().map(|view|serde_json::json!({"id":view.id,"epoch":view.epoch,"source":view.track.clip.source,"mask":view.track.clip.mask,"position":view.track.position,"playback":view.track.playback,"looping":view.track.clip.looping,"volume":view.track.clip.volume})).collect();
+    if let Err(error)=world.resource_mut::<Projections>().0.reconcile(&views) {fail(world,error);return;}
+    let descriptions:Vec<_>=views.iter().map(|view|serde_json::json!({"id":view.id,"epoch":view.epoch.to_string(),"nonce":world.resource::<Projections>().0.nonce(view),"identity":world.resource::<Projections>().0.resource_nonce(view),"source":view.track.clip.source,"mask":view.track.clip.mask,"position":view.track.position,"playback":view.track.playback,"looping":view.track.clip.looping,"volume":view.track.clip.volume,"active":if world.resource::<VnEngine>().0.state.scene_execution.is_some(){crate::scene_publication::video_clock_allowed(world,view)}else{active}})).collect();
     thread_local! {static CHECK:Closure<dyn Fn(Vec<u8>,bool)->String>=Closure::new(|data:Vec<u8>,mask:bool|rvn_ui::webm::validate_header(&data,mask).err().unwrap_or_default());}
     let result = CHECK.with(|check| {
         rvn_video_sync(
@@ -224,6 +291,9 @@ fn tick(world: &mut World) {
         }
     };
     let mut textures = world.remove_resource::<Textures>().unwrap();
+    let mut pending_frames=world.remove_resource::<PendingFrameErrors>().unwrap_or_default();
+    pending_frames.0.retain(|id,(old,_)|views.iter().any(|view|view.id==*id && old.epoch==view.epoch && old.resource_token==view.resource_token));
+    for (view,terminal) in pending_frames.0.values_mut(){terminal.submit(world,view);}
     let obsolete: Vec<_> = textures
         .0
         .keys()
@@ -240,10 +310,11 @@ fn tick(world: &mut World) {
         }
     }
     for view in &views {
+        let nonce=world.resource::<Projections>().0.nonce(view).unwrap();
         let replace = textures.0.get(&view.id).is_some_and(|texture| {
             let mut old = texture.clip.clone();
             old.volume = view.track.clip.volume;
-            old != view.track.clip
+            old != view.track.clip || texture.nonce!=nonce
         });
         if replace {
             if let Some(texture) = textures.0.remove(&view.id) {
@@ -272,31 +343,23 @@ fn tick(world: &mut World) {
                 entity: None,
                 caption: None,
                 clip: view.track.clip.clone(),
+                nonce,
                 width: 0,
                 height: 0,
             }
         });
     }
     for report in reports {
-        if !views
-            .iter()
-            .any(|view| view.id == report.id && view.epoch == report.epoch)
-        {
-            continue;
-        }
+        let Some(view)=views.iter().find(|view|view.id==report.id && world.resource::<Projections>().0.accepts(view,&report.epoch,&report.nonce)) else {continue;};
+        // A one-shot Rust pixel error is held by its exact capability too.
+        // Later DOM positions/EOF cannot replace it while admission is blocked.
+        if pending_frames.0.contains_key(&view.id){continue;}
         if matches!(report.kind.as_str(), "position" | "metadata") {
             if let Some(image) = textures.0.get_mut(&report.id) {
                 image.width = report.width.unwrap_or(0);
                 image.height = report.height.unwrap_or(0);
             }
         }
-        let waiting = world
-            .resource::<VnEngine>()
-            .0
-            .state
-            .videos
-            .waiting
-            .is_some();
         let feedback = match report.kind.as_str() {
             "position" => Some(Feedback::Position {
                 seconds: report.seconds.unwrap_or(f64::NAN),
@@ -314,44 +377,21 @@ fn tick(world: &mut World) {
                     .unwrap_or_else(|| "Click to start video".into()),
             )),
             "resume" => {
-                if let Err(error) = world.resource_mut::<VnEngine>().0.resume_video(&report.id) {
-                    fail(world, error);
-                }
+                if crate::scene_publication::queue_video_resume(world,view) {rvn_video_ack(&report.id,&report.nonce,&report.kind);}
                 None
             }
             _ => None,
         };
         if let Some(feedback) = feedback {
-            if let Err(error) = world.resource_mut::<VnEngine>().0.video_feedback(
-                report.epoch,
-                &report.id,
-                feedback,
-            ) {
-                fail(world, error);
-            }
-        }
-        if waiting
-            && world
-                .resource::<VnEngine>()
-                .0
-                .state
-                .videos
-                .waiting
-                .is_none()
-        {
-            if *world.resource::<State<VnState>>().get() == VnState::Menu {
-                world
-                    .resource_mut::<crate::resources::MenuState>()
-                    .return_to = Some(VnState::Stepping);
-            } else {
-                world
-                    .resource_mut::<NextState<VnState>>()
-                    .set(VnState::Stepping);
-            }
+            if crate::scene_publication::queue_video_feedback(world,view,feedback) {rvn_video_ack(&report.id,&report.nonce,&report.kind);}
         }
     }
     for view in &views {
         if let Some(texture) = textures.0.get_mut(&view.id) {
+            if !crate::video_visual::projection_visible(view) {
+                crate::video_visual::retire_visual(world, &mut texture.entity, &mut texture.caption);
+                continue;
+            }
             if texture
                 .entity
                 .is_some_and(|entity| world.get_entity(entity).is_none())
@@ -361,17 +401,18 @@ fn tick(world: &mut World) {
             }
             if texture.entity.is_none() {
                 if let Some((entity, caption)) =
-                    crate::video_visual::create(world, &view.track.clip, texture.image.clone())
+                    crate::video_visual::create(world, view, texture.image.clone())
                 {
                     texture.entity = Some(entity);
                     texture.caption = Some(caption);
                 }
             }
             if let Some(entity) = texture.entity {
-                match rvn_video_pixels(&view.id) {
+                if !pending_frames.0.contains_key(&view.id) {
+                match rvn_video_pixels(&view.id, &texture.nonce) {
                     Ok(pixels) if !pixels.is_empty() => {
                         if pixels.len() != texture.width as usize * texture.height as usize * 4 {
-                            fail(world, "Browser video returned an invalid RGBA buffer");
+                            retain_frame_error(world,&mut pending_frames,view,"Browser video returned an invalid RGBA buffer".into());
                         } else {
                             if let Some(image) = world
                                 .resource_mut::<Assets<Image>>()
@@ -389,12 +430,9 @@ fn tick(world: &mut World) {
                     }
                     Ok(_) => {}
                     Err(error) => {
-                        let _ = world.resource_mut::<VnEngine>().0.video_feedback(
-                            view.epoch,
-                            &view.id,
-                            Feedback::Error(format!("Browser video frame: {error:?}")),
-                        );
+                        retain_frame_error(world,&mut pending_frames,view,format!("Browser video frame: {error:?}"));
                     }
+                }
                 }
                 if let Some(caption) = texture.caption {
                     let subtitle = world
@@ -427,6 +465,7 @@ fn tick(world: &mut World) {
         }
     }
     world.insert_resource(textures);
+    world.insert_resource(pending_frames);
     for command in world.resource_mut::<VnEngine>().0.renderer.take_pending() {
         world.send_event(command);
     }

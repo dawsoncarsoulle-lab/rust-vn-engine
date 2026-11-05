@@ -32,6 +32,36 @@ pub fn value_work(value: &Value) -> Result<usize, EvalError> {
         };
         match value {
             Value::Str(string) => text(string, bytes)?,
+            Value::Name(name) => {
+                // Authored display and comparison identity have equal UTF-8
+                // lengths; charge both stored strings when copying a value.
+                text(name.as_str(), bytes)?;
+                text(name.as_str(), bytes)?;
+            },
+            Value::Enum(_) => {
+                *bytes=bytes.checked_add(std::mem::size_of::<rvn_parser::enum_asset::EnumValue>()).ok_or(EvalError::NumericOverflow)?;
+                if *bytes>MAX_VALUE_BYTES{return Err(EvalError::ExecutionLimit{limit:"1 Mio de valeurs retenues"});}
+            },
+            Value::Text(value) => {
+                value.visit_storage(depth + 1, nodes, bytes).map_err(EvalError::InvalidFunction)?;
+            },
+            Value::WidgetClass(reference) => {
+                let retained = if let Some(reference) = reference.as_ref() {
+                    reference.validate().map_err(EvalError::InvalidFunction)?;
+                    reference.retained_bytes()
+                } else {
+                    // A typed null has no identity but its existing Box still
+                    // retains Option storage; it must not evade the byte bound.
+                    std::mem::size_of::<Option<rvn_parser::widget_reference::WidgetClassReference>>()
+                };
+                *bytes = bytes.checked_add(retained).ok_or(EvalError::NumericOverflow)?;
+                if *bytes > MAX_VALUE_BYTES { return Err(EvalError::ExecutionLimit { limit: "1 Mio de valeurs retenues" }); }
+            },
+            Value::Widget(reference) => {
+                if let Some(portable)=reference.portable(){portable.validate().map_err(EvalError::InvalidFunction)?;}
+                *bytes = bytes.checked_add(reference.retained_bytes()).ok_or(EvalError::NumericOverflow)?;
+                if *bytes > MAX_VALUE_BYTES { return Err(EvalError::ExecutionLimit { limit: "1 Mio de valeurs retenues" }); }
+            },
             Value::Float(number) if !number.is_finite() => return Err(EvalError::NumericOverflow),
             Value::List(items) => {
                 if items.len() > MAX_COLLECTION_ITEMS {

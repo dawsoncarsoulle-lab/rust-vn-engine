@@ -4,14 +4,14 @@ use crate::{GraphDocument, GraphId, GraphKind, NodeId, NodeKind, PinId, Property
 use rvn_parser::{Expr, TextSegment};
 
 pub fn callable_name(kind: &GraphKind) -> Option<&str> {
-    match kind { GraphKind::Function{name}|GraphKind::Screen{name}|GraphKind::Handler{name}=>Some(name), _=>None }
+    match kind { GraphKind::UnitFunction{name}|GraphKind::Function{name}|GraphKind::Screen{name}|GraphKind::Handler{name}=>Some(name), _=>None }
 }
 pub fn validate_callable_name(kind:&GraphKind,name:&str)->Result<(),String>{
     if name.is_empty()||!name.chars().next().is_some_and(|c|c.is_ascii_alphabetic()||c=='_')||!name.chars().all(|c|c.is_ascii_alphanumeric()||c=='_'){
         return Err("Le nom doit commencer par une lettre ou _, puis contenir uniquement lettres, chiffres et _.".into());
     }
     if rvn_parser::builtin_arity(name).is_some(){return Err(format!("Le nom {name} est réservé à une fonction intégrée."));}
-    let declaration=match kind{GraphKind::Function{..}=>format!("function {name}(){{return 0}}"),GraphKind::Screen{..}=>format!("screen {name}(){{return component(\"root\",\"panel\",{{}},[])}}"),GraphKind::Handler{..}=>format!("handler {name}(event){{local accepted=true}}"),_=>return Err("Ce graphe n’est pas une fonction, un écran ou un gestionnaire.".into())};
+    let declaration=match kind{GraphKind::UnitFunction{..}=>format!("function {name}() -> (){{return}}"),GraphKind::Function{..}=>format!("function {name}(){{return 0}}"),GraphKind::Screen{..}=>format!("screen {name}(){{return component(\"root\",\"panel\",{{}},[])}}"),GraphKind::Handler{..}=>format!("handler {name}(event){{local accepted=true}}"),_=>return Err("Ce graphe n’est pas une fonction, un écran ou un gestionnaire.".into())};
     rvn_parser::parse(&declaration).map_err(|error|format!("Nom RVN invalide : {error}"))?;Ok(())
 }
 
@@ -23,8 +23,8 @@ fn expression(expr:&mut Expr,old:&str,new:&str){
     }
 }
 fn expression_text(text:&str,old:&str,new:&str)->Result<String,String>{
-    let parsed=rvn_parser::parse(&format!("local value={text}" )).map_err(|error|error.to_string())?;
-    let Some(rvn_parser::Statement::LocalVar{value,..})=parsed.first()else{return Err("Expression RVN attendue".into());};
+    let parsed=rvn_parser::parse(&format!("set value={text}" )).map_err(|error|error.to_string())?;
+    let Some(rvn_parser::Statement::SetVar{value,..})=parsed.first()else{return Err("Expression RVN attendue".into());};
     let mut next=value.clone();expression(&mut next,old,new);
     Ok(if next==*value{text.into()}else{crate::import::expression_source(&next)})
 }
@@ -86,6 +86,10 @@ pub fn reconcile_callable_references(graph:&mut GraphDocument,kind:&GraphKind,ol
     let nodes:Vec<_>=graph.nodes.keys().copied().collect();
     for id in nodes{
         let node_kind=graph.nodes[&id].kind;
+        if matches!(kind,GraphKind::UnitFunction{..}) && node_kind==NodeKind::UnitCall
+            && graph.nodes[&id].properties.get("function")==Some(&PropertyValue::String(old.into())) {
+            graph.nodes.get_mut(&id).unwrap().properties.insert("function".into(),PropertyValue::String(new.into()));
+        }
         if matches!(kind,GraphKind::Function{..}){
             if node_kind==NodeKind::FunctionCall&&graph.nodes[&id].properties.get("function")==Some(&PropertyValue::String(old.into())){graph.nodes.get_mut(&id).unwrap().properties.insert("function".into(),PropertyValue::String(new.into()));}
             if node_kind==NodeKind::MotionCurve{literal_reference(graph,id,"function",old,new)?;}
@@ -122,7 +126,7 @@ pub fn rename_callable_graphs(graphs:&[GraphDocument],id:GraphId,new:&str)->Resu
     for graph in &mut result{
         let nodes:Vec<_>=graph.nodes.values().filter_map(|node|if node.kind==NodeKind::FunctionCall{if let Some(PropertyValue::String(function))=node.properties.get("function"){Some((node.id,function.clone()))}else{None}}else{None}).collect();
         for(node,function)in nodes{for(_,index)in bindings.iter().filter(|(name,_)|name==&function){literal_reference(graph,node,&format!("item_{index}"),old,new)?;}}
-        reconcile_callable_references(graph,&target.kind,old,new)?;if graph.graph_id==id{graph.kind=match &graph.kind{GraphKind::Function{..}=>GraphKind::Function{name:new.into()},GraphKind::Screen{..}=>GraphKind::Screen{name:new.into()},GraphKind::Handler{..}=>GraphKind::Handler{name:new.into()},_=>unreachable!()};}
+        reconcile_callable_references(graph,&target.kind,old,new)?;if graph.graph_id==id{graph.kind=match &graph.kind{GraphKind::UnitFunction{..}=>GraphKind::UnitFunction{name:new.into()},GraphKind::Function{..}=>GraphKind::Function{name:new.into()},GraphKind::Screen{..}=>GraphKind::Screen{name:new.into()},GraphKind::Handler{..}=>GraphKind::Handler{name:new.into()},_=>unreachable!()};}
     }
     crate::transpile_project(&result).map_err(|error|error.to_string())?;Ok(result)
 }

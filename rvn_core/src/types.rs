@@ -80,14 +80,37 @@ pub struct CinematicState {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct DialogueSnapshot {
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub consumer_dialogue:Option<crate::consumer_schedule::BoundConsumerDialogue>,
     pub pc: usize,
     pub vars: HashMap<String, Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lexical_globals: Option<HashMap<String, Value>>,
     #[serde(default)]
     pub random: crate::random::RandomState,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GameState {
+    /// Source-admitted standalone Game lifetime; never a synthetic Scene.
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub game_tasks:Option<crate::game_tasks::GameTasksState>,
+    /// Native Game audio lifetime; absent in historical and Scene stories.
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub game_audio:Option<crate::scene_resources::ResourceRegistry>,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub consumer_dialogue:Option<crate::consumer_schedule::BoundConsumerDialogue>,
+    /// Ordinary game/pre-scene owner. Scene visits carry their own parked frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consumer_frame: Option<crate::consumer_schedule::BoundConsumerFrame>,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub consumer_choice:Option<crate::consumer_schedule::BoundConsumerChoice>,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub consumer_imagemap:Option<crate::consumer_schedule::BoundConsumerImagemap>,
+    /// Absent in legacy stories. Explicit scenes retain both live continuation
+    /// and frozen display input, including suspended callers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene_execution: Option<crate::scene::SceneExecution>,
     #[serde(default)]
     pub accessibility: rvn_ui::accessibility::AccessibilitySettings,
     /// Transaction-local speech requests. They must not be replayed by load or rollback.

@@ -60,14 +60,11 @@ pub(super) fn render_quick_actions(
     let key = format!(
         "{key}:fonts={}:lang={}",
         ctx.fonts.len(),
-        ctx.engine
-            .0
-            .locale
-            .as_ref()
+        ctx.locale()
             .map(|l| l.current_lang())
             .unwrap_or("")
     );
-    let key=format!("{key}:rollback={}",crate::systems::input::can_rollback(&ctx.engine.0));
+    let key=format!("{key}:rollback={}",ctx.can_rollback());
     if *last == key {
         return;
     }

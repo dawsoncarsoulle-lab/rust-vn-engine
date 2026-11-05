@@ -1,0 +1,11 @@
+function late_message() {
+    local draw = random(1, 999)
+    return "after"
+}
+init {
+    set message = "before"
+}
+scene label start
+"[message]"
+set message = late_message()
+"[message]"

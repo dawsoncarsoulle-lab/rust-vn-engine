@@ -43,6 +43,18 @@ impl GraphDiagnostic {
 
 pub(crate) fn validate_document(graph: &GraphDocument) -> Vec<GraphDiagnostic> {
     let mut diagnostics = Vec::new();
+    for (node,message) in crate::widget_viewport_graph1003::validate(graph) { diagnostics.push(GraphDiagnostic::error("G_WIDGET_VIEWPORT",message,Some(node),None,None)); }
+    for (node,message) in crate::widget_factory_graph_1001::validate(graph) { diagnostics.push(GraphDiagnostic::error("G_WIDGET_FACTORY",message,Some(node),None,None)); }
+    for node in graph.nodes.values().filter(|node|node.kind==NodeKind::WidgetObjectClass) {
+        if let Err(message)=crate::widget_object_class_graph1002::validate_node(graph,node) {
+            diagnostics.push(GraphDiagnostic::error("G_WIDGET_OBJECT_CLASS",message,Some(node.id),None,None));
+        }
+    }
+    let binding_stamp = graph.source_binding_stamp();
+    if let Err(error) = graph.validate_narrative_metadata() {
+        let code = if crate::entry_parameter_identity1003::validate_graph_parameter_metadata(graph).is_err() { "G_UNIT_PARAMETERS" } else { "G_NARRATIVE_METADATA" };
+        diagnostics.push(GraphDiagnostic::error(code, error, None, None, None));
+    }
     let mut seen_pin_keys = BTreeSet::new();
     let types = graph.effective_pin_types();
     let mut incoming = BTreeMap::new();
@@ -54,6 +66,16 @@ pub(crate) fn validate_document(graph: &GraphDocument) -> Vec<GraphDiagnostic> {
     }
 
     for node in graph.nodes.values() {
+        if node.kind == NodeKind::StringTableAsset {
+            let invalid = match node.properties.get("table") {
+                Some(PropertyValue::String(id)) if id.is_empty() => None,
+                Some(PropertyValue::String(id)) => rvn_parser::localized_text::validate_string_table_id(id).err(),
+                _ => Some("La référence de table attend un identifiant d’asset texte.".into()),
+            };
+            if let Some(message) = invalid {
+                diagnostics.push(GraphDiagnostic::error("invalid_string_table_asset", message, Some(node.id), None, None));
+            }
+        }
         if let (Some(PropertyValue::String(name)), Some(PropertyValue::StringList(types))) = (
             node.properties.get("name"),
             node.properties.get("inferred_conflict_types"),
@@ -95,7 +117,11 @@ pub(crate) fn validate_document(graph: &GraphDocument) -> Vec<GraphDiagnostic> {
                             _ => None,
                         })
                 });
-            if name.is_none_or(|name| !graph.variables.contains_key(name)) {
+            // Unit parameters belong to actual entry pins, even if the
+            // optional variable presentation cache has not been retained.
+            if name.is_none_or(|name| !graph.variables.contains_key(name)
+                && !(matches!(graph.kind, crate::GraphKind::UnitFunction { .. })
+                    && graph.variable_scope(name) == Some(crate::VariableScope::Parameter))) {
                 diagnostics.push(GraphDiagnostic::error(
                     "unknown_variable",
                     format!(
@@ -149,7 +175,7 @@ pub(crate) fn validate_document(graph: &GraphDocument) -> Vec<GraphDiagnostic> {
             {
                 if let Some(value) = &pin.default_value {
                     let source = crate::type_inference::property_type(value);
-                    let input = graph.pin_constraint_type(pin.id).unwrap_or(ValueType::Any);
+                    let input = graph.pin_constraint_type_with_binding_stamp(pin.id,binding_stamp).unwrap_or(ValueType::Any);
                     if !input.accepts(&source)
                         && !(input == ValueType::InterpolatedText && source == ValueType::String)
                     {
@@ -243,7 +269,7 @@ pub(crate) fn validate_document(graph: &GraphDocument) -> Vec<GraphDiagnostic> {
         }
         let output_type = types.get(&output.id).unwrap_or(&output.value_type);
         let input_type = graph
-            .pin_constraint_type(input.id)
+            .pin_constraint_type_with_binding_stamp(input.id,binding_stamp)
             .unwrap_or_else(|| input.value_type.clone());
         if !graph.accepts_pin_source_with_context(input.id, output_type, &types, Some(&incoming)) {
             diagnostics.push(GraphDiagnostic::error(
@@ -265,7 +291,7 @@ pub(crate) fn validate_document(graph: &GraphDocument) -> Vec<GraphDiagnostic> {
         }
     }
 
-    if let Some(node) = first_data_cycle(graph) {
+    if let Some(node) = first_data_cycle(graph, &types) {
         diagnostics.push(GraphDiagnostic::error(
             "data_cycle",
             format!("expression graph contains a cycle through node {node}"),
@@ -278,12 +304,13 @@ pub(crate) fn validate_document(graph: &GraphDocument) -> Vec<GraphDiagnostic> {
     diagnostics
 }
 
-fn first_data_cycle(graph: &GraphDocument) -> Option<NodeId> {
+fn first_data_cycle(graph: &GraphDocument, types: &BTreeMap<PinId,ValueType>) -> Option<NodeId> {
     fn visit(
         graph: &GraphDocument,
         node: NodeId,
         active: &mut BTreeSet<NodeId>,
         complete: &mut BTreeSet<NodeId>,
+        types: &BTreeMap<PinId,ValueType>,
     ) -> Option<NodeId> {
         if active.contains(&node) {
             return Some(node);
@@ -298,8 +325,8 @@ fn first_data_cycle(graph: &GraphDocument) -> Option<NodeId> {
             else {
                 continue;
             };
-            if output.node == node && !output.value_type.is_execution() {
-                if let Some(cycle) = visit(graph, input.node, active, complete) {
+            if output.node == node && !types.get(&output.id).unwrap_or(&output.value_type).is_execution() {
+                if let Some(cycle) = visit(graph, input.node, active, complete, types) {
                     return Some(cycle);
                 }
             }
@@ -312,7 +339,7 @@ fn first_data_cycle(graph: &GraphDocument) -> Option<NodeId> {
     let mut active = BTreeSet::new();
     let mut complete = BTreeSet::new();
     for node in graph.nodes.keys().copied() {
-        if let Some(cycle) = visit(graph, node, &mut active, &mut complete) {
+        if let Some(cycle) = visit(graph, node, &mut active, &mut complete, types) {
             return Some(cycle);
         }
     }

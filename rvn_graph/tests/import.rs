@@ -236,3 +236,123 @@ fn label_and_position_defaults_become_visible_typed_references() {
         "Disconnecting a label must not leave a hidden target"
     );
 }
+
+
+#[test]
+fn timer_jump_and_cancel_import_keep_actual_nodes_durations_and_targets_in_native_source() {
+    let script=rvn_parser::parse("label start\ntimer 5.25 => jump done\ntimer cancel\n\"Ready\"\nreturn\nlabel done\n\"Done\"\n").unwrap();
+    let mut graphs=import_script(&script).expect("existing Timer catalogue nodes must import their lossless RVN form");
+    let graph=graphs.iter_mut().find(|g|matches!(&g.kind,GraphKind::Label{name}if name=="start")).unwrap();
+    let timer=graph.nodes.values().find(|node|node.kind==NodeKind::Timer).unwrap().id;
+    // Import creates visible producer nodes; a hidden default is not the operand.
+    for (key,kind,property,value) in [("duration",NodeKind::Literal,"value",PropertyValue::Float(5.25)),("target",NodeKind::LabelValue,"label",PropertyValue::String("done".into()))] {
+        let input=graph.pin_by_key(timer,key).unwrap();assert!(input.default_value.is_none());
+        let edge=graph.edges.values().find(|edge|edge.input==input.id).unwrap();
+        let source=&graph.nodes[&graph.pins[&edge.output].node];assert_eq!(source.kind,kind);assert_eq!(source.properties.get(property),Some(&value));
+    }
+    assert_eq!(graph.nodes.values().filter(|node|node.kind==NodeKind::TimerCancel).count(),1);
+    let ordinary=transpile_project(&graphs).unwrap();assert!(ordinary.ast.contains(&Statement::Timer{duration_secs:5.25,action:"jump done".into()}));assert!(ordinary.ast.contains(&Statement::TimerCancel));
+    enable_native_timer_labels_with_real_legacy_init(&mut graphs);
+    let native=transpile_project(&graphs).expect("actual native Label Consumer path with unchanged empty Legacy Init");
+    assert!(native.source.contains("flow.consume_v2("));
+    let program=rvn_parser::parse_program(&native.source).unwrap();rvn_parser::scheduled_source::scheduled_step_sources(&program).unwrap();
+    let restored=import_native_frame_script(&native.ast).unwrap();
+    for original in &graphs{let actual=restored.iter().find(|g|g.graph_id==original.graph_id).unwrap();assert_eq!(actual.edges,original.edges);assert_eq!(actual.pins.keys().collect::<Vec<_>>(),original.pins.keys().collect::<Vec<_>>());assert_eq!(actual.nodes.keys().collect::<Vec<_>>(),original.nodes.keys().collect::<Vec<_>>());}
+}
+
+#[test]
+fn timer_call_is_refused_instead_of_silently_changing_existing_jump_node_semantics() {
+    let script=rvn_parser::parse("label start\ntimer 5 => call done\n\"Ready\"\nreturn\nlabel done\nreturn\n").unwrap();
+    assert!(import_script(&script).unwrap_err().contains("losslessly"));
+}
+
+
+#[test]
+fn native_timer_literal_fields_cannot_borrow_a_different_constant_source_output() {
+    let script=rvn_parser::parse("label start\ntimer 5.25 => jump done\n\"Ready\"\nreturn\nlabel done\n\"Done\"\n").unwrap();
+    let mut graphs=import_script(&script).unwrap();enable_native_timer_labels_with_real_legacy_init(&mut graphs);
+    let native=transpile_project(&graphs).unwrap();
+    for replacement in ["timer 9.25 => jump done","timer 5.25 => jump start"] {
+        let bad=native.source.replace("timer 5.25 => jump done",replacement);assert_ne!(bad,native.source);
+        let program=rvn_parser::parse_program(&bad).unwrap();
+        assert!(rvn_parser::scheduled_source::scheduled_step_sources(&program).is_err());
+        assert!(import_native_frame_script(&program.script).is_err());
+        assert!(rvn_core::Engine::from_program(program,rvn_core::TerminalRenderer,8).is_err());
+    }
+}
+
+
+#[test]
+fn timer_seconds_above_one_do_not_relax_static_music_volume_domain() {
+    // Keep the historical parser's valid clamp, then test the actual static
+    // admission against separately forged AST and actual reparsed source bytes.
+    let historical=rvn_parser::parse("label start\nmusic.volume(\"1.5\")\n\"Ready\"\n").unwrap();
+    assert!(historical.iter().any(|s|matches!(s,Statement::MusicVolume{level}if *level==1.0)));
+    let script=rvn_parser::parse("label start\nmusic.volume(\"0.5\")\n\"Ready\"\n").unwrap();
+    let mut graphs=import_script(&script).unwrap();enable_native_timer_labels_with_real_legacy_init(&mut graphs);
+    let native=transpile_project(&graphs).unwrap();let mut program=rvn_parser::parse_program(&native.source).unwrap();
+    let mut changed=0;
+    for statement in &mut program.script {
+        if let Statement::ScheduledConsumer{steps,body,..}=statement {
+            if let [Statement::MusicVolume{level}]=body.as_mut_slice() {
+                assert_eq!(*level,0.5);*level=1.5;
+                let mut captured=0;
+                for step in steps {
+                    if let rvn_parser::ConsumerStep::Capture{value:rvn_parser::Expr::Float(value),..}=step {
+                        if *value==0.5{*value=1.5;captured+=1;}
+                    }
+                }
+                assert_eq!(captured,1);changed+=1;
+            }
+        }
+    }
+    assert_eq!(changed,1);
+    let error=rvn_parser::scheduled_source::scheduled_step_sources(&program).unwrap_err();
+    assert!(error.contains("Scheduled root source/AST mismatch"),"{error}");
+    // Reach the numeric-domain check with actual reparsed source bytes. The
+    // historical command clamps to one, while its real captured constant is
+    // still 1.5; a Timer's wider duration domain cannot admit that volume.
+    assert_eq!(native.source.matches("0.5").count(),2);
+    let forged_source=native.source.replace("0.5","1.5");
+    let forged=rvn_parser::parse_program(&forged_source).unwrap();
+    let mut commands=0;let mut constants=0;
+    for statement in &forged.script {
+        if let Statement::ScheduledConsumer{steps,body,..}=statement {
+            if let [Statement::MusicVolume{level}]=body.as_slice() {
+                assert_eq!(*level,1.0);commands+=1;
+                constants+=steps.iter().filter(|step|matches!(step,
+                    rvn_parser::ConsumerStep::Capture{value:rvn_parser::Expr::Float(value),..}if *value==1.5)).count();
+            }
+        }
+    }
+    assert_eq!((commands,constants),(1,1));
+    let error=rvn_parser::scheduled_source::scheduled_step_sources(&forged).unwrap_err();
+    assert!(error.contains("Audio volume constant differs"),"{error}");
+    assert!(import_native_frame_script(&forged.script).is_err());
+    assert!(rvn_core::Engine::from_program(forged,rvn_core::TerminalRenderer,8).is_err());
+}
+
+/// Timer tests exercise actual Label consumers. The implicit empty Init is a
+/// real Legacy context view; no statement or Native identity is fabricated.
+fn enable_native_timer_labels_with_real_legacy_init(graphs:&mut [GraphDocument]) {
+    let init=graphs.iter().find(|graph|graph.kind==GraphKind::Init).expect("ordinary import keeps the implicit Init view");
+    assert!(init.inspector_evaluation.is_legacy());assert_eq!(init.nodes.len(),1);assert!(init.nodes.values().all(|node|node.kind==NodeKind::Init));assert!(init.edges.is_empty());
+    for graph in graphs.iter_mut().filter(|graph|matches!(graph.kind,GraphKind::Label{..})) {graph.enable_native_frame_preparation().unwrap();}
+    assert!(graphs.iter().filter(|graph|graph.kind==GraphKind::Init).all(|graph|graph.inspector_evaluation.is_legacy()));
+}
+#[test]
+fn empty_implicit_init_native_identity_gap_is_explicit_and_never_filled_with_an_invented_statement() {
+    let script=rvn_parser::parse("label start\nreturn\n").unwrap();let graphs=import_script(&script).unwrap();
+    let init=graphs.iter().find(|graph|graph.kind==GraphKind::Init).unwrap();assert!(init.edges.is_empty());assert_eq!(init.nodes.len(),1);
+    let ordinary=transpile_with_origins(init).unwrap();assert!(matches!(ordinary.ast.as_slice(),[Statement::Init{body}]if body.is_empty()));
+    let mut requested=init.clone();requested.enable_native_frame_preparation().unwrap();let guarded=requested.clone();
+    // Historical Graph12 refusal remains preserved in its actual old receipt.
+    // A source-aware declaration now transports the root; AST-only import
+    // still cannot invent that provenance and remains the negative boundary.
+    let declared=prepare_native_frame_graph(&requested).unwrap();
+    assert_eq!(declared.ast,ordinary.ast,"declaration adds no statement, consumer or PC");
+    assert!(import_native_frame_script(&declared.ast).is_err());
+    let restored=import_native_frame_source(&declared.source,declared.context).unwrap();
+    assert!(restored.iter().any(|graph|graph.graph_id==requested.graph_id&&!graph.inspector_evaluation.is_legacy()));
+    assert_eq!(requested,guarded,"preparation must not mutate the requested graph");
+}

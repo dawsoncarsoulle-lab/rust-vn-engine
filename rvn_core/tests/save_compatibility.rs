@@ -1,5 +1,65 @@
 use rvn_core::{save::SaveData, Engine, LoadCompatibility, TerminalRenderer};
 
+#[test]
+fn name_values_keep_identity_spelling_and_nested_types_through_actual_save_load() {
+    use rvn_parser::{Name, Value};
+    let source = r#"
+init {
+    set named = __rvn_string_to_name("RvnProbe0219Case")
+    set same = named == __rvn_string_to_name("rvnprobe0219case")
+    set old_string = "RvnProbe0219Case"
+    set old_string_equal = old_string == "rvnprobe0219case"
+    set names = [named, __rvn_string_to_name("None_0"), __rvn_string_to_name("_1")]
+    set display = __rvn_name_to_string(named)
+}
+label start
+"Name [display]"
+return
+"#;
+    let original = game(source);
+    assert_eq!(original.state.vars["same"], Value::Bool(true));
+    assert_eq!(original.state.vars["old_string_equal"], Value::Bool(false));
+    assert_eq!(original.state.vars["display"], Value::Str("RvnProbe0219Case".into()));
+    let saved = SaveData::from_state(&original.state, 1, "start".into(), "main.rvn".into());
+    let encoded = serde_json::to_value(&saved).unwrap();
+    assert_eq!(encoded["vars"]["named"], serde_json::json!({"type":"Name", "v":"RvnProbe0219Case"}));
+    assert_eq!(encoded["vars"]["old_string"], serde_json::json!({"type":"Str", "v":"RvnProbe0219Case"}));
+    let mut fresh = game(source);
+    assert_eq!(fresh.load_data(serde_json::from_value(encoded).unwrap()).unwrap(), LoadCompatibility::Verified);
+    let Value::Name(restored) = &fresh.state.vars["named"] else { panic!("typed Name lost on load") };
+    assert_eq!(restored.as_str(), "RvnProbe0219Case");
+    assert_eq!(restored, &Name::new("rvnprobe0219case").unwrap());
+    let Value::List(items) = &fresh.state.vars["names"] else { panic!("Name list lost on load") };
+    assert!(matches!(&items[1], Value::Name(name) if name.as_str()=="None_0" && !name.is_none()));
+    assert!(matches!(&items[2], Value::Name(name) if name.as_str()=="None" && name.is_none()));
+    assert_eq!(serde_json::to_value(&fresh.state.vars["named"]).unwrap(), serde_json::json!({"Name":"RvnProbe0219Case"}));
+}
+
+#[test]
+fn name_deserialization_validates_recursive_saves_without_reinterpreting_strings() {
+    use rvn_core::save::SaveValue;
+    use rvn_parser::{Name, NameError, Value};
+    let base = "a".repeat(1023);
+    assert!(Name::new(&format!("{base}_2147483646")).is_ok());
+    assert_eq!(Name::new(&format!("{base}_2147483647")), Err(NameError::EntryTooLong));
+    assert_eq!(Name::new(&"😀".repeat(512)), Err(NameError::EntryTooLong));
+    for invalid in ["safe\0trailing".to_owned(), "a".repeat(1024)] {
+        assert!(serde_json::from_value::<Value>(serde_json::json!({"Name": invalid})).is_err());
+        assert!(serde_json::from_value::<SaveValue>(serde_json::json!({"type":"List","v":[{"type":"Name","v":invalid}]})).is_err());
+        let legacy: SaveValue = serde_json::from_value(serde_json::json!({"type":"Str","v":invalid})).unwrap();
+        assert!(matches!(legacy, SaveValue::Str(text) if text==invalid));
+    }
+    assert!(serde_json::from_value::<Name>(serde_json::json!({"display":"Valid","identity":"forged"})).is_err());
+    let nested = Value::Dict(std::collections::BTreeMap::from([
+        ("AuthoredKey".into(), Value::Name(Name::new("AuthoredCase").unwrap())),
+        ("authoredkey".into(), Value::Str("authoredcase".into())),
+    ]));
+    let saved = SaveValue::from(&nested);
+    let loaded: SaveValue = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+    assert_eq!(Value::from(loaded), nested);
+    assert!(rvn_core::ui::value_to_json(&nested).is_err());
+}
+
 fn game(source: &str) -> Engine<TerminalRenderer> {
     let mut game = Engine::new(rvn_parser::parse(source).unwrap(), TerminalRenderer, 16).unwrap();
     game.step_until_interaction().unwrap();

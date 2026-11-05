@@ -63,6 +63,10 @@ pub struct VideoState {
 pub struct VideoView {
     pub id: String,
     pub epoch: u64,
+    /// Exact transient authority; a player name alone cannot identify scene work.
+    pub resource_token: Option<crate::scene_resources::ResourceToken>,
+    /// Projection visibility is independent of the player's clock authority.
+    pub ui_projection: Option<crate::ui_residency::UiProjectionBinding>,
     pub track: Track,
     pub subtitle: Option<String>,
 }

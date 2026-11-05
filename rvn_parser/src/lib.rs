@@ -5,16 +5,40 @@ pub mod error;
 pub mod expr;
 pub mod lexer;
 pub mod logic;
+pub mod enum_asset;
+pub mod enum_asset_json;
+pub mod enum_asset_admission1025;
+mod enum_value_wire1025;
+pub mod localized_text;
+pub mod function_library_asset1023;
+pub mod function_library_program1023;
+pub mod widget_asset;
+pub mod widget_viewport_effect_1003;
+pub mod widget_create_effect;
+pub mod widget_reference;
 pub mod parser;
+pub mod program;
 pub mod source;
+pub mod scheduled_source;
+pub mod scheduled_exec_links_v1;
+pub mod loop_phase_dependencies;
+pub mod scheduled_operand_contract;
 
 pub use ast::*;
+mod consumer_contract;
+pub use consumer_contract::{ClassicConsumerKind, ScheduledConsumerKind, scheduled_consumer_kind, scheduled_consumer_body_supported};
 pub use error::*;
 pub use expr::{BinOpKind, Expr, InterpolatedText, TextSegment};
-pub use logic::{builtin_arity, is_binding_name, validate_logic, LogicDiagnostic};
+pub use logic::{builtin_arity, is_binding_name, is_variable_binding_name, variable_binding_source_name, variable_source_name, validate_logic, LogicDiagnostic};
 pub use parser::{
-    parse, parse_interpolated_str, parse_recovering, parse_spanned, RecoveredScript,
-    SpannedStatement,
+    parse, parse_for_context_discovery, parse_interpolated_str, parse_recovering,
+    parse_recovering_with_context, parse_spanned, parse_spanned_with_context, parse_with_context,
+    parse_with_origins, RecoveredScript, SpannedStatement,
+};
+pub use program::{
+    parse_file_program_with_uses, parse_program, NarrativeContext, ParsedProgram, ParsedSource,
+    ProgramSource, StatementOrigin, StatementSpan, CapturedUseResolution,
+    parse_file_program_with_uses_from_source, capture_file_program_resolution, recheck_file_program_resolution,
 };
 pub use source::{SourceDocument, SourceEditError};
 
@@ -81,7 +105,19 @@ fn parse_file_with_uses_inner(
     Ok(resolved)
 }
 
-fn expand_use_path(base_dir: &Path, raw: &str) -> Result<Vec<PathBuf>, String> {
+/// Expand one authored `use` into paths relative to its importing directory.
+/// Ordinary paths use `Path::join` unchanged, including absolute paths and
+/// parent components; their existence is checked by the caller. Wildcards
+/// `dir/*` and `dir/*.rvn` enumerate direct lowercase `.rvn` entries in sorted
+/// `PathBuf` order and reject unreadable or empty directories.
+///
+/// This enumerates paths only. It does not read or parse source, canonicalize
+/// identities, detect cycles, deduplicate imports, freeze bytes, or enforce a
+/// sandbox. Those responsibilities remain with the loader and its caller.
+pub fn expand_use_path(base_dir: &Path, raw: &str) -> Result<Vec<PathBuf>, String> {
+    expand_use_path_bounded(base_dir, raw, usize::MAX)
+}
+pub(crate) fn expand_use_path_bounded(base_dir: &Path, raw: &str, limit: usize) -> Result<Vec<PathBuf>, String> {
     if raw.ends_with("/*") || raw.ends_with("/*.rvn") {
         let dir_part = raw
             .strip_suffix("/*.rvn")
@@ -89,6 +125,7 @@ fn expand_use_path(base_dir: &Path, raw: &str) -> Result<Vec<PathBuf>, String> {
             .unwrap_or(raw);
         let dir = base_dir.join(dir_part);
         let mut files = Vec::new();
+        let mut bytes = 0usize;
         let entries = fs::read_dir(&dir).map_err(|e| {
             format!(
                 "impossible de lire le dossier `use` `{}`: {e}",
@@ -100,6 +137,11 @@ fn expand_use_path(base_dir: &Path, raw: &str) -> Result<Vec<PathBuf>, String> {
                 entry.map_err(|e| format!("erreur de lecture dans `{}`: {e}", dir.display()))?;
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) == Some("rvn") {
+                if limit != usize::MAX {
+                    bytes = bytes.checked_add(path.as_os_str().len()).filter(|n| *n <= 16 * 1024 * 1024)
+                        .ok_or("Use wildcard byte budget exceeded")?;
+                    if files.len() >= limit || path.as_os_str().len() > 4096 { return Err("Use wildcard target budget exceeded".into()); }
+                }
                 files.push(path);
             }
         }
@@ -654,3 +696,5 @@ mod tests {
         );
     }
 }
+
+pub mod enum_recovery1025;

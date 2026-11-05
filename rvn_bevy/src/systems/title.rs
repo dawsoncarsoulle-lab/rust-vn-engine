@@ -705,7 +705,9 @@ pub fn title_interaction_system(
     mut persistent: ResMut<PersistentDataResource>,
     mut vn_events: EventWriter<VnCommand>,
     mut exit: EventWriter<AppExit>,
+    launch_inputs:(Option<Res<crate::resources::NarrativeStart>>,Option<ResMut<crate::checkpoint_requests::CheckpointRequests>>,Option<ResMut<crate::runtime_restart::Requests>>),
 ) {
+    let(start,mut checkpoint_requests,mut restart_requests)=launch_inputs;
     for (interaction, button, colors, mut bg_color) in interaction_query.iter_mut() {
         match interaction {
             Interaction::Hovered => {
@@ -725,6 +727,9 @@ pub fn title_interaction_system(
                         ) {
                             Ok(mgr) => match resolve_continue_data(&mgr, &persistent) {
                                 Ok((data, target)) => {
+                                    match crate::checkpoint_requests::defer_load(&engine,checkpoint_requests.as_deref_mut(),&data,target.clone(),true) {
+                                        Ok(true)=>return,Ok(false)=>{},Err(error)=>{error!("Continue admission: {error}");continue;}
+                                    }
                                     match engine.0.load_data(data) {
                                         Ok(rvn_core::engine::LoadCompatibility::LegacyUnchecked) => warn!("Ancienne sauvegarde : compatibilité après modification de l’histoire non vérifiable"),
                                         Ok(_) => {},
@@ -752,6 +757,12 @@ pub fn title_interaction_system(
                     TitleButton::NewGame => {
                         // Returning here after an ending must start a fresh story,
                         // not resume the finished instruction pointer.
+                        if engine.0.is_finished() && engine.0.requires_owned_startup_for_fresh(){
+                            let label=start.as_ref().and_then(|start|start.0.clone());
+                            let result=restart_requests.as_deref_mut().ok_or_else(||"Actual normal restart consumer is missing".to_string()).and_then(|requests|requests.admit(&engine,label));
+                            if let Err(error)=result{error!("Nouvelle partie refusée : {error}");}
+                            continue;
+                        }
                         if engine.0.is_finished() {
                             let Ok(mut fresh) = engine
                                 .0
@@ -760,8 +771,13 @@ pub fn title_interaction_system(
                                 error!("Impossible de recommencer la partie");
                                 continue;
                             };
+                            if let Some(label) = start.as_ref().and_then(|start|start.0.as_ref()) {
+                                if let Err(error) = fresh.enter_label(label) {
+                                    error!("Impossible de recommencer à {label} : {error}");
+                                    continue;
+                                }
+                            }
                             fresh.locale = engine.0.locale.take();
-                            fresh.persistent_vars = engine.0.persistent_vars.clone();
                             for (id, sprite) in &engine.0.state.sprites {
                                 if sprite.visible {
                                     vn_events.send(VnCommand::HideSprite {

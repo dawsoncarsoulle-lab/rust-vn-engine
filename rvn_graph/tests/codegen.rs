@@ -1046,3 +1046,63 @@ fn folds_variadic_boolean_operator_inputs_into_native_expressions() {
         .source
         .contains("set flag = ((true or false) or true)"));
 }
+
+
+fn exact_variable_name_compile_case(name: &str) {
+    let source="init { set flag = true }\nlabel start\nset flag = flag\nreturn\n";
+    let project=rvn_graph::SourceProject::open(source,&[]).unwrap();
+    let mut graph=project.graphs().iter().find(|g|matches!(&g.kind,rvn_graph::GraphKind::Label{name} if name=="start")).unwrap().clone();
+    graph.rename_variable("flag",name).unwrap();
+    let before=graph.clone();
+    let result=rvn_graph::transpile(&graph);
+    assert_eq!(graph,before,"compilation must not edit nodes, pins, identities, values or names");
+    let generated=result.expect("an accepted Blueprint variable name must compile without renaming its semantic key");
+    assert!(generated.ast.iter().any(|statement|matches!(statement,rvn_parser::Statement::SetVar{name:actual,value:rvn_parser::Expr::Var(read)} if actual==name && read==name)));
+    assert_eq!(rvn_parser::parse(&generated.source).unwrap(),generated.ast);
+    assert_eq!(rvn_graph::GraphDocument::from_json(&graph.to_pretty_json().unwrap()).unwrap(),before);
+}
+#[test]
+fn blueprint_variable_unicode_semantic_name_compiles_exactly(){exact_variable_name_compile_case("Confianceété");}
+#[test]
+fn blueprint_variable_spaced_semantic_name_compiles_exactly(){exact_variable_name_compile_case("Confiance été");}
+
+
+#[test]
+fn blueprint_variable_escaped_keyword_and_distinct_names_compile_exactly() {
+    for name in ["true","1er","valeur]été","prix`été","chemin\\été","日本語","é","e\u{301}","Score","score"] {
+        exact_variable_name_compile_case(name);
+    }
+}
+
+#[test]
+fn blueprint_quoted_parameters_and_iterators_compile_without_identity_changes() {
+    let source="function reward(`Limite été`) { local `Total été`=0 for `Élément été` in [1,2] { set `Total été`=`Total été`+`Élément été` } flow.for_loop(`Index été`,1,2) { set `Total été`=`Total été`+`Index été` } return `Total été`+`Limite été` }\nlabel start\nset `Résultat été`=reward(3)\nreturn\n";
+    let project=rvn_graph::SourceProject::open(source,&[]).unwrap();
+    for graph in project.graphs() {
+        let before=graph.clone();let generated=transpile(graph).unwrap();
+        assert_eq!(graph,&before);
+        assert_eq!(rvn_parser::parse(&generated.source).unwrap(),generated.ast);
+    }
+    let function=project.graphs().iter().find(|graph|matches!(&graph.kind,GraphKind::Function{name} if name=="reward")).unwrap();
+    let generated=transpile(function).unwrap();
+    assert!(generated.source.contains("reward(`Limite été`)"));
+    assert!(generated.source.contains("`Élément été`"));
+    assert!(generated.source.contains("flow.for_loop(`Index été`,"));
+}
+
+
+#[test]
+fn blueprint_escaped_variable_dialogue_compilation_applies_both_syntax_layers() {
+    for name in ["Confiance été","valeur]été","prix`été","chemin\\été","prix\"été"] {
+        let variable=rvn_parser::variable_source_name(name).unwrap();
+        let text=format!("[{variable}]");
+        let source=format!("init {{ set {variable}=2 }}\nlabel start\n{}\nreturn\n",serde_json::to_string(&text).unwrap());
+        let project=rvn_graph::SourceProject::open(&source,&[]).unwrap();
+        let graph=project.graphs().iter().find(|graph|matches!(&graph.kind,GraphKind::Label{name} if name=="start")).unwrap();
+        let before=graph.clone();let generated=transpile(graph).unwrap();
+        assert_eq!(graph,&before);
+        assert_eq!(rvn_parser::parse(&generated.source).unwrap(),generated.ast);
+        let dialogue=generated.ast.iter().find_map(|statement|match statement {rvn_parser::Statement::Dialogue{text,..}=>Some(text),_=>None}).unwrap();
+        assert_eq!(dialogue.0,vec![rvn_parser::TextSegment::Interp(rvn_parser::Expr::Var(name.into()))]);
+    }
+}

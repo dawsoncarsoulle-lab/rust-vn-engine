@@ -10,6 +10,8 @@ video = ["dep:ffmpeg-next"]
 
 [dependencies]
 rvn_ui = { path = "../rvn_ui" }
+sha2 = "0.10.9"
+serde = { version = "1.0.228", features = ["derive"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ffmpeg-next = { version = "9.0", default-features = false, features = ["codec", "format", "software-scaling", "software-resampling"], optional = true }

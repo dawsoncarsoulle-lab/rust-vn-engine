@@ -1,0 +1,3 @@
+use super::*;
+use rvn_parser::enum_asset::{EnumAsset,EnumAssetId};
+#[test] fn enum_graph_admission1025_real_adapter_requires_exact_project_index(){let asset=EnumAsset::new(EnumAssetId::parse("329f41eae6ba4b4bb71dfaf60fb50001").unwrap(),"Alpha".into()).unwrap();let rows=[("329f41eae6ba4b4bb71dfaf60fb50001",Some("Alpha.rvnenum"))];let files=vec![("Alpha.rvnenum".into(),asset.encode().unwrap().into_bytes())];let admitted=admit_enum_assets1025(EnumIndexInput::Table(&rows),&files,true).unwrap();assert_eq!(admitted.asset(asset.id()),Some(&asset));assert!(admit_enum_assets1025(EnumIndexInput::Absent,&files,true).is_err());}

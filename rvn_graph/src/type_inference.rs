@@ -19,11 +19,12 @@ impl GraphDocument {
     pub fn local_variable_names(&self) -> BTreeSet<String> {
         let mut names = self.parameter_names();
         for node in self.nodes.values() {
-            if node.kind == NodeKind::LocalVariable
-                || (node.kind == NodeKind::ForEach
+            if crate::widget_factory_graph_1001::is_local_assignment(node)
+                || (matches!(node.kind,NodeKind::ForEach|NodeKind::ForLoopWithBreak)
                     && matches!(
                         self.kind,
                         GraphKind::Function { .. }
+                            | GraphKind::UnitFunction { .. }
                             | GraphKind::Screen { .. }
                             | GraphKind::Handler { .. }
                     ))
@@ -59,6 +60,7 @@ impl GraphDocument {
     }
 
     fn parameter_names(&self) -> BTreeSet<String> {
+        if matches!(self.kind,GraphKind::UnitFunction{..}) { return crate::unit_graph_source1003::parameters(self).map(|pins|pins.iter().map(|pin|pin.label.clone()).collect()).unwrap_or_default(); }
         self.nodes
             .values()
             .filter(|node| {
@@ -86,7 +88,9 @@ impl GraphDocument {
                 | NodeKind::VariableReference
                 | NodeKind::SetVariable
                 | NodeKind::LocalVariable
+                | NodeKind::WidgetCreate
                 | NodeKind::ForEach
+                | NodeKind::ForLoopWithBreak
         ) {
             return None;
         }
@@ -168,10 +172,15 @@ impl GraphDocument {
     /// Authoring compatibility constraint, distinct from the connected value's
     /// presentation type. Includes current registry types and legacy IndexKey.
     pub fn pin_constraint_type(&self, pin: PinId) -> Option<ValueType> {
+        self.pin_constraint_type_with_binding_stamp(pin,self.source_binding_stamp())
+    }
+
+    pub(crate) fn pin_constraint_type_with_binding_stamp(&self,pin:PinId,stamp:u64) -> Option<ValueType> {
+        if let Some(value_type) = self.source_binding_pin_type_with_stamp(pin,stamp) { return Some(value_type); }
         let pin = self.pins.get(&pin)?;
         let node = self.nodes.get(&pin.node)?;
-        if node.kind == NodeKind::Reroute && !pin.value_type.is_execution() {
-            return Some(ValueType::Any);
+        if node.kind == NodeKind::Reroute {
+            return Some(reroute_constraint(self, node.id));
         }
         // Old presentation caches used an integer-only Index pin. The current
         // operator accepts integer positions and string dictionary keys.
@@ -202,9 +211,84 @@ struct Inference<'a> {
     active_operand_contexts: BTreeSet<NodeId>,
     incoming: BTreeMap<PinId, Option<PinId>>,
     work: usize,
+    binding_stamp: u64,
+    reroutes: crate::reroute_net::RerouteTopology,
+    reroute_types: BTreeMap<(usize, bool), ValueType>,
+    active_reroutes: BTreeSet<(usize, bool)>,
+    exhausted: bool,
+}
+
+pub(crate) fn reroute_constraint(graph: &GraphDocument, node: NodeId) -> ValueType {
+    Inference::new(graph).reroute_type(node, 0, true)
+}
+
+pub(crate) fn reroute_edit_constraint(graph: &GraphDocument, node: NodeId) -> Option<ValueType> {
+    let mut inference=Inference::new(graph);
+    let ty=inference.reroute_type(node,0,true);
+    (!inference.exhausted).then_some(ty)
+}
+
+pub(crate) fn reroute_exec_connection_resolvable(graph:&GraphDocument,output:PinId,input:PinId)->bool {
+    let mut inference=Inference::new(graph);
+    inference.reroutes=graph.reroute_topology_with_link(Some((output,input)));
+    for pin in [output,input] {
+        let Some(model)=graph.pins.get(&pin)else{return false;};
+        if graph.nodes.get(&model.node).is_some_and(|n|n.kind==NodeKind::Reroute)
+            && inference.reroute_type(model.node,0,true)!=ValueType::Execution{return false;}
+    }
+    !inference.exhausted
+}
+
+pub(crate) fn reroute_constraints(graph: &GraphDocument) -> BTreeMap<PinId, ValueType> {
+    let mut inference=Inference::new(graph);
+    let nodes: Vec<_>=inference.reroutes.by_node.keys().copied().collect();
+    let mut result=BTreeMap::new();
+    for node in nodes {
+        let ty=inference.reroute_type(node,0,true);
+        for key in ["value","value_out"] {
+            if let Some(pin)=graph.pin_by_key(node,key) { result.insert(pin.id,ty.clone()); }
+        }
+    }
+    result
 }
 
 impl<'a> Inference<'a> {
+    fn reroute_type(&mut self, node: NodeId, depth: usize, constraint: bool) -> ValueType {
+        let Some(index)=self.reroutes.by_node.get(&node).copied() else { return ValueType::Any; };
+        let key=(index,constraint);
+        if let Some(ty)=self.reroute_types.get(&key) { return ty.clone(); }
+        if depth>128 || self.work>=100_000 { self.exhausted=true; return ValueType::Any; }
+        if !self.active_reroutes.insert(key) { return ValueType::Any; }
+        let net=&self.reroutes.nets[index];
+        let valid=net.valid;
+        let too_deep=net.too_deep;
+        let cost=net.nodes.len()+net.producers.len()+net.consumers.len();
+        let producers: Vec<_>=net.producers.iter().copied().collect();
+        let consumers: Vec<_>=net.consumers.iter().copied().collect();
+        self.work=self.work.saturating_add(cost);
+        let mut ty=ValueType::Any;
+        // Preserve the engine's existing bounded-inference contract even
+        // though a connected knot chain is now flattened before inference.
+        if too_deep || self.work>100_000 { self.exhausted=true; }
+        if valid && !self.exhausted {
+            // Actual producers win. Consumer constraints can type a cable,
+            // but never manufacture a value for an unknown connected producer.
+            for source in &producers {
+                let candidate=self.pin(*source,depth+1);
+                if candidate!=ValueType::Any { ty=candidate; break; }
+            }
+            if ty==ValueType::Any && (constraint || producers.is_empty()) {
+                for consumer in consumers {
+                    let candidate=self.graph.pin_constraint_type_with_binding_stamp(consumer,self.binding_stamp).unwrap_or(ValueType::Any);
+                    if candidate!=ValueType::Any { ty=candidate; break; }
+                }
+            }
+        }
+        self.active_reroutes.remove(&key);
+        self.reroute_types.insert(key,ty.clone());
+        ty
+    }
+
     fn new(graph: &'a GraphDocument) -> Self {
         let mut incoming = BTreeMap::new();
         for edge in graph.edges.values() {
@@ -221,6 +305,11 @@ impl<'a> Inference<'a> {
             active_operand_contexts: BTreeSet::new(),
             incoming,
             work: 0,
+            binding_stamp: graph.source_binding_stamp(),
+            reroutes: graph.reroute_topology(),
+            reroute_types: BTreeMap::new(),
+            active_reroutes: BTreeSet::new(),
+            exhausted: false,
         }
     }
 
@@ -232,14 +321,17 @@ impl<'a> Inference<'a> {
             .graph
             .pins
             .get(&id)
-            .is_some_and(|pin| pin.value_type.is_execution())
+            .is_some_and(|pin| pin.value_type.is_execution()
+                && self.graph.nodes.get(&pin.node).is_some_and(|n| n.kind != NodeKind::Reroute))
         {
             self.types.insert(id, ValueType::Execution);
             return ValueType::Execution;
         }
-        if depth > 128 || self.work >= 100_000 || !self.active.insert(id) {
+        if depth > 128 || self.work >= 100_000 {
+            self.exhausted=true;
             return ValueType::Any;
         }
+        if !self.active.insert(id) { return ValueType::Any; }
         self.work += 1;
         let ty = self.infer(id, depth + 1);
         self.active.remove(&id);
@@ -251,14 +343,17 @@ impl<'a> Inference<'a> {
         let Some(pin) = self.graph.pins.get(&id) else {
             return ValueType::Any;
         };
-        if pin.value_type.is_execution() {
-            return ValueType::Execution;
-        }
         let Some(node) = self.graph.nodes.get(&pin.node) else {
             return ValueType::Any;
         };
+        if node.kind == NodeKind::Reroute {
+            return self.reroute_type(node.id, depth, false);
+        }
+        if pin.value_type.is_execution() {
+            return ValueType::Execution;
+        }
         if pin.direction == PinDirection::Input {
-            let declared = self.graph.pin_constraint_type(id).unwrap_or(ValueType::Any);
+            let declared = self.graph.pin_constraint_type_with_binding_stamp(id,self.binding_stamp).unwrap_or(ValueType::Any);
             if let Some(Some(source)) = self.incoming.get(&id) {
                 let value = self.pin(*source, depth);
                 // Show the value actually carried by every accepted legacy
@@ -308,20 +403,18 @@ impl<'a> Inference<'a> {
                 .or(pin.default_value.as_ref())
                 .map(property_type)
                 .unwrap_or_else(|| pin.value_type.clone()),
-            NodeKind::VariableGet => self
-                .graph
-                .variable_node_name(node.id)
-                .and_then(|name| self.graph.variables.get(&name))
-                .map(|variable| variable.value_type.clone())
-                .unwrap_or(ValueType::Any),
+            NodeKind::VariableGet => self.graph.pin_constraint_type_with_binding_stamp(id,self.binding_stamp).unwrap_or(ValueType::Any),
             NodeKind::SetVariable | NodeKind::LocalVariable if pin.key == "value_out" => {
-                let declared = self.graph.pin_constraint_type(id).unwrap_or(ValueType::Any);
+                let declared = self.graph.pin_constraint_type_with_binding_stamp(id,self.binding_stamp).unwrap_or(ValueType::Any);
                 if declared == ValueType::Any {
                     self.input_value(node.id, "value", depth)
                 } else {
                     declared
                 }
             }
+            NodeKind::ForEach if node.native_loop_contract == Some(crate::NativeLoopContract::DemandV1) && pin.key == "array_element" => {
+                match self.input_value(node.id, "collection", depth) { ValueType::List(item) => *item, _ => ValueType::Any }
+            },
             NodeKind::Reroute => self.input_value(node.id, "value", depth),
             NodeKind::MathAdd
             | NodeKind::MathSubtract
@@ -392,6 +485,7 @@ impl<'a> Inference<'a> {
             }
             NodeKind::Index => self.index_type(node.id, depth),
             NodeKind::FunctionCall => {
+                if self.graph.library_call1027(node.id).is_some(){return pin.value_type.clone();}
                 let Some(PropertyValue::String(function)) = node.properties.get("function") else {
                     return ValueType::Any;
                 };
@@ -724,6 +818,11 @@ fn operand_context_type(domain: OperandDomain, evidence: &[ValueType]) -> Option
     if known.is_empty() {
         return None;
     }
+    if matches!(domain, OperandDomain::Equality | OperandDomain::BlueprintEquality) {
+        if let ValueType::Enum(asset) = known[0] {
+            if known.iter().all(|ty| **ty == ValueType::Enum(*asset)) { return Some(ValueType::Enum(*asset)); }
+        }
+    }
     if matches!(domain, OperandDomain::Add)
         && known
             .iter()
@@ -769,6 +868,8 @@ pub(crate) fn property_type(value: &PropertyValue) -> ValueType {
         PropertyValue::Int(_) => ValueType::Int,
         PropertyValue::Float(_) => ValueType::Float,
         PropertyValue::String(_) => ValueType::String,
+        PropertyValue::Name(_) => ValueType::Name,
+        PropertyValue::Enum(value) => ValueType::Enum(value.asset),
         PropertyValue::StringList(items) => ValueType::List(Box::new(if items.is_empty() {
             ValueType::Any
         } else {
@@ -799,6 +900,7 @@ fn numeric_type(ty: ValueType) -> ValueType {
 
 fn arithmetic_type(add: bool, left: &ValueType, right: &ValueType) -> ValueType {
     use ValueType as T;
+    if matches!(left, T::Name | T::Enum(_)) || matches!(right, T::Name | T::Enum(_)) { return T::Any; }
     if add
         && (matches!(left, T::String | T::InterpolatedText)
             || matches!(right, T::String | T::InterpolatedText))
@@ -815,12 +917,27 @@ fn arithmetic_type(add: bool, left: &ValueType, right: &ValueType) -> ValueType 
 fn builtin_type(name: &str, args: &[ValueType]) -> ValueType {
     use ValueType as T;
     match name {
-        "len" | "floor" | "ceil" | "to_int" | "random" | "rand" => T::Int,
+        "__rvn_widget_class_v1" | "__rvn_widget_class_none_v1" | "__rvn_widget_object_class_v1" => T::WidgetClass,
+        "__rvn_widget_create_v1" => T::WidgetObject,
+        "__rvn_literal_name" | "__rvn_string_to_name" | "__rvn_string_table_id_name" | "__rvn_text_table_id" => T::Name,
+        "__rvn_text_table_valid" => T::Bool,
+        "__rvn_text_table_key" => T::String,
+        "__rvn_string_table_text_name" => T::InterpolatedText,
+        "__rvn_string_table_registered_name" | "__rvn_string_table_entry_registered_name" => T::Bool,
+        "__rvn_string_table_namespace_name" | "__rvn_string_table_source_name" | "__rvn_string_table_metadata_name" => T::String,
+        "__rvn_registered_string_tables_name" | "__rvn_string_table_metadata_ids_name" => T::List(Box::new(T::Name)),
+        "__rvn_string_table_keys_name" => T::List(Box::new(T::String)),
+        "__rvn_name_to_string" => T::String,
+        "len" | "floor" | "ceil" | "to_int" | "__rvn_bool_to_int" | "random" | "rand" => T::Int,
         "mouse_x" | "mouse_y" => T::Float,
-        "contains" | "key_pressed" | "mouse_clicked" => T::Bool,
+        "__rvn_string_table_registered" | "__rvn_string_table_entry_registered" => T::Bool,
+        "__rvn_string_table_id" | "__rvn_string_table_namespace" | "__rvn_string_table_source" | "__rvn_string_table_metadata" => T::String,
+        "__rvn_string_table_asset" => T::Asset(crate::AssetKind::StringTable),
+        "__rvn_registered_string_tables" | "__rvn_string_table_keys" | "__rvn_string_table_metadata_ids" => T::List(Box::new(T::String)),
+        "contains" | "key_pressed" | "mouse_clicked" | "__rvn_int_to_bool" => T::Bool,
         "upper" | "lower" | "capitalize" | "trim" | "replace" | "substring" | "make_color"
         | "make_color_rgb" | "text_to_string" => T::String,
-        "string_to_text" => T::InterpolatedText,
+        "string_to_text" | "__rvn_localizable_text" | "__rvn_invariant_text" | "__rvn_empty_text" | "__rvn_format_text" | "__rvn_string_table_text" => T::InterpolatedText,
         "split" | "dict_keys" => T::List(Box::new(T::String)),
         "abs" => numeric_type(args.first().cloned().unwrap_or(T::Any)),
         // min/max return Int when their chosen numeric value is integral, even
@@ -844,11 +961,30 @@ pub(crate) fn expression_type(
     expr: &Expr,
     variables: &BTreeMap<String, VariableDefinition>,
 ) -> ValueType {
-    fn infer(expr: &Expr, vars: &BTreeMap<String, VariableDefinition>, depth: usize) -> ValueType {
+    expression_type_with_resolver(expr, variables, &|_| None)
+}
+
+/// Pure source analysis. The resolver may supply a type for an expression
+/// whose genuine source producer has already been inspected. It never supplies
+/// a value, declaration, execution result or publication capability.
+pub(crate) fn expression_type_with_resolver(
+    expr: &Expr,
+    variables: &BTreeMap<String, VariableDefinition>,
+    resolver: &impl Fn(&Expr) -> Option<ValueType>,
+) -> ValueType {
+    fn infer(expr: &Expr, vars: &BTreeMap<String, VariableDefinition>, depth: usize,
+        resolver: &impl Fn(&Expr) -> Option<ValueType>) -> ValueType {
         if depth > 128 {
             return ValueType::Any;
         }
+        if let Some(ty) = resolver(expr) { return ty; }
+        if let Ok(Some(value)) = crate::enum_graph1026::literal_expression1026(expr) { return ValueType::Enum(value.asset); }
         match expr {
+            Expr::LibraryCall{..}=>ValueType::Any, // no type claim without the original qualified signature resolver
+            Expr::StandardMacroData{output,..}=>match output {
+                rvn_parser::scheduled_source::standard_macro_contract::DataOutput::Counter=>ValueType::Int,
+                rvn_parser::scheduled_source::standard_macro_contract::DataOutput::IsA=>ValueType::Bool,
+            },
             Expr::Int(_) => ValueType::Int,
             Expr::Float(_) => ValueType::Float,
             Expr::Bool(_) => ValueType::Bool,
@@ -858,10 +994,10 @@ pub(crate) fn expression_type(
                 .map(|var| var.value_type.clone())
                 .unwrap_or(ValueType::Any),
             Expr::ListLit(items) => ValueType::List(Box::new(common_type(
-                items.iter().map(|item| infer(item, vars, depth + 1)),
+                items.iter().map(|item| infer(item, vars, depth + 1, resolver)),
             ))),
             Expr::And(_, _) | Expr::Or(_, _) | Expr::Not(_) => ValueType::Bool,
-            Expr::Neg(value) => numeric_type(infer(value, vars, depth + 1)),
+            Expr::Neg(value) => numeric_type(infer(value, vars, depth + 1, resolver)),
             Expr::BinOp { op, left, right } => match op {
                 BinOpKind::Eq
                 | BinOpKind::Ne
@@ -871,13 +1007,13 @@ pub(crate) fn expression_type(
                 | BinOpKind::Ge => ValueType::Bool,
                 _ => arithmetic_type(
                     *op == BinOpKind::Add,
-                    &infer(left, vars, depth + 1),
-                    &infer(right, vars, depth + 1),
+                    &infer(left, vars, depth + 1, resolver),
+                    &infer(right, vars, depth + 1, resolver),
                 ),
             },
             Expr::Index { target, index } => match (
-                infer(target, vars, depth + 1),
-                infer(index, vars, depth + 1),
+                infer(target, vars, depth + 1, resolver),
+                infer(index, vars, depth + 1, resolver),
             ) {
                 (ValueType::List(inner), ValueType::Int) => *inner,
                 (ValueType::String | ValueType::InterpolatedText, ValueType::Int) => {
@@ -896,7 +1032,7 @@ pub(crate) fn expression_type(
                                     return ValueType::Any;
                                 }
                                 if name == key {
-                                    result = infer(&pair[1], vars, depth + 1);
+                                    result = infer(&pair[1], vars, depth + 1, resolver);
                                 }
                             }
                             return result;
@@ -910,10 +1046,10 @@ pub(crate) fn expression_type(
                 name,
                 &args
                     .iter()
-                    .map(|arg| infer(arg, vars, depth + 1))
+                    .map(|arg| infer(arg, vars, depth + 1, resolver))
                     .collect::<Vec<_>>(),
             ),
         }
     }
-    infer(expr, variables, 0)
+    infer(expr, variables, 0, resolver)
 }

@@ -68,7 +68,7 @@ fn equality_family_matches(left: &ValueType, right: &ValueType) -> bool {
     matches!(left, T::Any)
         || matches!(right, T::Any)
         || (matches!(left, T::Int | T::Float) && matches!(right, T::Int | T::Float))
-        || (left == right && matches!(left, T::Bool | T::String | T::InterpolatedText))
+        || (left == right && matches!(left, T::Bool | T::String | T::Name | T::InterpolatedText | T::Enum(_)))
 }
 
 pub(crate) fn authored_default_type(
@@ -124,7 +124,7 @@ impl GraphDocument {
                 matches!(
                     blueprint_operand_domain(node),
                     Some(BlueprintOperandDomain::Equality)
-                )
+                ) || crate::enum_graph1026::is_equality1026(node)
             });
         let types = if contextual {
             self.effective_pin_types()
@@ -165,6 +165,17 @@ impl GraphDocument {
         if !declared.accepts(source) || !node.kind.accepts_data_source(source) {
             return false;
         }
+        if crate::enum_graph1026::is_equality1026(node) {
+            for other in node.pins.iter().filter_map(|id| self.pins.get(id)).filter(|other|
+                other.id != input && other.direction == PinDirection::Input && !other.value_type.is_execution()) {
+                let mut wires = self.edges.values().filter(|edge| edge.input == other.id);
+                let producer = wires.next();
+                let evidence = if wires.next().is_some() { ValueType::Any }
+                    else if let Some(edge) = producer { types.get(&edge.output).cloned().unwrap_or(ValueType::Any) }
+                    else { other.default_value.as_ref().map(|value| authored_default_type(self, other, value)).unwrap_or(ValueType::Any) };
+                if !crate::enum_graph1026::equality_family1026(source, &evidence) { return false; }
+            }
+        }
         let Some(domain) = blueprint_operand_domain(node) else {
             return true;
         };
@@ -177,7 +188,7 @@ impl GraphDocument {
             D::Equality => {
                 if !matches!(
                     source,
-                    T::Any | T::Int | T::Float | T::Bool | T::String | T::InterpolatedText
+                    T::Any | T::Int | T::Float | T::Bool | T::String | T::InterpolatedText | T::Enum(_)
                 ) {
                     return false;
                 }
@@ -248,6 +259,7 @@ impl GraphDocument {
         } else {
             properties.remove(&marker);
         }
+        self.adopt_nominal_enum_schema1026();
         Ok(())
     }
 }

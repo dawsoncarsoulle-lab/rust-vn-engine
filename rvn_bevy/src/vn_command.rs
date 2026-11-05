@@ -25,6 +25,7 @@ pub enum VnCommand {
     LoadedCompatibility(rvn_core::LoadCompatibility),
     Accessibility(rvn_ui::accessibility::AccessibilitySettings),
     Speech(rvn_ui::accessibility::SpeechRequest),
+    RetiredWidgetSpeech(crate::accessibility::retired_speech_0975::FrozenSpeech),
     Videos(Vec<rvn_core::video::VideoView>),
     LayeredCharacters(Vec<rvn_core::composition::LayeredView>),
     Motions(Vec<rvn_core::motion::MotionView>),
@@ -36,6 +37,7 @@ pub enum VnCommand {
         path: String,
         transition: Transition,
     },
+    UnlockCinematic { id:String },
     ShowCinematic {
         id: String,
         transition: Option<String>,
@@ -80,6 +82,12 @@ pub enum VnCommand {
         character: Option<String>,
         text: String,
     },
+    ScopedShowDialogue {
+        source: rvn_core::display_reveal::DisplayRevealSource,
+        checkpoint: Option<rvn_core::display_reveal::RevealCheckpoint>,
+        character: Option<String>,
+        text: String,
+    },
     ShowChoice {
         options: Vec<String>,
     },
@@ -111,6 +119,8 @@ pub enum VnCommand {
         file: String,
     },
     VoiceStop,
+    SfxPlayTransition { file:String, transition:Transition },
+    SfxStopTransition { file:String, transition:Transition },
 
     // ── Meta ──────────────────────────────────────────────────────────────────
     ScriptFinished,

@@ -1,0 +1,9 @@
+function supplier0852(){local draw=random(1,1) return [11,22,33]}
+function first0852(){local draw=random(1,1) return 0}
+function last0852(){local draw=random(1,1) return 2}
+init{set observed0852=0}
+screen target0852(marker){local seen=0 for item in supplier0852(){set seen=item} return component("root","text",{"text":marker,"value":seen},[])}
+scene label start
+ui.open("target0852",["actual screen"],false,1)
+"Ready0852"
+return

@@ -229,6 +229,106 @@ pub(super) fn project(
     }
 }
 
+// Private proposal inside legacy_menu_navigation. Not installed/typechecked/run.
+// Preserve the existing MenuButton receiver while its presenter awaits K migration.
+#[derive(Clone, PartialEq)]
+struct PauseImageTarget {
+    root: Entity,
+    action: MenuButton,
+    order: i32,
+    key: String,
+}
+#[derive(Clone)]
+pub(crate) struct PauseImageFrame {
+    return_to: Option<VnState>,
+    targets: std::collections::HashMap<Entity, PauseImageTarget>,
+}
+fn pause_image_source(world: &World) -> Option<Option<VnState>> {
+    if *world.get_resource::<State<VnState>>()?.get() != VnState::Menu
+        || world.get_resource::<SaveMenuState>()?.active
+        || world.get_resource::<SettingsMenuState>()?.active
+        || world.get_resource::<crate::systems::save_menu::SaveConfirmation>()?.active()
+        || world.get_resource::<Menus>()?.active_page.is_some()
+        || world.get_resource::<crate::programmable_ui::Screens>().is_some_and(|screens| screens.modal())
+        || world.get_resource::<crate::accessibility::Accessibility>()
+            .is_some_and(|access| access.open || access.blocked) { return None; }
+    Some(world.get_resource::<MenuState>()?.return_to.clone())
+}
+fn pause_image_root(world: &World, mut entity: Entity) -> Option<Entity> {
+    for _ in 0..256 {
+        if world.get::<Style>(entity).is_some_and(|style| style.display == Display::None)
+            || world.get::<Visibility>(entity) == Some(&Visibility::Hidden) { return None; }
+        if world.get::<MenuOverlay>(entity).is_some() {
+            return world.get::<Covered>(entity).is_none().then_some(entity);
+        }
+        entity = world.get::<Parent>(entity)?.get();
+    }
+    None
+}
+fn pause_image_target(world: &World, entity: Entity) -> Option<PauseImageTarget> {
+    if world.get::<Button>(entity).is_none() || world.get::<Focusable>(entity).is_none()
+        || world.get::<MenuElement>(entity).is_some() || world.get::<MenuProxy>(entity).is_some() { return None; }
+    let focus = world.get::<MenuFocus>(entity)?;
+    Some(PauseImageTarget {root: pause_image_root(world, entity)?,
+        action: world.get::<MenuButton>(entity)?.clone(), order: focus.0, key: focus.1.clone()})
+}
+pub(crate) fn pause_image_cost(world: &World, cost: &mut crate::editor_preview_input::PreviewCost) -> Option<()> {
+    if pause_image_source(world).is_none() { return Some(()); }
+    let stack = world.get_resource::<bevy::ui::UiStack>()?;
+    if stack.uinodes.len() > 4096 { return None; }
+    cost.add(std::mem::size_of::<PauseImageFrame>())?;
+    for &entity in &stack.uinodes {
+        if world.get::<MenuButton>(entity).is_some() && world.get::<Focusable>(entity).is_some() {
+            let focus = world.get::<MenuFocus>(entity)?;
+            cost.add(std::mem::size_of::<PauseImageTarget>().checked_add(focus.1.len())?
+                .checked_add(std::mem::size_of::<Entity>())?)?;
+        }
+    }
+    Some(())
+}
+impl PauseImageFrame {
+    pub(crate) fn capture(world: &World) -> Option<Self> {
+        let mut cost = crate::editor_preview_input::PreviewCost::new(2 * 1024 * 1024);
+        pause_image_cost(world, &mut cost)?;
+        let return_to = pause_image_source(world)?;
+        let stack = world.get_resource::<bevy::ui::UiStack>()?;
+        let targets = stack.uinodes.iter().filter_map(|&entity|
+            pause_image_target(world, entity).map(|target| (entity, target))).collect();
+        Some(Self {return_to, targets})
+    }
+    pub(crate) fn contains(&self, entity: Entity) -> bool {self.targets.contains_key(&entity)}
+    pub(crate) fn current(&self, world: &World, entity: Entity) -> bool {
+        let mut cost = crate::editor_preview_input::PreviewCost::new(2 * 1024 * 1024);
+        if pause_image_cost(world, &mut cost).is_none()
+            || pause_image_source(world) != Some(self.return_to.clone())
+            || !world.get_resource::<bevy::ui::UiStack>().is_some_and(|stack| stack.uinodes.contains(&entity))
+            || !world.get::<ViewVisibility>(entity).is_some_and(|visible| visible.get())
+            || world.get::<Node>(entity).is_none() || world.get::<GlobalTransform>(entity).is_none() {return false;}
+        pause_image_target(world, entity).as_ref() == self.targets.get(&entity)
+            && self.targets.contains_key(&entity)
+    }
+    pub(crate) fn project(&self, world: &mut World, picked: Option<Entity>, pressed: Option<Entity>) {
+        let picked = picked.filter(|&entity| self.current(world, entity));
+        // A fresh primary Down owns activation. A held button dragged from a
+        // background into Resume must never become a new press recipient.
+        let pressed = pressed.filter(|&entity| self.current(world, entity));
+        let mut buttons = world.query_filtered::<(Entity, &mut Interaction),
+            (With<MenuButton>, Without<MenuElement>, Without<MenuProxy>)>();
+        for (entity, mut interaction) in buttons.iter_mut(world) {
+            let next = if pressed == Some(entity) {Interaction::Pressed}
+                else if picked == Some(entity) {Interaction::Hovered} else {Interaction::None};
+            if *interaction != next {*interaction = next;}
+        }
+    }
+}
+pub(crate) fn clear_pause_image_interactions(world: &mut World) {
+    let mut buttons = world.query_filtered::<&mut Interaction,
+        (With<MenuButton>, Without<MenuElement>, Without<MenuProxy>)>();
+    for mut interaction in buttons.iter_mut(world) {
+        if *interaction != Interaction::None {*interaction = Interaction::None;}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

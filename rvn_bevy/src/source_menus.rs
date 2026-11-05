@@ -13,6 +13,8 @@ use std::collections::BTreeMap;
 pub(crate) struct Stamp {
     generation: u64,
     epoch: u64,
+    runtime_epoch: u64,
+    owner: Option<rvn_core::scene::ActivationId>,
     pc: usize,
     interaction: Option<StoryInteraction>,
     destinations: Vec<usize>,
@@ -24,6 +26,7 @@ pub struct Receipt {
     pub(crate) effect: MenuEffect,
     pub(crate) stamp: Stamp,
     pub(crate) previous: rvn_core::GameState,
+    pub(crate) history_previous:Option<rvn_core::audio_checkpoint::HistoricalGameSnapshot>,
 }
 #[derive(Resource, Default)]
 pub(crate) struct SourceMenus {
@@ -37,6 +40,7 @@ pub(crate) struct SourceMenus {
     confirmation_serial: u64,
     confirmation_token: Option<u64>,
     consumed_receipt: u64,
+    consumed_instance:Option<u64>,
     pub(crate) diagnostic: String,
     invalid: BTreeMap<PageRole,(String,Option<String>,u64)>,
     conflict_key: String,
@@ -45,6 +49,21 @@ impl SourceMenus {
     pub(crate) fn active(&self, role: PageRole) -> bool { self.roles.contains_key(&role) }
     pub(crate) fn any(&self) -> bool { !self.roles.is_empty() }
     pub(crate) fn modal(&self) -> bool { self.roles.keys().any(|role| is_modal(*role)) }
+    #[cfg(test)]
+    pub(crate) fn for_test_role(role:PageRole)->Self {
+        Self{roles:BTreeMap::from([(role,"host".into())]),..Self::default()}
+    }
+// Proposed inside SourceMenus; private preparation, not installed or tested.
+pub(crate) fn current_confirmation_token(&self, gate: &SaveConfirmation) -> Option<u64> {
+    if gate.active()
+        && self.confirmation_key == format!("{:?}/{:?}", gate.pending, gate.action_pending)
+    {
+        self.confirmation_token
+    } else {
+        None
+    }
+}
+
     fn confirmation(&mut self, gate: &SaveConfirmation) {
         let key = if gate.active() { format!("{:?}/{:?}", gate.pending, gate.action_pending) } else { String::new() };
         if self.confirmation_key != key {
@@ -63,18 +82,23 @@ pub struct SourceMenusPlugin;
 impl Plugin for SourceMenusPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SourceMenus>().add_systems(Update, (
-            synchronize.in_set(SourceMenuSyncSet)
+            synchronize.run_if(resource_exists::<VnEngine>.and_then(crate::scene_publication::ready)).in_set(SourceMenuSyncSet)
                 .after(crate::systems::stepping_system)
                 .after(crate::systems::dialogue_system)
                 .after(crate::systems::typewriter_system)
                 .before(crate::programmable_ui::InterfaceReceiveSet)
                 .before(crate::programmable_ui::InterfaceInputSet),
-            dispatch.in_set(SourceMenuActionSet)
-                .after(crate::programmable_ui::InterfaceInputSet)
-                .after(crate::custom_canvas::CanvasInputSet)
-                .before(crate::systems::player_input_system),
         ));
+        register_dispatch(app);
     }
+}
+fn register_dispatch(app:&mut App) {
+    // Game receipts retain the existing bounded capture/drain. Startup has no
+    // authority to execute these Game actions before its real owner handoff.
+    app.add_systems(Update,dispatch.run_if(resource_exists::<VnEngine>).in_set(SourceMenuActionSet)
+        .after(crate::programmable_ui::InterfaceInputSet)
+        .after(crate::custom_canvas::CanvasInputSet)
+        .before(crate::systems::player_input_system));
 }
 #[derive(SystemParam)]
 struct Context<'w> {
@@ -162,7 +186,7 @@ fn context_value(role: PageRole, source: &SourceMenus, ctx: &Context, engine: &V
     let endings: Vec<_> = ctx.persistent.data.seen_endings.iter().map(|id| json!({"id":id,"unlocked":true,"locked":false})).collect();
     let history: Vec<_> = ctx.history.lines.iter().map(|line| json!({"character":line.character,"text":line.text})).collect();
     let choices: Vec<_> = ctx.render.choice_options.iter().enumerate().map(|(index,text)| json!({"index":index,"shortcut":index+1,"text":text})).collect();
-    let character = engine.0.current_interaction().ok().flatten().and_then(|interaction| match interaction {
+    let character = engine.0.displayed_interaction().ok().flatten().and_then(|interaction| match interaction {
         StoryInteraction::Dialogue { character, .. } => character, _ => None })
         .or_else(||engine.0.last_dialogue_interaction().ok().flatten().and_then(|interaction|match interaction {
             StoryInteraction::Dialogue { character, .. }=>character,_=>None})).unwrap_or_default();
@@ -229,8 +253,9 @@ fn synchronize(mut source: ResMut<SourceMenus>, menus: Res<Menus>, ctx: Context,
     }
     auth.pages = menus.document().map(|document| document.pages.iter().map(|page| page.id.clone()).collect()).unwrap_or_default();
     engine.0.renderer.menu_authority = auth;
-    engine.0.renderer.menu_stamp = Stamp { generation: source.generation, epoch: engine.0.interface_epoch(),
-        pc: engine.0.state.current_interactive_pc, interaction: engine.0.current_interaction().ok().flatten(),
+    engine.0.renderer.menu_stamp = Stamp { generation: source.generation, epoch: engine.0.interface_epoch(), runtime_epoch: engine.0.runtime_epoch(),
+        owner:engine.0.state.scene_execution.as_ref().and_then(|execution|execution.owner()),
+        pc: engine.0.state.current_interactive_pc, interaction: engine.0.displayed_interaction().ok().flatten(),
         destinations: engine.0.active_choice_indices().unwrap_or_default(), confirmation: source.confirmation_token };
     for (index, role) in PageRole::ALL.into_iter().enumerate() {
         if engine.0.renderer.menu_pending {break;}
@@ -258,7 +283,7 @@ fn synchronize(mut source: ResMut<SourceMenus>, menus: Res<Menus>, ctx: Context,
     for command in engine.0.renderer.take_pending() { output.send(command); }
 }
 fn execute_slot(ctx: &mut ActionContext, thumbnails: &crate::save_thumbnails::SaveThumbnails,
-    slot: u32, mode: SaveMenuMode, approved: bool) -> Result<(),String> {
+    slot: u32, mode: SaveMenuMode, approved: bool,previous:&rvn_core::GameState,proof:Option<&rvn_core::audio_checkpoint::HistoricalGameSnapshot>) -> Result<(),String> {
     let manager=SaveManager::new(&ctx.paths.saves,SUPPORTED_SLOTS).map_err(|error|error.to_string())?;
     let saved=manager.load(slot).ok();
     if mode!=SaveMenuMode::Load && manager.is_protected(slot).map_err(|error|error.to_string())? {return Err("Save slot is protected".into());}
@@ -269,6 +294,9 @@ fn execute_slot(ctx: &mut ActionContext, thumbnails: &crate::save_thumbnails::Sa
     }
     match mode {
         SaveMenuMode::Save=>{
+            crate::display_reveal::flush(&mut ctx.engine,&ctx.typing,ctx.reveal_binding.as_deref())?;
+            if crate::checkpoint_requests::defer_menu_save(&ctx.engine,ctx.checkpoint_requests.as_deref_mut(),
+                crate::checkpoint_requests::SaveDestination::Manual(slot),format!("Sauvegarde {slot}"),"script.rvn".into(),saved.clone(),previous,proof)? {return Ok(());}
             ctx.engine.0.save(&manager,slot,format!("Sauvegarde {slot}"),"script.rvn".into()).map_err(|error|error.to_string())?;
             if let Err(error)=thumbnails.persist(&ctx.engine,&manager,&ctx.paths.saves,slot) {warn!("Save thumbnail: {error}");}
             if let Ok(saved)=manager.load(slot) {
@@ -277,7 +305,10 @@ fn execute_slot(ctx: &mut ActionContext, thumbnails: &crate::save_thumbnails::Sa
             ctx.save.active=false; ctx.save.origin=SaveMenuOrigin::InGame;
         }
         SaveMenuMode::Load=>{
-            ctx.engine.0.load_data(saved.unwrap()).map_err(|error|error.to_string())?;
+            let saved=saved.unwrap();
+            let target=rvn_core::persistent::LastResumeTarget::manual(slot,saved.timestamp);
+            if crate::checkpoint_requests::defer_load(&ctx.engine,ctx.checkpoint_requests.as_deref_mut(),&saved,Some(target),true)? {return Ok(());}
+            ctx.engine.0.load_data(saved).map_err(|error|error.to_string())?;
             crate::systems::save_menu::apply_loaded_game(&mut ctx.engine,&mut ctx.render,&mut ctx.imagemap,&mut ctx.typing,&mut ctx.history,&mut ctx.events);
             if let Ok(saved)=manager.load(slot) {
                 crate::systems::save_menu::record_resume_target(&mut ctx.persistent,rvn_core::persistent::LastResumeTarget::manual(slot,saved.timestamp));
@@ -312,10 +343,13 @@ fn persist_preferences(ctx: &mut ActionContext, settings: &mut Settings, request
     ctx.persistent.data=persistent; *settings=next; Ok(())
 }
 fn execute_quick(ctx: &mut ActionContext, thumbnails: &mut crate::save_thumbnails::SaveThumbnails,
-    load: bool, approved: bool) -> Result<(),String> {
+    load: bool, approved: bool,previous:&rvn_core::GameState,proof:Option<&rvn_core::audio_checkpoint::HistoricalGameSnapshot>) -> Result<(),String> {
     let manager=SaveManager::new(&ctx.paths.saves,SUPPORTED_SLOTS).map_err(|error|error.to_string())?;
     if !load {
-        manager.save_quicksave(&ctx.engine.0.state,"Quicksave".into(),"script.rvn".into()).map_err(|error|error.to_string())?;
+        crate::display_reveal::flush(&mut ctx.engine,&ctx.typing,ctx.reveal_binding.as_deref())?;
+        if crate::checkpoint_requests::defer_menu_save(&ctx.engine,ctx.checkpoint_requests.as_deref_mut(),crate::checkpoint_requests::SaveDestination::Quick,
+            "Quicksave".into(),"script.rvn".into(),manager.load_quicksave().ok(),previous,proof)? {return Ok(());}
+        ctx.engine.0.save_quicksave(&manager,"Quicksave".into(),"script.rvn".into()).map_err(|error|error.to_string())?;
         if let Ok(data)=manager.load_quicksave() {
             crate::systems::save_menu::record_resume_target(&mut ctx.persistent,rvn_core::persistent::LastResumeTarget::quicksave(data.timestamp));
             thumbnails.request_resume(rvn_core::save::ResumeSlot::Quick,&ctx.engine,data);
@@ -326,6 +360,8 @@ fn execute_quick(ctx: &mut ActionContext, thumbnails: &mut crate::save_thumbnail
             ctx.confirmation.pending=Some((0,SaveMenuMode::Load));
             ctx.confirmation.quick_return=Some(ctx.state.get().clone());ctx.next.set(VnState::Menu);
         } else {
+            let target=rvn_core::persistent::LastResumeTarget::quicksave(data.timestamp);
+            if crate::checkpoint_requests::defer_load(&ctx.engine,ctx.checkpoint_requests.as_deref_mut(),&data,Some(target),true)? {return Ok(());}
             ctx.engine.0.load_data(data).map_err(|error|error.to_string())?;
             crate::systems::save_menu::apply_loaded_game(&mut ctx.engine,&mut ctx.render,&mut ctx.imagemap,&mut ctx.typing,&mut ctx.history,&mut ctx.events);
             if let Ok(data)=manager.load_quicksave() {
@@ -336,15 +372,68 @@ fn execute_quick(ctx: &mut ActionContext, thumbnails: &mut crate::save_thumbnail
     }
     Ok(())
 }
+pub(crate) fn checkpoint_receipt_bytes(previous:&rvn_core::GameState,effect:&MenuEffect,stamp:&Stamp,proof:Option<&rvn_core::audio_checkpoint::HistoricalGameSnapshot>)->Result<usize,String> {
+    struct Counter(usize);
+    impl std::fmt::Write for Counter {
+        fn write_str(&mut self,text:&str)->std::fmt::Result {
+            let next=self.0.checked_add(text.len()).ok_or(std::fmt::Error)?;
+            if next>16usize*1024*1024 {return Err(std::fmt::Error);}
+            self.0=next;Ok(())
+        }
+    }
+    let proof_bytes=proof.map(|proof|proof.payload_bytes()).transpose()?.unwrap_or(0);
+    if proof_bytes>16usize*1024*1024 {return Err("Historical menu witness exceeds bounded snapshot budget".into());}
+    let mut count=Counter(proof_bytes);
+    std::fmt::write(&mut count,format_args!("{previous:?}{effect:?}{stamp:?}")).map_err(|_|"Source-menu receipt exceeds its bounded snapshot budget before callback publication".to_string())?;
+    Ok(count.0)
+}
+#[derive(Default)]
+struct CheckpointReceiptBacklog {receipts:std::collections::VecDeque<(Receipt,usize)>,bytes:usize}
+impl CheckpointReceiptBacklog {
+    fn admit(&mut self,receipt:Receipt)->Result<(),String> {
+        let bytes=checkpoint_receipt_bytes(&receipt.previous,&receipt.effect,&receipt.stamp,receipt.history_previous.as_ref())?;
+        if self.receipts.len()>=8 || bytes>(16usize*1024*1024).saturating_sub(self.bytes) {
+            return Err("Source-menu receipt backlog is full; the new suffix was refused".into());
+        }
+        self.bytes+=bytes;self.receipts.push_back((receipt,bytes));Ok(())
+    }
+    fn pop(&mut self)->Option<Receipt> {
+        let (receipt,bytes)=self.receipts.pop_front()?;self.bytes-=bytes;Some(receipt)
+    }
+}
 fn dispatch(mut commands: Commands, mut source: ResMut<SourceMenus>, mut menus: ResMut<Menus>,
+    mut backlog:Local<CheckpointReceiptBacklog>,
     mut io:ParamSet<(ActionContext,EventReader<VnCommand>)>, mut settings: ResMut<Settings>, mut gallery: ResMut<GalleryState>,
     mut choice_focus:ResMut<ChoiceFocus>,
     mut thumbnails: ResMut<crate::save_thumbnails::SaveThumbnails>, mut diagnostic: ResMut<ScriptErrorMessage>) {
     // ActionContext writes VnCommand as it applies game effects. Read the
     // receipt queue first, through a ParamSet, rather than aliasing Events.
-    let receipts:Vec<_>=io.p1().read().filter_map(|event|if let VnCommand::SourceMenu(receipt)=event{Some(receipt.clone())}else{None}).collect();
-    let mut ctx=io.p0();
-    for receipt in receipts {
+    // Events expire after a few frames. Capture the already-produced suffix
+    // once into a bounded local backlog before a request may defer its drain.
+    let mut refused=None;
+    for receipt in io.p1().read().filter_map(|event|if let VnCommand::SourceMenu(receipt)=event{Some(receipt.clone())}else{None}) {
+        if let Err(error)=backlog.admit(receipt){warn!("Source menu: {error}");refused=Some(error);}
+    }
+    loop {
+        let mut ctx=io.p0();
+        if ctx.engine.0.renderer.scene_frame_failed || ctx.engine.0.renderer.scene_batch_pending() || ctx.checkpoint_requests.as_ref().is_some_and(|requests|requests.blocked()) || backlog.receipts.is_empty() {
+            if let Some(error)=refused {source.diagnostic=error;diagnostic.0=source.diagnostic.clone();}
+            return;
+        }
+        let receipt=backlog.pop().unwrap();
+        // Historical authority is admitted before receipt consumption or action
+        // payload. A foreign Engine cannot poison this Engine's receipt window.
+        let historical=if ctx.engine.0.state.scene_execution.is_some() {
+            receipt.history_previous.as_ref().ok_or_else(||"Missing pre-callback historical menu witness".to_string())
+                .and_then(|proof|ctx.engine.0.accepts_source_menu_snapshot(&receipt.previous,proof).map_err(|error|error.to_string()))
+        } else {Ok(true)};
+        let historical_current=matches!(&historical,Ok(true));
+        if !historical_current {
+            source.diagnostic=match &historical {Err(error)=>error.clone(),_=>"Stale historical menu witness".into()};
+            diagnostic.0=source.diagnostic.clone();warn!("Source menu: {}",source.diagnostic);continue;
+        }
+        let instance=ctx.engine.0.instance_id();
+        if source.consumed_instance!=Some(instance) {source.consumed_instance=Some(instance);source.consumed_receipt=0;}
         if receipt.identity<=source.consumed_receipt {
             // Ordered, host-issued identities survive every GameState restore.
             // An old receipt never owns the candidate state of a newer click.
@@ -353,9 +442,10 @@ fn dispatch(mut commands: Commands, mut source: ResMut<SourceMenus>, mut menus: 
         // Refusal is terminal too. A corrected click receives a new identity.
         source.consumed_receipt=receipt.identity;
         ctx.engine.0.renderer.menu_pending = false;
-        let current_interaction = ctx.engine.0.current_interaction().ok().flatten();
+        let current_interaction = ctx.engine.0.displayed_interaction().ok().flatten();
         let current_token = if ctx.confirmation.active() && source.confirmation_key == format!("{:?}/{:?}",ctx.confirmation.pending,ctx.confirmation.action_pending) { source.confirmation_token } else { None };
-        let replaced_story=receipt.stamp.epoch!=ctx.engine.0.interface_epoch() || receipt.stamp.pc!=ctx.engine.0.state.current_interactive_pc;
+        let replaced_story=ctx.engine.0.renderer.scene_batch_pending() || receipt.stamp.runtime_epoch!=ctx.engine.0.runtime_epoch() || receipt.stamp.epoch!=ctx.engine.0.interface_epoch() || receipt.stamp.pc!=ctx.engine.0.state.current_interactive_pc
+            || receipt.stamp.owner!=ctx.engine.0.state.scene_execution.as_ref().and_then(|execution|execution.owner());
         let stale = receipt.stamp.generation != source.generation || replaced_story
             || receipt.stamp.pc != ctx.engine.0.state.current_interactive_pc || receipt.stamp.interaction != current_interaction
             || receipt.stamp.destinations != ctx.engine.0.active_choice_indices().unwrap_or_default()
@@ -377,13 +467,27 @@ fn dispatch(mut commands: Commands, mut source: ResMut<SourceMenus>, mut menus: 
         let confirmed_transition=matches!(&receipt.effect.request,MenuRequest::Confirm{..}) &&
             (ctx.confirmation.pending.is_some_and(|(_,mode)|mode==SaveMenuMode::Load)
                 || ctx.confirmation.action_pending.as_ref().is_some_and(|(action,_,_)|matches!(action,Action::NewGame|Action::StartScene(_)|Action::Continue)));
-        let mut result = if stale { Err("Stale source-menu interaction".to_string()) } else { live.validate(&receipt.effect) };
-        if result.is_ok() { result = apply_request(&mut commands,&mut source,&mut menus,&mut ctx,&mut settings,&mut gallery,&mut choice_focus,&mut thumbnails,&receipt.effect); }
+        // Historical authority is admitted before the action payload. A foreign
+        // witness must never authorize cancellation on another Engine instance.
+        let mut result = if stale {Err("Stale source-menu interaction".to_string())}
+            else {historical.and_then(|current|if current {live.validate(&receipt.effect)}else{Err("Stale historical menu witness".into())})};
+        if result.is_ok() { result = apply_request(&mut commands,&mut source,&mut menus,&mut ctx,&mut settings,&mut gallery,&mut choice_focus,&mut thumbnails,&receipt.effect,&receipt.previous,receipt.history_previous.as_ref()); }
+        let mut retained_history=false;
+        if result.is_ok() && !history_transition && !confirmed_transition {
+            match ctx.checkpoint_requests.as_deref().map(|requests|requests.menu_history_retained(&ctx.engine)).transpose() {
+                Ok(retained)=>retained_history=retained.unwrap_or(false),Err(error)=>result=Err(error),
+            }
+        }
+        if result.is_ok() && !history_transition && !confirmed_transition && !retained_history {
+            if let Some(proof)=receipt.history_previous.as_ref() {
+                result=ctx.engine.0.finish_source_menu_snapshot(receipt.previous.clone(),proof).map(|_|()).map_err(|error|error.to_string());
+            } else {ctx.engine.0.finish_source_menu_transaction(receipt.previous.clone());}
+        }
         if let Err(error) = result {
             source.diagnostic = error;
             // A late receipt must never rewind an independently loaded or
             // rolled-back story. Its originating transaction no longer owns it.
-            if !replaced_story {
+            if !replaced_story && historical_current {
                 if let Err(error) = ctx.engine.0.cancel_source_menu_transaction(receipt.previous.clone()) { source.diagnostic.push_str(&format!(" / rollback: {error}")); }
             }
             warn!("Source menu: {}",source.diagnostic);
@@ -391,21 +495,22 @@ fn dispatch(mut commands: Commands, mut source: ResMut<SourceMenus>, mut menus: 
             for command in ctx.engine.0.renderer.take_pending() { ctx.events.send(command); }
         } else {
             source.diagnostic.clear(); diagnostic.0.clear();
-            if !history_transition && !confirmed_transition {ctx.engine.0.finish_source_menu_transaction(receipt.previous.clone());}
+            // Exact history admission and completion were handled above.
         }
     }
 }
 fn apply_request(commands: &mut Commands, source: &mut SourceMenus, menus: &mut Menus, ctx: &mut ActionContext,
-    settings: &mut Settings, gallery: &mut GalleryState, choice_focus:&mut ChoiceFocus, thumbnails: &mut crate::save_thumbnails::SaveThumbnails, effect: &MenuEffect) -> Result<(), String> {
+    settings: &mut Settings, gallery: &mut GalleryState, choice_focus:&mut ChoiceFocus, thumbnails: &mut crate::save_thumbnails::SaveThumbnails, effect: &MenuEffect,previous:&rvn_core::GameState,proof:Option<&rvn_core::audio_checkpoint::HistoricalGameSnapshot>) -> Result<(), String> {
     match &effect.request {
         MenuRequest::Action { action } => {
             if *action==Action::Rollback {
+                if crate::checkpoint_requests::defer_rollback(&ctx.engine,ctx.checkpoint_requests.as_deref_mut())? {return Ok(());}
                 if !crate::systems::input::rollback_game(&mut ctx.engine.0){return Err("Rollback could not restore a previous narrative or UI state".into());}
                 crate::systems::input::present_rollback(&mut ctx.engine,&mut ctx.render,&mut ctx.imagemap,choice_focus,&mut ctx.typing,&mut ctx.events);
                 ctx.next.set(VnState::Waiting);
             }
-            else if *action==Action::QuickSave {execute_quick(ctx,thumbnails,false,false)?;}
-            else if *action==Action::QuickLoad {execute_quick(ctx,thumbnails,true,false)?;}
+            else if *action==Action::QuickSave {execute_quick(ctx,thumbnails,false,false,previous,proof)?;}
+            else if *action==Action::QuickLoad {execute_quick(ctx,thumbnails,true,false,previous,proof)?;}
             else if *action==Action::Back && *ctx.state.get()==VnState::Gallery && gallery.selected_cg.is_some() {gallery.selected_cg=None;}
             else {crate::menu_documents::dispatch_source_action(commands,menus,ctx,&effect.screen,action.clone())?;}
         }
@@ -415,7 +520,7 @@ fn apply_request(commands: &mut Commands, source: &mut SourceMenus, menus: &mut 
             if mode != SaveMenuMode::Load && manager.is_protected(*slot).map_err(|error|error.to_string())? { return Err("Save slot is protected".into()); }
             if mode != SaveMenuMode::Save { let saved=manager.load(*slot).map_err(|error|error.to_string())?;
                 if mode==SaveMenuMode::Load && saved.story_identity.is_some() && saved.story_identity != ctx.engine.0.state.story_identity { return Err("Saved story is incompatible".into()); } }
-            execute_slot(ctx,thumbnails,*slot,mode,false)?;
+            execute_slot(ctx,thumbnails,*slot,mode,false,previous,proof)?;
         }
         MenuRequest::ProtectSlot { slot,protected } => {
             let manager=SaveManager::new(&ctx.paths.saves,SUPPORTED_SLOTS).map_err(|error|error.to_string())?;
@@ -431,13 +536,13 @@ fn apply_request(commands: &mut Commands, source: &mut SourceMenus, menus: &mut 
         MenuRequest::GalleryCg {id} => gallery.selected_cg=Some(id.clone()),
         MenuRequest::GalleryTab {tab} => { gallery.view=match tab {GalleryTab::Cg=>GalleryView::Cg,GalleryTab::Endings=>GalleryView::Endings}; gallery.selected_cg=None; },
         MenuRequest::Confirm {token} | MenuRequest::CancelConfirmation {token} => {
-            if source.confirmation_token != Some(*token) { return Err("Confirmation token expired".into()); }
+            if source.current_confirmation_token(&ctx.confirmation) != Some(*token) { return Err("Confirmation token expired".into()); }
             let approved=matches!(effect.request,MenuRequest::Confirm{..});
             if let Some((slot,mode))=ctx.confirmation.pending.filter(|(slot,_)|*slot>0) {
-                if approved {execute_slot(ctx,thumbnails,slot as u32,mode,true)?;}
+                if approved {execute_slot(ctx,thumbnails,slot as u32,mode,true,previous,proof)?;}
                 ctx.confirmation.pending=None;
             } else if ctx.confirmation.pending==Some((0,SaveMenuMode::Load)) {
-                if approved {execute_quick(ctx,thumbnails,true,true)?;}
+                if approved {execute_quick(ctx,thumbnails,true,true,previous,proof)?;}
                 else {ctx.next.set(ctx.confirmation.quick_return.take().unwrap_or(VnState::Waiting));}
                 ctx.confirmation.pending=None;
             } else {crate::menu_documents::source_confirmation(commands,menus,ctx,approved)?;}
@@ -488,8 +593,23 @@ label start
             .init_resource::<ChoiceFocus>().init_resource::<crate::save_thumbnails::SaveThumbnails>().init_resource::<ScriptErrorMessage>()
             .insert_resource(ProjectPaths::new(directory.clone(),directory.clone(),directory.clone(),directory.clone(),directory.clone()))
             .insert_resource(PersistentDataResource{manager:persistent,data}).add_event::<VnCommand>().add_event::<PlayerInput>()
-            .add_systems(Update,dispatch);
+            ;
+        register_dispatch(&mut app);
         let mut harness=Harness{app,directory,role:PageRole::Confirm,screen:"confirmation",request:None};harness.refresh();harness
+    }
+    pub(crate) fn welcome_engine()->VnEngine {
+        let source=r#"handler approve(event){menu.execute(event["data"]["request"])}
+screen ordinary(request){return component("yes","button",{"events":{"click":"approve"},"event_data":{"request":request}},[])}
+scene label start
+"Waiting""#;
+        VnEngine(rvn_core::Engine::from_program(rvn_parser::parse_program(source).unwrap(),crate::bevy_renderer::BevyRenderer::new(),8).unwrap())
+    }
+    pub(crate) fn welcome_application()->Harness {
+        let mut harness=application(SaveMenuMode::Save);
+        harness.app.world_mut().insert_resource(welcome_engine());
+        harness.app.world_mut().insert_resource(State::new(VnState::TitleScreen));
+        harness.present(PageRole::Settings,MenuRequest::NumberPreference{key:NumberPreference::MusicVolume,value:0.25});
+        harness
     }
     impl Harness {
         fn present(&mut self,role:PageRole,request:MenuRequest) {
@@ -526,7 +646,7 @@ label start
                     compatible:data.is_some_and(|data|data.story_identity.is_none()||data.story_identity==engine.0.state.story_identity)})
             }).collect()}else{BTreeMap::new()};
             engine.0.renderer.menu_authority=MenuAuthority{live_screens:[self.screen.into()].into(),screen_roles:[(self.screen.into(),self.role)].into(),confirmation_token:token,game_active:!from_title,from_title,save_active,settings_active,slots,..default()};
-            let stamp=Stamp{generation,epoch:engine.0.interface_epoch(),pc:engine.0.state.current_interactive_pc,interaction:engine.0.current_interaction().unwrap(),destinations:engine.0.active_choice_indices().unwrap(),confirmation:token};
+            let stamp=Stamp{generation,epoch:engine.0.interface_epoch(),runtime_epoch:engine.0.runtime_epoch(),owner:engine.0.state.scene_execution.as_ref().and_then(|execution|execution.owner()),pc:engine.0.state.current_interactive_pc,interaction:engine.0.displayed_interaction().unwrap(),destinations:engine.0.active_choice_indices().unwrap(),confirmation:token};
             engine.0.renderer.menu_stamp=stamp;
             if token.is_some()||self.request.is_some() {
                 let data=if let Some(request)=&self.request{serde_json::to_value(request).unwrap()}else{json!({"confirmation":{"token":token.unwrap()}})};

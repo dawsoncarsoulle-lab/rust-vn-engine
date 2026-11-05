@@ -1,0 +1,8 @@
+init{
+hero.show("hero.png") at center
+flow.consume_v2("scope_init_sprite_effect","command"){hero.effect(scale:1.25,flip_x:true,tint:"#ff8800")}
+}
+label start
+"waiting"
+label done
+"done"

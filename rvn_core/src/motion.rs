@@ -108,6 +108,7 @@ pub struct MotionState {
 pub struct MotionView {
     pub target: MotionTarget,
     pub pose: Pose,
+    pub ui_projection: Option<crate::ui_residency::UiProjectionBinding>,
 }
 impl MotionState {
     pub fn validate(&self) -> Result<(), String> {
@@ -149,6 +150,7 @@ impl MotionState {
                 Ok(MotionView {
                     target: track.target.clone(),
                     pose: track.pose()?,
+                    ui_projection: None,
                 })
             })
             .collect()

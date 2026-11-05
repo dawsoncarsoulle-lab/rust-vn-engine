@@ -1,0 +1,16 @@
+init {set ends = 0}
+handler completed(event) {set ends = ends + 1}
+function video_name() {local draw = random(1, 1) return "intro"}
+function clip() {local draw = random(1, 1) return video_clip("clip.webm", {"on_end":"completed"})}
+scene label start
+flow.consume_v2("scene:start", "play") {
+    capture "name" = video_name()
+    capture "clip" = clip()
+    video.play(__rvn_captured_v1("name"), __rvn_captured_v1("clip"))
+}
+flow.consume_v2("scene:start", "wait") {
+    capture "name" = video_name()
+    video.wait(__rvn_captured_v1("name"))
+}
+flow.consume_v2("scene:start", "finished") {set result = ends}
+"done"

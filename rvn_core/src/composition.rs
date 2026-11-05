@@ -15,6 +15,10 @@ pub struct CharacterComposition {
 #[serde(deny_unknown_fields)]
 pub struct LayeredState {
     pub characters: BTreeMap<String, CharacterComposition>,
+    /// Canonical declared id -> display name. This is saved alongside the
+    /// existing character state; render registries are only projections.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub display_names: BTreeMap<String, String>,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct LayeredView {
@@ -26,7 +30,30 @@ pub struct LayeredView {
     pub position: rvn_parser::Position,
 }
 impl LayeredState {
+    pub fn validate_names<'a>(names: impl Iterator<Item = (&'a str, &'a str)>) -> Result<(), String> {
+        let mut budget = crate::scene::NarrativeBudget::default();
+        for (id, name) in names {
+            if id.is_empty() || id.len() > 4096 || name.len() > 1_000_000 {
+                return Err("Invalid character declaration identity or display-name size".into());
+            }
+            budget.presentation(1, id.chars().count().checked_add(name.chars().count())
+                .ok_or("Character declaration work overflow")?)?;
+        }
+        Ok(())
+    }
+    pub fn declare(&mut self, id: String, name: String) -> Result<(), String> {
+        // Validate the borrowed proposed map before cloning or mutating it.
+        Self::validate_names(self.display_names.iter().filter(|(key, _)| *key != &id)
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+            .chain(std::iter::once((id.as_str(), name.as_str()))))?;
+        self.display_names.insert(id, name);
+        Ok(())
+    }
+    pub fn display_name<'a>(&'a self, id: &'a str) -> &'a str {
+        self.display_names.get(id).map(String::as_str).unwrap_or(id)
+    }
     pub fn validate(&self) -> Result<(), String> {
+        Self::validate_names(self.display_names.iter().map(|(id, name)| (id.as_str(), name.as_str())))?;
         if self.characters.len() > 64 {
             return Err("Composition limit: 64 characters".into());
         }
@@ -118,6 +145,28 @@ pub fn resolve_attributes(
     globals: &std::collections::HashMap<String, Value>,
     random: &mut crate::random::RandomState,
 ) -> Result<Attributes, EvalError> {
+    resolve_attributes_budgeted(
+        definition,
+        previous,
+        patch,
+        library,
+        globals,
+        random,
+        &mut crate::ui::CanvasBudget::default(),
+    )
+}
+/// Resolve a selector inside the caller's existing transaction budget.
+/// Structural refusal keeps RNG neutral while the attempted work is charged.
+/// The legacy wrapper above retains its fresh-budget contract.
+pub fn resolve_attributes_budgeted(
+    definition: &Composition,
+    previous: &Attributes,
+    patch: &Attributes,
+    library: &crate::eval::FunctionLibrary,
+    globals: &std::collections::HashMap<String, Value>,
+    random: &mut crate::random::RandomState,
+    budget: &mut crate::ui::CanvasBudget,
+) -> Result<Attributes, EvalError> {
     let invalid = |message: String| EvalError::InvalidFunction(message);
     let mut result = definition
         .select_attributes(previous, patch)
@@ -134,13 +183,14 @@ pub fn resolve_attributes(
             ),
         );
         let mut next_random = *random;
-        let value = library.eval_with_random(
+        let value = library.eval_with_random_budgeted(
             &rvn_parser::Expr::Call {
                 name: name.clone(),
                 args: vec![rvn_parser::Expr::Var("__rvn_attributes".into())],
             },
             &locals,
             &mut next_random,
+            budget,
         )?;
         let Value::Dict(values) = value else {
             return Err(invalid(format!(
@@ -194,4 +244,27 @@ pub fn construct(name: &str, args: &[Value]) -> Result<Value, EvalError> {
         ImageLayer::parse(json).map_err(|message| invalid(&message))?;
     }
     Ok(value)
+}
+
+/// Compatibility for old saves only: the historical host registry scanned raw
+/// declarations and Init bodies, never branches, wrappers, or expressions.
+/// The caller checks the old save/story identity before invoking this migration.
+pub(crate) fn legacy_display_names(script: &[rvn_parser::Statement]) -> Result<BTreeMap<String, String>, String> {
+    fn collect(block: &[rvn_parser::Statement], depth: usize, names: &mut LayeredState) -> Result<(), String> {
+        if depth > 128 { return Err("Legacy character declaration depth exceeds128".into()); }
+        for statement in block {
+            match statement {
+                rvn_parser::Statement::CharacterCreate { id, display_name } => {
+                    LayeredState::validate_names(std::iter::once((id.as_str(), display_name.as_str())))?;
+                    names.declare(id.clone(), display_name.clone())?;
+                }
+                rvn_parser::Statement::Init { body } => collect(body, depth + 1, names)?,
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+    let mut names = LayeredState::default();
+    collect(script, 0, &mut names)?;
+    Ok(names.display_names)
 }

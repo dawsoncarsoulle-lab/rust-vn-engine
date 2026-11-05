@@ -552,7 +552,8 @@ fn analyze_files(mut files: Vec<(Url, String)>) -> Analysis {
                 | Statement::Screen { body, .. }
                 | Statement::Handler { body, .. }
                 | Statement::While { body, .. }
-                | Statement::ForEach { body, .. } => protect(body, unsafe_names, screens),
+                | Statement::ForEach { body, .. } | Statement::ForLoopWithBreak{body,..}=>protect(body,unsafe_names,screens),
+                Statement::Sequence{branches}=>for b in branches{protect(b,unsafe_names,screens);},
                 Statement::If {
                     then_branch,
                     else_branch,
@@ -1183,6 +1184,8 @@ fn collect_block(
                 }
                 collect_block(source, ranges, body, semantic, diagnostics);
             }
+            Statement::Sequence{branches}=>for b in branches{collect_block(source,ranges,b,semantic,diagnostics);},
+            Statement::ForLoopWithBreak{first,last,body,..}=>{collect_expr(first,source,semantic);collect_expr(last,source,semantic);collect_block(source,ranges,body,semantic,diagnostics);},
             Statement::While { condition, body } => {
                 collect_expr(condition, source, semantic);
                 collect_block(source, ranges, body, semantic, diagnostics);
@@ -1315,6 +1318,8 @@ fn collect_block(
                     collect_expr(value, source, semantic);
                 }
             }
+            Statement::WidgetAddToViewport { object, z_order } => { collect_expr(object, source, semantic); collect_expr(z_order, source, semantic); }
+            Statement::WidgetRemoveFromParent { object } => collect_expr(object, source, semantic),
             Statement::UiClose { name } => collect_expr(name, source, semantic),
             Statement::UiFocus { name, element } => {
                 collect_expr(name, source, semantic);
@@ -1636,6 +1641,7 @@ fn function_completions(index: &ProjectIndex) -> Vec<CompletionItem> {
         .functions
         .values()
         .filter(|function| function.declaration == "function")
+        .filter(|function| function.parameters.iter().all(|name|rvn_parser::is_variable_binding_name(name)))
         .collect();
     functions.sort_by(|a, b| a.name.cmp(&b.name));
     functions
@@ -1655,7 +1661,11 @@ fn function_completions(index: &ProjectIndex) -> Vec<CompletionItem> {
                     .parameters
                     .iter()
                     .enumerate()
-                    .map(|(index, parameter)| format!("${{{}:{}}}", index + 1, parameter))
+                    .map(|(index, parameter)| {
+                        let source = rvn_parser::variable_binding_source_name(parameter).expect("validated parameter");
+                        let snippet = source.replace('\\', "\\\\").replace('$', "\\$").replace('}', "\\}");
+                        format!("${{{}:{}}}", index + 1, snippet)
+                    })
                     .collect::<Vec<_>>()
                     .join(", ")
             )),
@@ -2147,6 +2157,42 @@ mod tests {
 
     fn uri(name: &str) -> Url {
         Url::from_file_path(std::env::temp_dir().join(format!("{name}.rvn"))).unwrap()
+    }
+
+    #[test]
+    fn viewport1003_live_operand_calls_keep_exact_references_renames_and_unknown_call_diagnostics() {
+        // Existing LSP delegates variable diagnostics to rvn check; preserve
+        // that policy and its lexical callable index, never grant runtime types.
+        let file=uri("viewport1003-calls");
+        let source="function object_for_viewport(){return 0}\nfunction order_for_viewport(){return 0}\nscene label start\nwidget.add_to_viewport(object_for_viewport(),order_for_viewport())\nwidget.remove_from_parent(object_for_viewport())\nreturn\n";
+        let index=analyze_workspace(&[],&HashMap::from([(file.clone(),source.into())])).index;
+        assert!(index.diagnostics_for(&file).is_empty(),"{:?}",index.diagnostics_for(&file));
+        let column=source.lines().nth(3).unwrap().find("object_for_viewport").unwrap()as u32;
+        let symbol=index.symbol_at(&file,Position::new(3,column+1)).unwrap();assert_eq!(symbol.name,"object_for_viewport");
+        let references=index.references_for(&symbol);assert_eq!(references.len(),3);
+        assert!(references.iter().any(|location|location.uri==file&&location.range==Range::new(Position::new(3,column),Position::new(3,column+"object_for_viewport".len()as u32))));
+        let edits=index.rename_edit(&symbol,"current_object").unwrap().changes.unwrap();assert_eq!(edits[&file].len(),3);
+        let invalid=source.replace(",order_for_viewport())",",missing_order())");
+        let index=analyze_workspace(&[],&HashMap::from([(file.clone(),invalid.clone())])).index;
+        let errors=index.diagnostics_for(&file);let unknown:Vec<_>=errors.iter().filter(|error|diagnostic_code(error)==Some("unknown-function")).collect();assert_eq!(unknown.len(),1,"{errors:?}");
+        let start=invalid.lines().nth(3).unwrap().find("missing_order").unwrap()as u32;
+        assert_eq!(unknown[0].range,Range::new(Position::new(3,start),Position::new(3,start+"missing_order".len()as u32)));
+    }
+    #[test]
+    fn quoted_parameter_completion_inserts_valid_snippets_and_keeps_utf16_callable_spans() {
+        let file=uri("quoted-parameter-completion");
+        let source="function reward(`Confiance été`, `Prix $}`){return `Confiance été`}\r\nlabel start\r\nset `💠 été` = reward(1,2)\r\nreturn\r\n";
+        let index=analyze_workspace(&[],&HashMap::from([(file.clone(),source.into())])).index;
+        assert!(index.diagnostics_for(&file).is_empty(),"{:?}",index.diagnostics_for(&file));
+        let completion=function_completions(&index).into_iter().find(|item|item.label=="reward").unwrap();
+        assert_eq!(completion.detail.as_deref(),Some("reward(Confiance été, Prix $})"));
+        assert_eq!(completion.insert_text.as_deref(),Some(r"reward(${1:`Confiance été`}, ${2:`Prix \$\}`})"));
+        let line=source.lines().nth(2).unwrap();let byte=line.find("reward").unwrap();let start=line[..byte].encode_utf16().count() as u32;
+        let symbol=index.symbol_at(&file,Position::new(2,start+1)).unwrap();
+        assert_eq!(symbol.name,"reward");
+        let expected=Range::new(Position::new(2,start),Position::new(2,start+6));
+        assert!(index.references_for(&symbol).iter().any(|location|location.range==expected));
+        assert!(index.rename_edit(&symbol,"Confiance été").is_none());
     }
 
     #[test]

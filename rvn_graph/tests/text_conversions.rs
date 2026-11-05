@@ -492,3 +492,229 @@ fn explicit_cast_source_declares_text_and_string_and_does_not_coerce_numbers() {
         assert!(import_script(&rvn_parser::parse(source).unwrap()).is_err());
     }
 }
+
+mod name_invariant1021 {
+    use super::*;
+    use rvn_parser::{localized_text::{DeferredText, TextLocalization}, Expr, Name, Value};
+    use rvn_core::{Engine, Interaction, TerminalRenderer};
+    use std::collections::HashMap;
+
+    fn invariant(source: &str) -> Value { Value::Text(Box::new(DeferredText::invariant(source))) }
+    fn locale() -> rvn_core::locale::LocaleManager {
+        use rvn_core::locale::{LocaleManager, LocaleTable};
+        LocaleManager::from_frozen_catalogs("en", "fr", vec!["en".into(), "fr".into()], HashMap::from([
+            ("en".into(), LocaleTable { lang: "en".into(), strings: HashMap::new() }.into()),
+            ("fr".into(), LocaleTable { lang: "fr".into(), strings: HashMap::from([
+                ("FoO_2 [score] Été".into(), "NE PAS TRADUIRE".into()),
+            ]) }.into()),
+        ])).unwrap()
+    }
+
+    #[test]
+    fn name_invariant_constructor_keeps_spelling_none_literal_brackets_and_locale_independence() {
+        for name in [Name::default(), Name::new("").unwrap(), Name::new("FoO_2").unwrap(),
+            Name::new("FoO_2 [score] Été").unwrap(), Name::new("東京_7").unwrap()] {
+            let spelling = name.as_str().to_owned();
+            let args = vec![Value::Name(name.clone())];
+            let actual = rvn_core::localized_text::construct("__rvn_invariant_text", &args).unwrap();
+            assert_eq!(actual, invariant(&spelling));
+            let Value::Text(text) = &actual else { panic!("A Name must produce an actual portable Text") };
+            assert!(matches!(text.as_ref(), DeferredText::Literal { text } if text.localization == TextLocalization::CultureInvariant && text.source == spelling));
+            let mut languages = locale();
+            for lang in ["fr", "en", "fr"] {
+                languages.set_language(lang).unwrap();
+                assert_eq!(rvn_core::localized_text::render_text(text, Some(&languages), &rvn_core::localized_text::VnTextScalars).unwrap(), spelling);
+            }
+            let expression = Expr::Call { name: "__rvn_invariant_text".into(), args: vec![Expr::Call { name: "__rvn_literal_name".into(), args: vec![Expr::Str(name.as_str().into())] }] };
+            assert_eq!(rvn_core::eval::eval_expr(&expression, &HashMap::from([("score".into(), Value::Int(99))])).unwrap(), actual);
+            assert_eq!(serde_json::from_str::<Value>(&serde_json::to_string(&actual).unwrap()).unwrap(), actual);
+        }
+        assert_eq!(Name::new("").unwrap().as_str(), "None");
+        assert_eq!(rvn_core::localized_text::construct("__rvn_invariant_text", &[Value::Str("[score]".into())]).unwrap(), invariant("[score]"));
+        for bad in [vec![], vec![Value::Int(7)], vec![Value::Float(7.0)], vec![Value::Bool(true)],
+            vec![Value::List(vec![])], vec![Value::Dict(Default::default())], vec![invariant("text")],
+            vec![Value::Name(Name::default()), Value::Str("extra".into())]] {
+            assert!(rvn_core::localized_text::construct("__rvn_invariant_text", &bad).is_err());
+        }
+        assert_eq!(ValueType::InterpolatedText.conversion_from(&ValueType::Name), Some(NodeKind::FunctionCall));
+        assert_eq!(ValueType::InterpolatedText.conversion_path_from(&ValueType::Name), Some(vec![NodeKind::FunctionCall]));
+        assert!(ValueType::List(Box::new(ValueType::InterpolatedText)).conversion_specs_from(&ValueType::List(Box::new(ValueType::Name))).is_none());
+    }
+
+    #[test]
+    fn name_invariant_real_wire_is_one_configured_node_atomic_and_never_repairs_old_invalid_wires() {
+        let mut graph = GraphDocument::new(GraphId(102101), GraphKind::Label { name: "start".into() });
+        let name = add(&mut graph, NodeKind::Literal, 0.0);
+        graph.set_property(name, "value", PropertyValue::Name(NameDefault::new("FoO_2").unwrap())).unwrap();
+        let sink = add(&mut graph, NodeKind::Dialogue, 600.0);
+        let output = pin(&graph, name, "value"); let input = pin(&graph, sink, "text");
+        let before = graph.clone();
+        assert!(graph.connect(output, input).is_err()); assert_eq!(graph, before);
+        assert!(graph.connect_with_conversions(input, output, [200.0, 0.0]).is_err()); assert_eq!(graph, before);
+        let connection = graph.connect_with_conversions(output, input, [200.0, 0.0]).unwrap();
+        let [cast] = connection.conversions.as_slice() else { panic!("One visible Name to invariant Text step required") };
+        assert_eq!(graph.nodes[cast].kind, NodeKind::FunctionCall);
+        assert_eq!(graph.nodes[cast].properties.get("function"), Some(&PropertyValue::String("__rvn_invariant_text".into())));
+        assert_eq!(graph.effective_pin_type(pin(&graph, *cast, "item_0")), Some(ValueType::Name));
+        assert_eq!(graph.effective_pin_type(pin(&graph, *cast, "result")), Some(ValueType::InterpolatedText));
+        assert!(graph.pin_by_key(*cast, "item_0").unwrap().text_localization.is_none());
+        assert!(graph.text_owner.is_none());
+        assert_eq!(graph.nodes[&name], before.nodes[&name]); assert_eq!(graph.nodes[&sink], before.nodes[&sink]);
+        let after = graph.clone();
+        assert!(graph.connect_with_conversions(output, input, [200.0, 0.0]).is_err()); assert_eq!(graph, after);
+        assert_eq!(GraphDocument::from_json(&graph.to_pretty_json().unwrap()).unwrap(), after);
+        graph = before.clone(); assert_eq!(graph, before); graph = after.clone(); assert_eq!(graph, after);
+        // An older retained incompatible wire is diagnostic authoring data,
+        // never authorization to silently insert the new conversion on load.
+        let mut raw = serde_json::to_value(&before).unwrap();
+        raw["edges"]["900001"] = serde_json::to_value(GraphEdge { id: EdgeId(900001), output, input }).unwrap();
+        raw["next_edge_id"] = serde_json::json!(900002);
+        let mut retained: GraphDocument = serde_json::from_value(raw).unwrap(); let invalid = retained.clone();
+        assert_eq!(retained.materialize_implicit_conversions().unwrap(), 0); assert_eq!(retained, invalid);
+        assert!(retained.validate().iter().any(|d| d.code == "incompatible_types"));
+        assert_eq!(GraphDocument::from_json(&retained.to_pretty_json().unwrap()).unwrap(), invalid);
+    }
+
+    #[test]
+    fn name_invariant_local_type_migration_converts_actual_explicit_set_default_and_executes_text() {
+        let source = "scene label start\nlocal value=__rvn_literal_name(\"None\")\nset value=__rvn_literal_name(\"FoO_2 [score] Été\")\n\"[value]\"\nreturn\n";
+        let mut graph = import_script(&rvn_parser::parse_program(source).unwrap().script).unwrap().into_iter()
+            .find(|g| matches!(&g.kind, GraphKind::Label { name } if name == "start")).unwrap();
+        let assignment = graph.nodes.values().find(|n| n.kind == NodeKind::SetVariable).unwrap().id;
+        let input = pin(&graph, assignment, "value");
+        // Exercise an authored inline default, not an already wired RHS.
+        graph.disconnect_pin(input);
+        graph.set_pin_default(assignment, "value", PropertyValue::Name(NameDefault::new("FoO_2 [score] Été").unwrap())).unwrap();
+        let initial = graph.local_variable_initializers("value").unwrap().remove(0);
+        let dialogue = graph.nodes.values().find(|n| n.kind == NodeKind::Dialogue).unwrap().id;
+        let dialogue_input = pin(&graph, dialogue, "text");
+        let previous_cast = graph.pins[&graph.edges.values().find(|e| e.input == dialogue_input).unwrap().output].node;
+        assert_eq!(graph.nodes[&previous_cast].kind, NodeKind::FunctionCall);
+        assert_eq!(graph.nodes[&previous_cast].properties.get("function"), Some(&PropertyValue::String("__rvn_invariant_text".into())));
+        let previous_input = pin(&graph, previous_cast, "item_0");
+        let read_output = graph.edges.values().find(|e| e.input == previous_input).unwrap().output;
+        assert_eq!(graph.nodes[&graph.pins[&read_output].node].kind, NodeKind::VariableGet);
+        assert_eq!(graph.effective_pin_type(read_output), Some(ValueType::Name));
+        let before = graph.clone();
+        let mut next = graph.prepare_local_variable_type("value", &initial, ValueType::InterpolatedText).unwrap().reconstruct(&graph).unwrap();
+        assert_eq!(graph, before);
+        let casts: Vec<_> = next.nodes.values().filter(|n| n.kind == NodeKind::FunctionCall && n.properties.get("function") == Some(&PropertyValue::String("__rvn_invariant_text".into()))).map(|n| n.id).collect();
+        assert_eq!(casts.len(), 2);
+        let assignment_cast = next.pins[&next.edges.values().find(|e| e.input == input).unwrap().output].node;
+        assert_ne!(assignment_cast, previous_cast);
+        assert!(casts.contains(&assignment_cast) && casts.contains(&previous_cast));
+        for (consumer, cast) in [(input, assignment_cast), (dialogue_input, previous_cast)] {
+            let edges: Vec<_> = next.edges.values().filter(|e| e.input == consumer).collect();
+            assert_eq!(edges.len(), 1);
+            assert_eq!(edges[0].output, pin(&next, cast, "result"));
+        }
+        assert_eq!(next.effective_pin_type(pin(&next, assignment_cast, "item_0")), Some(ValueType::Name));
+        let assignment_source = next.edges.values().find(|e| e.input == pin(&next, assignment_cast, "item_0")).unwrap().output;
+        assert_eq!(next.nodes[&next.pins[&assignment_source].node].properties.get("value"), Some(&PropertyValue::Name(NameDefault::new("FoO_2 [score] Été").unwrap())));
+        // Literal declaration policy resets its default to the requested type.
+        // It is a TextValue producer, not a second assignment converter.
+        let initial_input = pin(&next, initial.node, "value");
+        let initial_source = next.edges.values().find(|e| e.input == initial_input).unwrap().output;
+        let initial_value = &next.nodes[&next.pins[&initial_source].node];
+        assert_eq!(initial_value.kind, NodeKind::TextValue);
+        assert_eq!(initial_value.properties.get("value"), Some(&PropertyValue::String(String::new())));
+        assert_ne!(initial.node, assignment);
+        // The original [value] import already had a typed Name-to-Text call.
+        // A local type edit retains that authoring node; it does not promise
+        // that every old typed consumer becomes executable. Reconnect the
+        // genuine now-Text read to the same Dialogue before cold/run checks.
+        assert_eq!(next.nodes[&previous_cast], before.nodes[&previous_cast]);
+        assert_eq!(next.effective_pin_type(read_output), Some(ValueType::InterpolatedText));
+        next.remove_node(previous_cast);
+        next.connect(read_output, dialogue_input).unwrap();
+        assert_eq!(next.pins[&input].default_value, Some(PropertyValue::String(String::new())));
+        let cold = GraphDocument::from_json(&next.to_pretty_json().unwrap()).unwrap(); assert_eq!(cold, next);
+        let mut engine = Engine::new(transpile(&cold).unwrap().ast, TerminalRenderer, 16).unwrap();
+        assert_eq!(engine.step_until_interaction().unwrap(), Some(Interaction::Dialogue { character: None, text: "FoO_2 [score] Été".into() }));
+        assert!(matches!(&engine.state.scene_execution.as_ref().unwrap().active.as_ref().unwrap().locals["value"], Value::Text(text) if **text == DeferredText::invariant("FoO_2 [score] Été")));
+        println!();
+    }
+
+    #[test]
+    fn name_invariant_native_graph_source_cold_and_save15_preserve_actual_name_and_text_without_locale_key() {
+        let source = "init {set named=__rvn_literal_name(\"FoO_2 [score] Été\") set text=__rvn_invariant_text(\"\") set score=99}\nscene label start\nset text=__rvn_invariant_text(__rvn_name_to_string(named))\n\"[text]\"\nreturn\n";
+        let original = rvn_parser::parse_program(source).unwrap();
+        let mut graphs = import_script(&original.script).unwrap();
+        let graph = graphs.iter_mut().find(|g| matches!(&g.kind, GraphKind::Label { name } if name == "start")).unwrap();
+        let old = graph.nodes.values().find(|n| n.kind == NodeKind::FunctionCall && n.properties.get("function") == Some(&PropertyValue::String("__rvn_invariant_text".into()))).unwrap().id;
+        let old_input = pin(graph, old, "item_0");
+        let bridge = graph.pins[&graph.edges.values().find(|e| e.input == old_input).unwrap().output].node;
+        assert_eq!(graph.nodes[&bridge].kind, NodeKind::ConvertNameToString);
+        let name_input = pin(graph, bridge, "value");
+        let name_output = graph.edges.values().find(|e| e.input == name_input).unwrap().output;
+        let old_output = pin(graph, old, "result");
+        let destination = graph.edges.values().find(|e| e.output == old_output).unwrap().input;
+        graph.remove_node(old); graph.remove_node(bridge);
+        let connection = graph.connect_with_conversions(name_output, destination, [240.0, 80.0]).unwrap();
+        assert_eq!(connection.conversions.len(), 1);
+        let cast = connection.conversions[0]; let graph_id = graph.graph_id;
+        assert_eq!(graph.effective_pin_type(pin(graph, cast, "result")), Some(ValueType::InterpolatedText));
+        let folder = std::env::temp_dir().join(format!("rvn-name-invariant1021-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir(&folder).unwrap();
+        // This Label reads the genuine Init/global Name declaration. The
+        // standalone-scope helper intentionally supplies no foreign context;
+        // use the public whole-project writer, whose Native preflight validates
+        // every scope against the complete emitted Init/Scene source instead.
+        for graph in &mut graphs { graph.enable_native_frame_preparation().unwrap(); }
+        let compiled = transpile_project(&graphs).unwrap();
+        let path = folder.join("main.rvn"); std::fs::write(&path, &compiled.source).unwrap();
+        let frozen = rvn_parser::parse_file_program_with_uses(&path).unwrap();
+        assert_eq!(frozen.script, compiled.ast);
+        let reconstructed = import_native_frame_script(&frozen.script).unwrap();
+        for expected in &graphs {
+            let actual = reconstructed.iter().find(|g| g.graph_id == expected.graph_id).unwrap();
+            assert_eq!(actual.edges, expected.edges);
+            assert_eq!(actual.nodes.keys().collect::<Vec<_>>(), expected.nodes.keys().collect::<Vec<_>>());
+            assert_eq!(actual.pins.keys().collect::<Vec<_>>(), expected.pins.keys().collect::<Vec<_>>());
+            for (id, pin) in &expected.pins {
+                assert_eq!((&actual.pins[id].key, actual.pins[id].direction), (&pin.key, pin.direction));
+                assert_eq!(actual.effective_pin_type(*id), expected.effective_pin_type(*id));
+            }
+            for (id, node) in &expected.nodes { assert_eq!(actual.nodes[id].kind, node.kind); }
+        }
+        assert_eq!(transpile_project(&reconstructed).unwrap().ast, compiled.ast);
+        let origins = NativeDebugSourceMap::from_program(&frozen).unwrap();
+        let commands: Vec<_> = origins.origins().iter().filter(|o| o.kind == NodeKind::SetVariable).collect();
+        assert!(!commands.is_empty());
+        for command in commands {
+            assert!(command.span.start < command.span.end);
+            assert_eq!(command.source, std::fs::canonicalize(&path).unwrap());
+            assert!(graphs.iter().any(|g| g.graph_id == command.graph && g.nodes.contains_key(&command.node)));
+        }
+        let actual = reconstructed.iter().find(|g| g.graph_id == graph_id).unwrap();
+        assert_eq!(actual.nodes[&cast].properties.get("function"), Some(&PropertyValue::String("__rvn_invariant_text".into())));
+        assert_eq!(actual.effective_pin_type(pin(actual, cast, "item_0")), Some(ValueType::Name));
+        assert!(actual.pin_by_key(cast, "item_0").unwrap().text_localization.is_none());
+        assert!(actual.pin_by_key(cast, "item_0").unwrap().text_table_reference.is_none());
+        let mut workspace = SourceWorkspace::link(&folder, &folder.join("main.rvn"), &reconstructed).unwrap();
+        let authoring = workspace.project().graphs().to_vec(); workspace.save(&authoring).unwrap();
+        let cold_workspace = SourceWorkspace::open(&folder).unwrap().unwrap();
+        assert!(cold_workspace.source_error.is_none()); assert_eq!(cold_workspace.project().graphs(), authoring);
+        let frozen = cold_workspace.project().resolved_program().unwrap();
+        let binding = rvn_core::consumer_schedule::ConsumerSourceBinding::from_program(&frozen).unwrap();
+        let mut warm = Engine::from_program_with_consumer_binding(frozen.clone(), binding, TerminalRenderer, 16).unwrap();
+        warm.locale = Some(locale());
+        assert_eq!(warm.step_until_interaction().unwrap(), Some(Interaction::Dialogue { character: None, text: "FoO_2 [score] Été".into() }));
+        assert!(matches!(&warm.state.vars["named"], Value::Name(name) if name.as_str() == "FoO_2 [score] Été"));
+        assert_eq!(warm.state.vars["text"], invariant("FoO_2 [score] Été"));
+        let random = warm.state.random;
+        let saved = warm.capture_save15(&frozen, None, 1, "Name invariant actual source".into()).unwrap().encode().unwrap();
+        let mut cold = Engine::from_program(frozen.clone(), TerminalRenderer, 16).unwrap(); cold.locale = Some(locale());
+        cold.restore_save15(&frozen, rvn_core::save::consumer_checkpoint::Save15::decode(&saved).unwrap()).unwrap();
+        assert_eq!(cold.state.vars["text"], invariant("FoO_2 [score] Été"));
+        assert!(matches!(&cold.state.vars["named"], Value::Name(name) if name.as_str() == "FoO_2 [score] Été"));
+        let before = serde_json::to_value(&cold.state).unwrap();
+        for lang in ["en", "fr"] {
+            cold.locale.as_mut().unwrap().set_language(lang).unwrap();
+            assert_eq!(cold.displayed_interaction().unwrap(), Some(Interaction::Dialogue { character: None, text: "FoO_2 [score] Été".into() }));
+        }
+        assert_eq!(serde_json::to_value(&cold.state).unwrap(), before); assert_eq!(cold.state.random, random);
+        std::fs::remove_dir_all(folder).unwrap();
+        println!();
+    }
+}

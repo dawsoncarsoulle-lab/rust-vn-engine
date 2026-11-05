@@ -78,7 +78,7 @@ fn legacy_saves_receive_defaults_and_unknown_versions_are_rejected() {
     let legacy: SaveData = serde_json::from_value(json.clone()).unwrap();
     assert_eq!(legacy.format_version, 1);
     assert_eq!(legacy.random, RandomState::default());
-    for version in [0, rvn_core::save::SAVE_FORMAT_VERSION + 1, 9999] {
+    for version in [0, rvn_core::save::MAX_SUPPORTED_SAVE_FORMAT_VERSION + 1, 9999] {
         json["format_version"] = version.into();
         assert!(serde_json::from_value::<SaveData>(json.clone()).is_err());
     }

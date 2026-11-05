@@ -104,6 +104,12 @@ pub fn layout_rects(root: &Component, viewport: [f32; 2]) -> Result<Vec<Componen
     {
         return Err("Invalid screen layout viewport".into());
     }
+    if root.layout_contract.is_some() {
+        // Both front ends may supply actual font metrics to the exported
+        // layout_widget_rects API. This compatibility entry keeps the existing
+        // deterministic text measurer; it is not font/pixel parity evidence.
+        return crate::programmable::layout_widget_rects(root,[0.0,0.0,viewport[0],viewport[1]],&mut |node| Ok(measure(node,viewport)));
+    }
     if !root.visible {
         return Ok(Vec::new());
     }

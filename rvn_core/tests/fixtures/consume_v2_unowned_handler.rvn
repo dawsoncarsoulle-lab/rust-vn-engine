@@ -1,0 +1,9 @@
+init {set prior = 1 / 0}
+handler click(event) {
+    flow.consume_v2("handler:click", "unattached") {
+        capture "effect" = random(1, 1)
+        set touched = __rvn_captured_v1("effect")
+    }
+}
+scene label start
+"done"

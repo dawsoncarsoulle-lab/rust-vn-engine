@@ -1,0 +1,8 @@
+init{
+hero.show("hero.png") at center
+flow.consume_v2("scope_init_sprite_animate","command"){hero.animate("bounce")}
+}
+label start
+"waiting"
+label done
+"done"

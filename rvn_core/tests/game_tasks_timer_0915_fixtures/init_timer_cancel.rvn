@@ -1,0 +1,9 @@
+init{
+hero.show("hero.png") at center
+timer 3 => jump done
+flow.consume_v2("scope_init_timer_cancel","command"){timer cancel}
+}
+label start
+"waiting"
+label done
+"done"

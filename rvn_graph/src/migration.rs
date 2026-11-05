@@ -1,4 +1,4 @@
-use crate::GRAPH_SCHEMA_VERSION;
+use crate::GRAPH_MAX_SUPPORTED_SCHEMA_VERSION;
 use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,7 +13,7 @@ pub fn migrate_graph_value(mut value: Value) -> Result<(Value, MigrationReport),
         .get("schema_version")
         .and_then(Value::as_u64)
         .unwrap_or(0) as u32;
-    if from > GRAPH_SCHEMA_VERSION {
+    if from > GRAPH_MAX_SUPPORTED_SCHEMA_VERSION {
         return Err(from);
     }
     let mut version = from;
@@ -51,6 +51,21 @@ pub fn migrate_graph_value(mut value: Value) -> Result<(Value, MigrationReport),
             .insert("schema_version".into(), Value::from(5));
         version = 5;
         steps.push("v4_to_v5_programmable_canvas");
+    }
+    // Legacy behavior is recorded without promoting unrelated schema 5-8.
+    // UUIDs, pins, variables, sources and counters are untouched.
+    if from <= crate::GRAPH_TABLE_TEXT_SCHEMA_VERSION {
+        let mut migrated = false;
+        if let Some(nodes) = value.get_mut("nodes").and_then(Value::as_object_mut) {
+            for node in nodes.values_mut().filter_map(Value::as_object_mut) {
+                if matches!(node.get("kind").and_then(Value::as_str), Some("string_table_id" | "string_table_registered" | "string_table_entry_registered" | "string_table_namespace" | "string_table_source" | "string_table_metadata" | "registered_string_tables" | "string_table_keys" | "string_table_metadata_ids"))
+                    && !node.contains_key("string_table_contract") {
+                    node.insert("string_table_contract".into(), Value::String("legacy_string_v1".into()));
+                    migrated = true;
+                }
+            }
+        }
+        if migrated { steps.push("explicit_legacy_string_table_contracts"); }
     }
     Ok((
         value,

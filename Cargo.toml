@@ -8,6 +8,7 @@ members = [
     "rvn_bevy",
     "rvn_cli",
     "rvn_lsp",
+    "rvn_native_source_binding",
 ]
 resolver = "2"
 exclude = ["vendor/ffmpeg-sys-next"]

@@ -9,10 +9,13 @@ pub fn locale_reload_system(
     mut output: EventWriter<crate::vn_command::VnCommand>,
     mut error: ResMut<crate::resources::ScriptErrorMessage>,
     mut next: ResMut<NextState<crate::resources::VnState>>,
+    typing: Option<Res<crate::resources::TypewriterState>>,
+    binding: Option<Res<crate::display_reveal::DialogueRevealBinding>>,
 ) {
     let Some(locale) = &engine.0.locale else {
         return;
     };
+    if locale.provider_policy()==rvn_core::locale::LocaleProviderPolicy::FrozenCatalogs {return;}
     let current = locale.current_lang().to_string();
     let default = locale.default_lang().to_string();
 
@@ -41,14 +44,25 @@ pub fn locale_reload_system(
     }
 
     if needs_reload {
+        if let Some(typing)=typing.as_deref() {
+            if let Err(problem)=crate::display_reveal::flush(&mut engine,typing,binding.as_deref()) {
+                engine.0.renderer.scene_frame_failed=true;error.0=problem;next.set(crate::resources::VnState::Error);return;
+            }
+        }
         if let Some(locale) = &mut engine.0.locale {
             locale.reload_current();
             info!("[locale] hot-reloaded — langue : {}", current);
         }
-        match engine.0.refresh_interfaces() {
+        match refresh_localized_interfaces(&mut engine) {
             Ok(()) => {
                 for command in engine.0.renderer.take_pending() {
                     output.send(command);
+                }
+                if engine.0.state.scene_execution.is_some() {
+                    match engine.0.displayed_interaction() {
+                        Ok(Some(rvn_core::Interaction::Dialogue{character,text}))=>{output.send(crate::display_reveal::command(&engine,character,text));},
+                        Ok(_)=>{},Err(problem)=>{error.0=problem.to_string();next.set(crate::resources::VnState::Error);}
+                    }
                 }
             }
             Err(problem) => {
@@ -66,6 +80,8 @@ pub fn locale_lang_watch_system(
     mut output: EventWriter<crate::vn_command::VnCommand>,
     mut error: ResMut<crate::resources::ScriptErrorMessage>,
     mut next: ResMut<NextState<crate::resources::VnState>>,
+    typing: Option<Res<crate::resources::TypewriterState>>,
+    binding: Option<Res<crate::display_reveal::DialogueRevealBinding>>,
 ) {
     use rvn_parser::Value;
 
@@ -86,16 +102,27 @@ pub fn locale_lang_watch_system(
             .unwrap_or_default();
 
         if lang != current {
+            if let Some(typing)=typing.as_deref() {
+                if let Err(problem)=crate::display_reveal::flush(&mut engine,typing,binding.as_deref()) {
+                    engine.0.renderer.scene_frame_failed=true;error.0=problem;next.set(crate::resources::VnState::Error);return;
+                }
+            }
             if let Some(locale) = &mut engine.0.locale {
                 match locale.set_language(&lang) {
                     Ok(_) => info!("[locale] langue changée → {}", lang),
                     Err(e) => error!("[locale] impossible de charger `{}` : {}", lang, e),
                 }
             }
-            match engine.0.refresh_interfaces() {
+            match refresh_localized_interfaces(&mut engine) {
                 Ok(()) => {
                     for command in engine.0.renderer.take_pending() {
                         output.send(command);
+                    }
+                    if engine.0.state.scene_execution.is_some() {
+                        match engine.0.displayed_interaction() {
+                            Ok(Some(rvn_core::Interaction::Dialogue{character,text}))=>{output.send(crate::display_reveal::command(&engine,character,text));},
+                            Ok(_)=>{},Err(problem)=>{error.0=problem.to_string();next.set(crate::resources::VnState::Error);}
+                        }
                     }
                 }
                 Err(problem) => {
@@ -105,4 +132,14 @@ pub fn locale_lang_watch_system(
             }
         }
     }
+}
+
+pub(crate) fn refresh_localized_interfaces(engine: &mut VnEngine) -> Result<(), rvn_core::RuntimeError> {
+    engine.0.refresh_interfaces()?;
+    if engine.0.state.scene_execution.is_some()
+        && matches!(engine.0.displayed_interaction()?, Some(rvn_core::Interaction::Choice { .. }))
+    {
+        engine.0.publish_current_scene_interaction()?;
+    }
+    Ok(())
 }

@@ -52,6 +52,8 @@ mod shadows;
 mod text_states;
 pub(crate) use animations::VisualNode;
 pub(crate) use confirmation::ConfirmationButton;
+pub(crate) use confirmation::preview_image::{Frame as ConfirmationImageFrame,
+    cost as confirmation_image_cost, clear_interactions as clear_confirmation_image_interactions};
 pub(crate) use dropdown::{Dropdown, LanguageSelect};
 pub(crate) use narrative::{ChoicesRoot, NarrativeRoot};
 pub(crate) use scrollbars::Scrollbar;
@@ -74,38 +76,38 @@ impl Plugin for MenuDocumentsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Menus>()
             .init_resource::<local_controls::Drag>()
+            .init_resource::<scrollbars::PointerDrag>()
+            .init_resource::<MenuKeyboardModifiers>()
             .init_resource::<crate::save_thumbnails::SaveThumbnails>()
-            .add_systems(Last, crate::save_thumbnails::capture)
-            .add_systems(PostUpdate, (text_states::update, dropdown::text_colors))
+            .add_systems(Last, ((crate::save_thumbnails::capture.run_if(resource_exists::<VnEngine>))).distributive_run_if(crate::runtime_restart::presentation_available))
+            .add_systems(PostUpdate, (((text_states::update, dropdown::text_colors))).distributive_run_if(crate::runtime_restart::presentation_available))
             .add_systems(
-                PostUpdate,
-                image_states::update
+                PostUpdate, ((image_states::update
                     .after(bevy::ui::UiSystem::Layout)
-                    .before(animations::fade),
-            )
-            .add_systems(Update, crate::save_thumbnails::load.before(render))
+                    .before(animations::fade))).distributive_run_if(crate::runtime_restart::presentation_available))
+            .add_systems(Update, ((crate::save_thumbnails::load.before(render))).distributive_run_if(crate::runtime_restart::presentation_available))
             .init_resource::<dropdown::Dropdown>()
             .init_resource::<animations::RuntimeAnimations>()
             .init_resource::<legacy_navigation::Navigation>()
             .init_resource::<crate::systems::save_menu::SaveConfirmation>()
-            .add_systems(Startup, load_menu_font)
+            .add_systems(Startup, ((load_menu_font)).distributive_run_if(crate::runtime_restart::presentation_available))
             .add_systems(
-                Update,
-                (
-                    gamepad_input,
+                Update, (((
+                    gamepad_input.run_if(crate::runtime_restart::input_available),
                     load.before(crate::source_menus::SourceMenuSyncSet),
-                    local_controls::update,
-                    sliders,
+                    local_controls::update.run_if(crate::runtime_restart::input_available),
+                    sliders.run_if(crate::runtime_restart::input_available),
                     render.after(crate::source_menus::SourceMenuSyncSet),
-                    dropdown::update,
+                    dropdown::update.run_if(crate::runtime_restart::input_available),
                     legacy_navigation::project.in_set(legacy_navigation::ProjectionSet),
-                    keyboard,
-                    legacy_navigation::back_key,
-                    scrollbars::drag,
-                    scroll_lists,
-                    paginate,
-                    interact,
+                    keyboard.run_if(crate::runtime_restart::input_available),
+                    legacy_navigation::back_key.run_if(crate::runtime_restart::input_available),
+                    scrollbars::drag.run_if(crate::runtime_restart::input_available),
+                    scroll_lists.run_if(crate::runtime_restart::input_available),
+                    paginate.run_if(crate::runtime_restart::input_available),
+                    interact.run_if(crate::runtime_restart::input_available).run_if(resource_exists::<VnEngine>),
                 )
+                    .distributive_run_if(crate::scene_publication::ready)
                     .chain()
                     .before(crate::systems::input_system)
                     .before(crate::systems::menu_input_system)
@@ -114,36 +116,28 @@ impl Plugin for MenuDocumentsPlugin {
                     .before(crate::systems::save_menu_interaction_system)
                     .before(crate::systems::settings_menu_interaction_system)
                     .before(crate::systems::gallery_interaction_system)
-                    .before(crate::systems::history_input_system),
-            )
+                    .before(crate::systems::history_input_system))).distributive_run_if(crate::runtime_restart::presentation_available))
             // Update presenters/actions may replace or close the focused
             // entity. Project outlines after their deferred buffers have
             // been applied, rather than queueing inserts against old roots.
-            .add_systems(PostUpdate, focus_visuals.before(bevy::ui::UiSystem::Layout))
+            .add_systems(PostUpdate, ((focus_visuals.before(bevy::ui::UiSystem::Layout))).distributive_run_if(crate::runtime_restart::presentation_available))
             .add_systems(
-                Update,
-                narrative::render_narrative
+                Update, ((narrative::render_narrative
                     .after(crate::systems::dialogue_system)
                     .after(crate::systems::typewriter_system)
                     .after(crate::systems::apply_theme_system)
-                    .after(render),
-            )
+                    .after(render))).distributive_run_if(crate::runtime_restart::presentation_available))
             .add_systems(
-                Update,
-                narrative::render_quick_actions
+                Update, ((narrative::render_quick_actions
                     .after(render)
-                    .before(keyboard),
-            )
+                    .before(keyboard))).distributive_run_if(crate::runtime_restart::presentation_available))
             .add_systems(
-                Update,
-                confirmation::update
+                Update, ((confirmation::update.run_if(crate::runtime_restart::input_available)
                     .after(interact)
                     .before(crate::systems::save_menu_interaction_system)
-                    .before(crate::systems::menu_input_system),
-            )
+                    .before(crate::systems::menu_input_system))).distributive_run_if(crate::runtime_restart::presentation_available))
             .add_systems(
-                Update,
-                (
+                Update, (((
                     narrative::render_choices,
                     narrative::choice_focus_visuals,
                     narrative::choice_scroll_bounds,
@@ -151,31 +145,25 @@ impl Plugin for MenuDocumentsPlugin {
                     .chain()
                     .after(crate::systems::update_choice_buttons)
                     .after(crate::systems::choice_interaction_system)
-                    .before(scroll_lists),
-            )
-            .add_systems(Last, cleanup_proxies);
-        app.add_systems(Update, animations::start.after(interact));
+                    .before(scroll_lists))).distributive_run_if(crate::runtime_restart::presentation_available))
+            .add_systems(Last, ((cleanup_proxies)).distributive_run_if(crate::runtime_restart::presentation_available));
+        app.add_systems(Update, ((animations::start.after(interact))).distributive_run_if(crate::runtime_restart::presentation_available));
         app.add_systems(
-            PostUpdate,
-            (animations::transform, animations::fade)
+            PostUpdate, (((animations::transform, animations::fade)
                 .chain()
                 .after(bevy::ui::UiSystem::Layout)
-                .before(bevy::transform::TransformSystem::TransformPropagate),
-        );
-        app.add_systems(Update, legacy_navigation::finish_settings_back
+                .before(bevy::transform::TransformSystem::TransformPropagate))).distributive_run_if(crate::runtime_restart::presentation_available));
+        app.add_systems(Update, ((legacy_navigation::finish_settings_back
             .after(crate::systems::settings_menu_interaction_system)
-            .before(crate::systems::despawn_settings_menu_overlay));
+            .before(crate::systems::despawn_settings_menu_overlay))).distributive_run_if(crate::runtime_restart::presentation_available));
         app.configure_sets(Update, legacy_navigation::ProjectionSet
             .after(crate::systems::spawn_save_menu_overlay)
             .after(crate::systems::spawn_settings_menu_overlay)
             .after(crate::systems::spawn_gallery_overlay));
         app.add_systems(
-            PostUpdate,
-            shadows::follow.after(bevy::transform::TransformSystem::TransformPropagate),
-        );
+            PostUpdate, ((shadows::follow.after(bevy::transform::TransformSystem::TransformPropagate))).distributive_run_if(crate::runtime_restart::presentation_available));
         app.add_systems(
-            PostUpdate,
-            (
+            PostUpdate, (((
                 dropdown::reveal_selection,
                 dynamic_rows::grow,
                 auto_list_bounds,
@@ -186,8 +174,7 @@ impl Plugin for MenuDocumentsPlugin {
             )
                 .chain()
                 .after(bevy::ui::UiSystem::Layout)
-                .before(animations::fade),
-        );
+                .before(animations::fade))).distributive_run_if(crate::runtime_restart::presentation_available));
     }
 }
 #[derive(Resource, Default)]
@@ -216,8 +203,19 @@ pub(crate) struct Menus {
     settings_values: std::collections::BTreeMap<String, serde_json::Value>,
     animation_requests: Vec<(String, String, rvn_ui::AnimationClip)>,
 }
+/// Retire only physical captures; retain menu document/session/hover/focus.
+pub(crate) fn cancel_runtime_input(world:&mut World){
+    let current=world.get_resource::<ButtonInput<KeyCode>>().map(|keys|[keys.pressed(KeyCode::ControlLeft),keys.pressed(KeyCode::ControlRight),keys.pressed(KeyCode::ShiftLeft),keys.pressed(KeyCode::ShiftRight)]).unwrap_or([false;4]);
+    if let Some(mut modifiers)=world.get_resource_mut::<MenuKeyboardModifiers>(){modifiers.0=current;}
+    if let Some(mut menus)=world.get_resource_mut::<Menus>(){menus.pressed=None;menus.slider_drag=None;}
+    if let Some(mut drag)=world.get_resource_mut::<local_controls::Drag>(){*drag=default();}
+    if let Some(mut drag)=world.get_resource_mut::<scrollbars::PointerDrag>(){*drag=default();}
+}
 impl Menus {
     pub(crate) fn current_page(&self)->Option<&str> {self.page.as_deref()}
+    pub(crate) fn finish_checkpoint_restore(&mut self) {
+        self.pending=None;self.page=None;self.history.clear();self.key.clear();
+    }
     pub(crate) fn keyboard_focus(&self) -> Option<Entity> {
         self.focus
     }
@@ -530,6 +528,8 @@ fn scroll_to_focus(
         }
     }
 }
+#[derive(Resource,Default)]
+struct MenuKeyboardModifiers([bool;4]);
 fn keyboard(
     mut keys: ResMut<ButtonInput<KeyCode>>,
     pads: Res<ButtonInput<GamepadButton>>,
@@ -541,22 +541,23 @@ fn keyboard(
     state: Option<Res<State<VnState>>>,
     legacy: Query<&legacy_navigation::Focusable>,
     mut key_events: EventReader<bevy::input::keyboard::KeyboardInput>,
-    mut modifiers: Local<[bool; 4]>,
+    mut modifiers: ResMut<MenuKeyboardModifiers>,
+    input:crate::runtime_restart::InputAccess,
 ) {
     // Keep the modifier state at Tab's keydown. A complete OS chord can be
     // pressed and released before this frame's ButtonInput final state.
     // Drain even with no presenter so releases cannot linger after a modal.
-    let raw: Vec<_> = key_events.read().cloned().collect();
+    let raw: Vec<_> = key_events.read_with_id().filter(|(_,id)|input.accepts::<bevy::input::keyboard::KeyboardInput>(id.id)).map(|(event,_)|event.clone()).collect();
     let has_shift = raw.iter().any(|event|
         matches!(event.key_code, KeyCode::ShiftLeft | KeyCode::ShiftRight));
-    let pressed = crate::programmable_ui::key_chords(raw.into_iter(), &mut *modifiers);
+    let pressed = crate::programmable_ui::key_chords(raw.into_iter(), &mut modifiers.0);
     let final_shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     let tab_shift = pressed.iter().find(|(key, _, _)| key.key_code == KeyCode::Tab)
         .map(|(_, _, shift)| *shift || (!has_shift && final_shift))
         .unwrap_or(final_shift);
-    *modifiers = [keys.pressed(KeyCode::ControlLeft), keys.pressed(KeyCode::ControlRight),
+    modifiers.0 = [keys.pressed(KeyCode::ControlLeft), keys.pressed(KeyCode::ControlRight),
         keys.pressed(KeyCode::ShiftLeft), keys.pressed(KeyCode::ShiftRight)];
-    if dropdown.open || confirmation.active() {
+    if !input.available() || dropdown.open || confirmation.active() {
         return;
     }
     if let Some(previous) = menus.pressed.take() {
@@ -661,10 +662,12 @@ fn scroll_lists(
     dropdown: Res<dropdown::Dropdown>,
     popups: Query<Entity, With<dropdown::Popup>>,
     mut styles: Query<&mut Style, Without<scrollbars::Scrollbar>>,
+    input:crate::runtime_restart::InputAccess,
 ) {
     let delta: f32 = wheel
-        .read()
-        .map(|e| {
+        .read_with_id()
+        .filter(|(_,id)|input.accepts::<bevy::input::mouse::MouseWheel>(id.id))
+        .map(|(e,_)| {
             e.y * if e.unit == bevy::input::mouse::MouseScrollUnit::Line {
                 44.0
             } else {
@@ -735,9 +738,15 @@ fn scroll_lists(
 fn color(c: [f32; 4]) -> Color {
     Color::srgba(c[0], c[1], c[2], c[3])
 }
-fn load(paths: Res<ProjectPaths>, mut menus: ResMut<Menus>, engine: Res<VnEngine>) {
+fn load(paths: Res<ProjectPaths>, mut menus: ResMut<Menus>, engine: Option<Res<VnEngine>>, startup: Option<Res<crate::debugger_startup::DebugBootstrap>>, start: Option<Res<crate::resources::NarrativeStart>>) {
+    let script = match (engine.as_deref(), startup.as_deref()) {
+        (Some(engine), None) => &engine.0.script,
+        (None, Some(startup)) => &startup.owner.program().script,
+        _ => return,
+    };
     if menus.start_label.is_none() {
-        if let Some(rvn_parser::Statement::Label { name }) = engine.0.script.get(engine.0.state.pc)
+        if let Some(label) = start.and_then(|start| start.0.clone()) { menus.start_label = Some(label); }
+        else if let Some(rvn_parser::Statement::Label { name } | rvn_parser::Statement::SceneLabel { name }) = script.iter().find(|statement| matches!(statement,rvn_parser::Statement::Label{..}|rvn_parser::Statement::SceneLabel{..}))
         {
             menus.start_label = Some(name.clone());
         }
@@ -768,12 +777,10 @@ fn load(paths: Res<ProjectPaths>, mut menus: ResMut<Menus>, engine: Res<VnEngine
         menus.key.clear();
         return;
     }
-    let labels = engine
-        .0
-        .script
+    let labels = script
         .iter()
         .filter_map(|s| {
-            if let rvn_parser::Statement::Label { name } = s {
+            if let rvn_parser::Statement::Label { name } | rvn_parser::Statement::SceneLabel { name } = s {
                 Some(name.clone())
             } else {
                 None
@@ -828,7 +835,8 @@ type OldMenus = Or<(
 )>;
 #[derive(SystemParam)]
 struct Context<'w, 's> {
-    engine: Res<'w, VnEngine>,
+    engine: Option<Res<'w, VnEngine>>,
+    startup: Option<Res<'w, crate::debugger_startup::DebugBootstrap>>,
     state: Res<'w, State<VnState>>,
     save: Res<'w, SaveMenuState>,
     settings: Res<'w, SettingsMenuState>,
@@ -846,14 +854,21 @@ struct Context<'w, 's> {
     values: Res<'w, crate::systems::settings_menu::Settings>,
     menu: Res<'w, MenuState>,
 }
+impl Context<'_, '_> {
+    fn locale(&self) -> Option<&rvn_core::locale::LocaleManager> {
+        match (self.engine.as_deref(), self.startup.as_deref()) {
+            (Some(engine), None) => engine.0.locale.as_ref(),
+            (None, Some(startup)) => startup.owner.locale(),
+            _ => None,
+        }
+    }
+    fn can_rollback(&self) -> bool {
+        self.startup.is_none() && self.engine.as_deref()
+            .is_some_and(|engine| crate::systems::input::can_rollback(&engine.0))
+    }
+}
 fn translated(ctx: &Context, text: &str) -> String {
-    ctx.engine
-        .0
-        .locale
-        .as_ref()
-        .map(|locale| locale.translate(text))
-        .unwrap_or(text)
-        .to_owned()
+    ctx.locale().map(|locale| locale.translate(text)).unwrap_or(text).to_owned()
 }
 fn render(
     mut commands: Commands,
@@ -903,7 +918,7 @@ fn render(
             && ctx.menu.return_to != Some(VnState::TitleScreen))
         .into(),
     );
-    menus.session.variables.insert("state.can_rollback".into(),crate::systems::input::can_rollback(&ctx.engine.0).into());
+    menus.session.variables.insert("state.can_rollback".into(),ctx.can_rollback().into());
     let page = menus
         .doc
         .as_ref()
@@ -1032,14 +1047,11 @@ fn render(
         "{key}:{image_state:?}:{}:{:?}:{presentation:?}:{locals:?}:{}",
         ctx.values.auto_speed,
         (ctx.images.len(), ctx.fonts.len(), ctx.save.revision),
-        ctx.engine
-            .0
-            .locale
-            .as_ref()
+        ctx.locale()
             .map(|l| l.current_lang())
             .unwrap_or("")
     );
-    let key=format!("{key}:rollback={}",crate::systems::input::can_rollback(&ctx.engine.0));
+    let key=format!("{key}:rollback={}",ctx.can_rollback());
     if menus.key == key {
         return;
     }
@@ -1182,7 +1194,7 @@ fn spawn_element(
         true
     };
     let enabled = e.enabled
-        && (e.action != Action::Rollback || crate::systems::input::can_rollback(&ctx.engine.0))
+        && (e.action != Action::Rollback || ctx.can_rollback())
         && page_action_enabled
         && !(e.action == Action::Continue && ctx.persistent.data.last_resume_target.is_none());
     let entity = commands
@@ -2187,6 +2199,9 @@ pub(crate) struct ActionContext<'w> {
     pub(crate) imagemap: ResMut<'w, ImagemapState>,
     pub(crate) render: ResMut<'w, VnRenderState>,
     pub(crate) typing: ResMut<'w, TypewriterState>,
+    pub(crate) reveal_binding: Option<Res<'w,crate::display_reveal::DialogueRevealBinding>>,
+    pub(crate) checkpoint_requests:Option<ResMut<'w,crate::checkpoint_requests::CheckpointRequests>>,
+    pub(crate) restart_requests:Option<ResMut<'w,crate::runtime_restart::Requests>>,
     pub(crate) skip: ResMut<'w, SkipMode>,
     pub(crate) events: EventWriter<'w, crate::vn_command::VnCommand>,
     pub(crate) player_events: EventWriter<'w, crate::vn_command::PlayerInput>,
@@ -2476,6 +2491,7 @@ fn dispatch_action(commands: &mut Commands, menus: &mut Menus, ctx: &mut ActionC
                         });
                         match result {
                             Ok((data, target)) => {
+                                if crate::checkpoint_requests::defer_load(&ctx.engine,ctx.checkpoint_requests.as_deref_mut(),&data,target.clone(),true)? {return Ok(());}
                                 match ctx.engine.0.load_data(data) {
                                     Ok(rvn_core::engine::LoadCompatibility::LegacyUnchecked) => warn!("Ancienne sauvegarde : compatibilité après modification de l’histoire non vérifiable"),
                                     Ok(_) => {},
@@ -2517,6 +2533,10 @@ fn dispatch_action(commands: &mut Commands, menus: &mut Menus, ctx: &mut ActionC
                         } else {
                             menus.start_label.clone()
                         };
+                        if ctx.engine.0.requires_owned_startup_for_fresh(){
+                            ctx.restart_requests.as_deref_mut().ok_or("Actual normal restart consumer is missing")?.admit(&ctx.engine,label)?;
+                            return Ok(());
+                        }
                         let Ok(mut fresh) = ctx
                             .engine
                             .0
@@ -2525,15 +2545,9 @@ fn dispatch_action(commands: &mut Commands, menus: &mut Menus, ctx: &mut ActionC
                             return Err("Impossible de créer la nouvelle partie".into());
                         };
                         if let Some(label) = label {
-                            let Some(pc) = fresh.script.iter().position(
-                                |s| matches!(s,rvn_parser::Statement::Label{name} if name==&label),
-                            ) else {
-                                return Err(format!("Label absent : {label}"));
-                            };
-                            fresh.state.pc = pc;
+                            fresh.enter_label(&label).map_err(|error| format!("Entrée absente ou invalide {label} : {error}"))?;
                         }
                         fresh.locale = ctx.engine.0.locale.take();
-                        fresh.persistent_vars = ctx.engine.0.persistent_vars.clone();
                         let visible: Vec<_> = ctx
                             .engine
                             .0
@@ -2713,4 +2727,12 @@ mod confirmation_action_tests {
         assert!(matches!(harness.app.world().resource::<NextState<VnState>>(),NextState::Pending(VnState::Stepping)));
         assert_eq!(harness.app.world().resource::<VnEngine>().0.state.vars["qa_events"],rvn_parser::Value::Int(0));assert!(harness.app.world().resource::<ScriptErrorMessage>().0.is_empty());assert_eq!(harness.disk(),disk);
     }
+}
+
+#[cfg(test)]
+impl Menus{
+ pub(crate) fn restart_state_for_test(&self)->serde_json::Value{
+  let presentation=self.session.presentation.iter().map(|((page,id),value)|serde_json::json!([page,id,value.visible,value.enabled,value.text,value.image])).collect::<Vec<_>>();
+  serde_json::json!({"doc":self.doc,"key":self.key,"page":self.page,"history":self.history,"overlay_return":format!("{:?}",self.overlay_return),"session_variables":self.session.variables,"session_presentation":presentation,"session_error":self.session.last_error,"pending":self.pending,"start_label":self.start_label,"error":self.error,"focus":self.focus.map(Entity::to_bits),"focus_key":self.focus_key,"active_page":self.active_page,"list_pages":self.list_pages,"settings":self.settings_values})
+ }
 }

@@ -1,0 +1,7 @@
+label start
+flow.consume_v2("first","timer"){timer 0.5 => jump done}
+"first"
+flow.consume_v2("second","timer"){timer 0.75 => jump done}
+"second"
+label done
+"done"

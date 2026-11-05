@@ -1,0 +1,26 @@
+function producer() {
+    local draw = random(1, 1)
+    return true
+}
+function caller() {
+    local caller_only = 37
+    flow.consume_v2("function:caller", "choose") {
+        capture "condition" = producer()
+        if __rvn_captured_v1("condition") {
+            flow.consume_v2("function:caller", "sequence") {
+                flow.sequence() {
+                    {flow.consume_v2("function:caller", "first") {local order = 1}}
+                    {flow.consume_v2("function:caller", "nested") {
+                        if true {
+                            flow.consume_v2("function:caller", "second") {local order = order * 10 + 2}
+                        } else {set bad = 1 / 0}
+                    }}
+                }
+            }
+        } else {set bad = 1 / 0}
+    }
+    flow.consume_v2("function:caller", "return") {return [order, caller_only]}
+}
+scene label start
+set result = caller()
+"done"

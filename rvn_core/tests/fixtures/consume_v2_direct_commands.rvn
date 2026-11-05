@@ -1,0 +1,16 @@
+function args() {local draw=random(1,1) return [__rvn_literal_name("asset:Table"),__rvn_string_table_text_name(__rvn_literal_name("asset:Table")," raw key ")]}
+function paint(state, bounds, seconds) {return []}
+screen panel(name,text) {return component("root","column",{},[component("act","button",{"text":text_to_string(text)},[]),component("drawing","canvas",{"draw":"paint","state":{"x":0}},[])])}
+function portrait() {local draw=random(1,1) return layered_image([600,1000],{"face":"neutral"},[image_layer("neutral","neutral.png",{"group":"face","attribute":"neutral"}),image_layer("happy","happy.png",{"group":"face","attribute":"happy"})])}
+scene label start
+flow.consume_v2("scene:start","open") {capture "args"=args() ui.open("panel",__rvn_captured_v1("args"),false,0)}
+flow.consume_v2("scene:start","focus") {ui.focus("panel","act")}
+flow.consume_v2("scene:start","state") {ui.set_state("panel","drawing",{"x":9})}
+flow.consume_v2("scene:start","settings") {accessibility.configure({"text_scale":2})}
+flow.consume_v2("scene:start","speak") {capture "args"=args() accessibility.speak(text_to_string(__rvn_captured_v1("args")[1]))}
+flow.consume_v2("scene:start","quiet") {accessibility.stop()}
+flow.consume_v2("scene:start","compose") {capture "portrait"=portrait() character.compose("iris",__rvn_captured_v1("portrait"))}
+flow.consume_v2("scene:start","attributes") {character.attributes("iris",{"face":"happy"})}
+"checkpoint"
+flow.consume_v2("scene:start","close") {ui.close("panel")}
+"done"

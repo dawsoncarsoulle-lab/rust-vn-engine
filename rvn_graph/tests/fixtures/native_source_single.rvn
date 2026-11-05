@@ -1,0 +1,8 @@
+function probe() {
+    flow.consume_v1("g900/n1:function_entry|exec_out=1@0", "n5:function_return|exec_in=13@1,value=14@6") {
+        capture "n2:text_from_string_table|table=2@0,key=3@0,result=4@0" = __rvn_string_table_text_name(__rvn_literal_name("asset:TableCase"), "Hello\n世界")
+        inspect "n3:get_string_table_id_and_key|text=5@2,valid=6@0,table_id=7@0,key=8@0" = __rvn_captured_v1("n2:text_from_string_table|table=2@0,key=3@0,result=4@0")
+        capture "n4:list_literal|list=9@0,item_0=10@3,item_1=11@4,item_2=12@5" = [__rvn_terminal_v1("n3:get_string_table_id_and_key|text=5@2,valid=6@0,table_id=7@0,key=8@0", "valid"), __rvn_terminal_v1("n3:get_string_table_id_and_key|text=5@2,valid=6@0,table_id=7@0,key=8@0", "table_id"), __rvn_terminal_v1("n3:get_string_table_id_and_key|text=5@2,valid=6@0,table_id=7@0,key=8@0", "key")]
+        return __rvn_captured_v1("n4:list_literal|list=9@0,item_0=10@3,item_1=11@4,item_2=12@5")
+    }
+}

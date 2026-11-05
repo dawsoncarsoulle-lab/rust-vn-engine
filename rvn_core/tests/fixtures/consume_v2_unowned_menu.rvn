@@ -1,0 +1,7 @@
+init {set prior = 1 / 0}
+scene label start
+flow.consume_v2("scene:start", "untrusted_event") {
+    capture "effect" = random(1, 1)
+    menu.execute({"action":"save"})
+}
+"done"

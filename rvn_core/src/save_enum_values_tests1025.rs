@@ -1,0 +1,6 @@
+use super::*;
+use rvn_parser::{Value,enum_asset::{EnumAssetId,EnumMemberId}};
+fn value(asset:&str)->EnumValue{EnumValue{asset:EnumAssetId::parse(asset).unwrap(),member:EnumMemberId::parse("229f41eae6ba4b4bb71dfaf60fb50001").unwrap()}}
+#[test] fn enum_save_walk1025_visits_typed_values_in_nested_vectors_maps_and_structs(){#[derive(Serialize)]struct Frame{locals:std::collections::BTreeMap<String,Value>,continuation:Vec<Value>};let a=value("329f41eae6ba4b4bb71dfaf60fb50001");let b=value("329f41eae6ba4b4bb71dfaf60fb50002");let frame=Frame{locals:std::collections::BTreeMap::from([("x".into(),Value::List(vec![Value::Enum(b)]))]),continuation:vec![Value::Enum(a),Value::Enum(b)]};assert_eq!(collect(&frame).unwrap(),vec![a,b]);}
+#[test] fn enum_save_walk1025_does_not_parse_dictionary_keys_or_json_text(){let json=serde_json::json!({"Enum":{"asset":"329f41eae6ba4b4bb71dfaf60fb50001","member":"229f41eae6ba4b4bb71dfaf60fb50001"}});assert!(collect(&json).unwrap().is_empty());let value=Value::Dict(std::collections::BTreeMap::from([("Enum".into(),Value::Str(json.to_string()))]));assert!(collect(&value).unwrap().is_empty());}
+#[test] fn enum_save_walk1025_raw_enum_reference_dto_is_not_runtime_Value_authority(){let a=value("329f41eae6ba4b4bb71dfaf60fb50001");assert!(collect(&vec![a]).unwrap().is_empty());assert_eq!(collect(&Value::Enum(a)).unwrap(),vec![a]);}

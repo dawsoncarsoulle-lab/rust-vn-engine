@@ -131,13 +131,25 @@ pub fn spawn_or_despawn_debug_overlay_system(
 
 /// Système qui met à jour le contenu de l'overlay à chaque frame.
 pub fn update_debug_overlay_system(
-    engine: Res<VnEngine>,
+    engine: Option<Res<VnEngine>>,
+    startup: Option<Res<crate::debugger_startup::DebugBootstrap>>,
     state: Res<DebugOverlayState>,
     mut query: Query<&mut Text, With<DebugOverlayText>>,
 ) {
     if !state.visible {
         return;
     }
+    if let (None, Some(startup)) = (engine.as_deref(), startup.as_deref()) {
+        // The actual debugger snapshot carries the real Init route/stop. Never
+        // reinterpret Startup as an ordinary Game program counter.
+        let full = format!("Startup : {:?}\nVariables :\n{:?}",
+            startup.owner.snapshot(), startup.owner.state().vars);
+        for mut text in query.iter_mut() {
+            if let Some(section) = text.sections.get_mut(0) { section.value = full.clone(); }
+        }
+        return;
+    }
+    let (Some(engine), None) = (engine.as_deref(), startup.as_deref()) else { return; };
     // Récupère des infos du moteur : compteur de programme, statement et variables.
     let pc = engine.0.state.pc;
     let stmt_str = engine

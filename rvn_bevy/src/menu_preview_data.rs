@@ -23,8 +23,8 @@ pub(crate) struct MenuPreviewDataPlugin;
 impl Plugin for MenuPreviewDataPlugin {
     fn build(&self, app: &mut App) {
         if std::env::var("RVN_UI_PREVIEW_DATA").as_deref() == Ok("filled") {
-            app.add_systems(Update, seed_demo);
-            app.add_systems(OnEnter(VnState::Waiting), seed_history);
+            app.add_systems(Update, seed_demo.run_if(resource_exists::<VnEngine>));
+            app.add_systems(OnEnter(VnState::Waiting), seed_history.run_if(resource_exists::<VnEngine>));
         }
     }
 }

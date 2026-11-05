@@ -99,6 +99,8 @@ pub enum Token<'a> {
     Ge,
     #[token("=>")]
     Arrow,
+    #[token("->")]
+    FunctionResultArrow,
     #[token("=")]
     Assign,
     #[token("<")]
@@ -142,6 +144,10 @@ pub enum Token<'a> {
 
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
     Ident(&'a str),
+
+    // Quoting belongs to variable syntax, not to stored semantic names.
+    #[regex(r"`([^`\\\r\n]|\\.)*`")]
+    QuotedIdent(&'a str),
 
     #[regex(r#""([^"\\]|\\.)*""#)]
     String(&'a str),

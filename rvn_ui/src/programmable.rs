@@ -3,6 +3,9 @@
 pub use crate::programmable_layout::{layout_rects, ComponentRect};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+#[path = "programmable_slots.rs"]
+mod slots;
+pub use slots::{LayoutContract, SlotEdges, BoxSlotSize, ParentSlot, layout_widget_rects,measure_widget_desired};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -185,6 +188,19 @@ pub struct ScreenView {
     pub root: Component,
 }
 
+/// Parse the authored child tree of a live Screen instance. An empty RVN list
+/// denotes no child root; it is not an invisible Component or a closed instance.
+/// Component::parse remains the strict compatibility API for actual trees.
+#[path="programmable_owner_host_0942.rs"]
+mod owner_host;
+pub use owner_host::{parse_screen_description, ScreenDescription, ScreenHostProperties,
+    ScreenHostView, HostVisibility, ViewportSlot, HostEventKind, HostFocusTarget,
+    HostLifecycle, HostLifecycleEvent, HostGeometry,HostFocusRequest,parse_host_focus_target};
+
+pub fn parse_screen_root(value: serde_json::Value) -> Result<Option<Component>, String> {
+    parse_screen_description(value).map(|description|description.root)
+}
+
 fn yes() -> bool {
     true
 }
@@ -227,6 +243,12 @@ pub fn safe_asset_path(path: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Component {
+    /// Additive typed parent-slot contract. Absent means the unchanged legacy layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout_contract: Option<LayoutContract>,
+    /// Layout data of this child's relation to its parent, not content style.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_slot: Option<ParentSlot>,
     pub id: String,
     pub kind: ComponentKind,
     #[serde(default)]
@@ -356,6 +378,22 @@ pub struct Component {
 impl Component {
     pub fn parse(mut description: serde_json::Value) -> Result<Self, String> {
         expand_styles(&mut description, 0, &mut 0)?;
+        // Legacy descriptions retain their historical spacing default. An
+        // explicit Widget definition instead places children through slots;
+        // only omitted fields inherit its neutral default, after style merge.
+        // Explicit/style spacing remains authored and must pass validation.
+        if description.get("layout_contract").and_then(serde_json::Value::as_str)
+            == Some("widget_v1")
+        {
+            fn slot_defaults(value: &mut serde_json::Value) {
+                let Some(object) = value.as_object_mut() else { return; };
+                object.entry("spacing").or_insert(serde_json::json!(0.0));
+                if let Some(children) = object.get_mut("children").and_then(serde_json::Value::as_array_mut) {
+                    for child in children { slot_defaults(child); }
+                }
+            }
+            slot_defaults(&mut description);
+        }
         let mut root: Self = serde_json::from_value(description)
             .map_err(|error| format!("Invalid screen component: {error}"))?;
         root.visit_mut(&mut |component| {
@@ -379,7 +417,9 @@ impl Component {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        fn walk(node: &Component, depth: usize, ids: &mut BTreeSet<String>) -> Result<(), String> {
+        slots::validate_tree_contract(self)?;
+        let widget_mode=self.layout_contract.is_some();
+        fn walk(node: &Component, depth: usize, ids: &mut BTreeSet<String>, widget_mode:bool) -> Result<(), String> {
             if depth > 32 || ids.len() >= 512 {
                 return Err("Screen limit: 512 components and 32 nesting levels".into());
             }
@@ -608,7 +648,7 @@ impl Component {
             let container = matches!(
                 node.kind,
                 ComponentKind::Panel | ComponentKind::Row | ComponentKind::Column
-            );
+            ) || (widget_mode && node.kind==ComponentKind::Button);
             if !container && !node.children.is_empty() {
                 return Err(format!(
                     "Only containers accept child components: {}",
@@ -629,11 +669,11 @@ impl Component {
             }
             node.validate_value(&node.value)?;
             for child in &node.children {
-                walk(child, depth + 1, ids)?;
+                walk(child, depth + 1, ids, widget_mode)?;
             }
             Ok(())
         }
-        walk(self, 0, &mut BTreeSet::new())
+        walk(self, 0, &mut BTreeSet::new(), widget_mode)
     }
 
     pub fn is_control(&self) -> bool {
@@ -770,6 +810,55 @@ impl Component {
 mod tests {
     use super::*;
     #[test]
+    fn widget_layout_defaults_cover_all_supported_roots_and_inherit_to_children() {
+        for kind in ["column", "row", "button", "text"] {
+            let root = Component::parse(serde_json::json!({"id":"root","kind":kind,"layout_contract":"widget_v1"})).unwrap();
+            assert_eq!(root.spacing, 0.0);
+        }
+        let root = Component::parse(serde_json::json!({"id":"root","kind":"column","layout_contract":"widget_v1","children":[
+            {"id":"button","kind":"button","parent_slot":{"kind":"vertical_box"},"children":[
+                {"id":"text","kind":"text","text":"Child","parent_slot":ParentSlot::for_parent(ComponentKind::Button).unwrap()}
+            ]}
+        ]})).unwrap();
+        root.visit(&mut |node| assert_eq!(node.spacing, 0.0));
+    }
+    #[test]
+    fn widget_layout_defaults_do_not_erase_explicit_or_styled_spacing() {
+        for property in [serde_json::json!({"spacing":1}),serde_json::json!({"style":{"spacing":1}})] {
+            let mut root = serde_json::json!({"id":"root","kind":"column","layout_contract":"widget_v1"});
+            root.as_object_mut().unwrap().extend(property.as_object().unwrap().clone());
+            assert!(Component::parse(root).unwrap_err().contains("parent slots"));
+        }
+        let nested = serde_json::json!({"id":"root","kind":"column","layout_contract":"widget_v1","children":[
+            {"id":"text","kind":"text","text":"Child","spacing":2,"parent_slot":{"kind":"vertical_box"}}
+        ]});
+        assert!(Component::parse(nested).unwrap_err().contains("parent slots"));
+    }
+    #[test]
+    fn widget_layout_defaults_preserve_legacy_omitted_explicit_and_styled_spacing() {
+        let legacy = Component::parse(serde_json::json!({"id":"legacy","kind":"column","children":[{"id":"text","kind":"text"}]})).unwrap();
+        legacy.visit(&mut |node| assert_eq!(node.spacing, spacing()));
+        for property in [serde_json::json!({"spacing":3}),serde_json::json!({"style":{"spacing":3}})] {
+            let mut root = serde_json::json!({"id":"legacy","kind":"column"});
+            root.as_object_mut().unwrap().extend(property.as_object().unwrap().clone());
+            assert_eq!(Component::parse(root).unwrap().spacing, 3.0);
+        }
+    }
+    #[test]
+    fn widget_layout_defaults_roundtrip_and_keep_shared_button_text_slot_geometry() {
+        let root = Component::parse(serde_json::json!({"id":"root","kind":"column","layout_contract":"widget_v1","children":[
+            {"id":"button","kind":"button","parent_slot":{"kind":"vertical_box"},"children":[
+                {"id":"text","kind":"text","text":"Child","parent_slot":{"kind":"button","padding":{"left":4,"right":4,"top":2,"bottom":2},"horizontal":"center","vertical":"center"}}
+            ]}
+        ]})).unwrap();
+        let reopened = Component::parse(serde_json::to_value(&root).unwrap()).unwrap();
+        assert_eq!(reopened, root);
+        let rects = layout_widget_rects(&reopened,[0.0,0.0,640.0,480.0],&mut |node| Ok([node.text.chars().count() as f32*8.0,20.0])).unwrap();
+        assert_eq!(rects.iter().find(|node|node.id=="button").unwrap().rect[3],24.0);
+        assert_eq!(rects.iter().find(|node|node.id=="text").unwrap().rect[2..],[40.0,20.0]);
+    }
+
+    #[test]
     fn descriptions_are_strict_bounded_and_ordered() {
         let component =
             Component::parse(serde_json::json!({"id":"root","kind":"column","children":[
@@ -783,3 +872,7 @@ mod tests {
         assert!(Component::parse(serde_json::json!({"id":"x","kind":"slider","value":2})).is_err());
     }
 }
+
+#[cfg(test)]
+#[path="programmable_empty_root_tests_0942.rs"]
+mod empty_root_tests_0942;

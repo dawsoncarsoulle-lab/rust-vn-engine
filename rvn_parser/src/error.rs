@@ -33,6 +33,28 @@ pub fn byte_offset_to_location(source: &str, offset: usize, len_bytes: usize) ->
     SourceLocation { line, col, len }
 }
 
+/// Single lexing pass only. Logos emits ordered UTF-8 boundary spans; keep
+/// line/scalar-column state across their starts instead of rescanning the
+/// complete source prefix for every successful token. No global/source cache.
+pub(crate) struct SourceLocationCursor<'a>{
+    source:&'a str,offset:usize,line:usize,col:usize,
+}
+impl<'a> SourceLocationCursor<'a>{
+    pub(crate) fn new(source:&'a str)->Self{Self{source,offset:0,line:1,col:1}}
+    pub(crate) fn location(&mut self,offset:usize,len_bytes:usize)->SourceLocation{
+        let clamped=offset.min(self.source.len());
+        assert!(clamped>=self.offset,"lexer source spans must be monotone");
+        let delta=self.source.get(self.offset..clamped).expect("lexer source spans must use UTF-8 boundaries");
+        for scalar in delta.chars(){
+            if scalar=='\n'{self.line+=1;self.col=1;}else{self.col+=1;}
+        }
+        self.offset=clamped;
+        let len=offset.checked_add(len_bytes).and_then(|end|self.source.get(offset..end))
+            .map(|token|token.chars().count()).unwrap_or(len_bytes).max(1);
+        SourceLocation{line:self.line,col:self.col,len}
+    }
+}
+
 // ─── ERREURS ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, PartialEq)]

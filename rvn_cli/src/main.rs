@@ -23,7 +23,9 @@ mod check;
 mod desktop_export;
 mod desktop_paths;
 mod desktop_scripts;
+mod desktop_widgets;
 mod web_export;
+mod widget_runtime_loader_0950;
 #[cfg(any(test, feature = "video"))]
 mod video_distribution;
 use blueprint::transpile_blueprint;
@@ -397,6 +399,8 @@ struct ProjectConfig {
     project: ProjectSection,
     #[serde(default)]
     paths: PathsSection,
+    #[serde(default)]
+    string_tables: rvn_core::string_table_project::StringTableDeclarations,
 }
 
 #[derive(Debug, Deserialize)]
@@ -503,6 +507,12 @@ fn build_desktop_project(project_dir: &Path, cfg: &ProjectConfig, game_name: &st
     Ok(())
 }
 
+pub(crate) fn string_table_snapshot(project: &Path, cfg: &ProjectConfig) -> Result<std::collections::BTreeMap<String, [u8; 32]>> {
+    let prepared = rvn_core::string_table_project::prepare_native(&project.join(&cfg.paths.assets), &cfg.string_tables)
+        .map_err(anyhow::Error::msg)?;
+    Ok(prepared.source_hashes().clone())
+}
+
 fn build_desktop_project_with_runtime(
     project_dir: &Path,
     cfg: &ProjectConfig,
@@ -513,6 +523,7 @@ fn build_desktop_project_with_runtime(
     let platform = detect_platform()?;
     let location = desktop_export::Location::preflight(project_dir, &format!("{game_name}-{platform}"))?;
     desktop_paths::validate(project_dir, cfg)?;
+    let table_before = string_table_snapshot(project_dir, cfg)?;
     let scripts = desktop_scripts::collect(project_dir, Path::new(&cfg.project.main_script), Path::new(&cfg.paths.saves))?;
     let manifest = fs::read(project_dir.join("rvn.toml"))?;
 
@@ -521,6 +532,7 @@ fn build_desktop_project_with_runtime(
     let runtime_metadata = fs::metadata(&runtime_binary)?;
     anyhow::ensure!(runtime_metadata.is_file() && runtime_metadata.len() > 0, "Desktop runtime is not a nonempty regular file");
     anyhow::ensure!(fs::read(project_dir.join("rvn.toml"))? == manifest, "Project configuration changed during runtime preparation; the previous export was retained");
+    anyhow::ensure!(string_table_snapshot(project_dir, cfg)? == table_before, "String-table assets changed during Desktop runtime preparation; the previous export was retained");
     // No output has been created or moved before all project inputs and the
     // runtime are ready. The old export remains available throughout staging.
     let mut stage = create_dist_structure(location)?;
@@ -529,12 +541,24 @@ fn build_desktop_project_with_runtime(
     let executable_name = desktop_executable_name(game_name, std::env::consts::OS);
     let result = (|| {
         copy_project_files_with_scripts(project_dir, stage.path(), cfg, &scripts)?;
+        let widget_preflight = desktop_widgets::prepare(&stage.path().join("data"), cfg, &manifest)?;
         #[cfg(feature = "video")]
         video_distribution::copy_for_runtime(&runtime_binary, stage.path())?;
         let output_binary = stage.path().join(&executable_name);
         fs::copy(&runtime_binary, &output_binary).with_context(|| format!("unable to copy runtime binary '{}' to '{}'", runtime_binary.display(), output_binary.display()))?;
         anyhow::ensure!(fs::read(project_dir.join("rvn.toml"))? == manifest, "Project configuration changed during Desktop staging; the previous export was retained");
-        stage.publish_with_hook(before_replace)
+        anyhow::ensure!(string_table_snapshot(&stage.path().join("data"), cfg)? == table_before, "Copied Desktop table assets differ from prepared bytes");
+        stage.publish_with_hook(|path| {
+            before_replace(path)?;
+            anyhow::ensure!(fs::read(project_dir.join("rvn.toml"))? == manifest, "Project configuration changed during Desktop publication");
+            anyhow::ensure!(string_table_snapshot(project_dir, cfg)? == table_before, "String-table assets changed during Desktop publication");
+            anyhow::ensure!(string_table_snapshot(&path.join("data"), cfg)? == table_before, "Staged Desktop table assets changed before publication");
+            if !cfg.string_tables.is_empty() {
+                anyhow::ensure!(fs::read(path.join("data/rvn.toml"))? == manifest, "Staged Desktop table index changed before publication");
+            }
+            widget_preflight.verify(&path.join("data"), cfg, &manifest)?;
+            Ok(())
+        })
     })();
     match result {
         Ok(published) => Ok(published),
@@ -928,6 +952,13 @@ fn write_web_asset_manifest(
         manifest.push('\n');
     }
 
+    rvn_core::string_table_project::validate_declarations(&cfg.string_tables).map_err(anyhow::Error::msg)?;
+    manifest.push_str("\n[string_tables]\n");
+    for (id, path) in &cfg.string_tables {
+        manifest.push_str(&toml_string(id)); manifest.push_str(" = ");
+        manifest.push_str(&toml_string(path)); manifest.push('\n');
+    }
+
     fs::write(dist_dir.join("rvn_web_assets.toml"), manifest).with_context(|| {
         format!(
             "unable to write web asset manifest '{}'",
@@ -1058,6 +1089,16 @@ fn copy_project_notices(project_dir: &Path, dist_dir: &Path) -> Result<()> {
         runtime_notices.join("THIRD-PARTY-NOTICES.txt"),
         include_str!("../../RUNTIME-NOTICES.txt"),
     )?;
+    // These faces are embedded by the Widget runtime; retain their original
+    // complete terms and attribution in both Desktop and Web distributions.
+    for (name, selected) in [
+        ("Roboto-2011-Regular", rvn_ui::widget_fonts::WidgetBuiltinFace::Regular),
+        ("Roboto-2011-Bold", rvn_ui::widget_fonts::WidgetBuiltinFace::DefaultText),
+    ] {
+        let face = rvn_ui::widget_fonts::face(selected);
+        fs::write(runtime_notices.join(format!("LICENSE-{name}.txt")), face.license)?;
+        fs::write(runtime_notices.join(format!("NOTICE-{name}.txt")), face.notice)?;
+    }
     Ok(())
 }
 
@@ -1162,6 +1203,14 @@ mod distribution_regressions {
             fs::read_to_string(dist.join("CREDITS.md")).unwrap(),
             "Attribution: CC BY artist"
         );
+        for (name, selected) in [
+            ("Roboto-2011-Regular", rvn_ui::widget_fonts::WidgetBuiltinFace::Regular),
+            ("Roboto-2011-Bold", rvn_ui::widget_fonts::WidgetBuiltinFace::DefaultText),
+        ] {
+            let face = rvn_ui::widget_fonts::face(selected);
+            assert_eq!(fs::read(dist.join(format!("rust-vn-notices/LICENSE-{name}.txt"))).unwrap(), face.license.as_bytes());
+            assert_eq!(fs::read(dist.join(format!("rust-vn-notices/NOTICE-{name}.txt"))).unwrap(), face.notice.as_bytes());
+        }
         copy_custom_menus(&root, &dist).unwrap();
         assert_eq!(fs::read_to_string(dist.join("menus.rvnui")).unwrap(), menu);
         write_web_script_manifest(&root, &dist, Path::new("project.generated.rvn")).unwrap();

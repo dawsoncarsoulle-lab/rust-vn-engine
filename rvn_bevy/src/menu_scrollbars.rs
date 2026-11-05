@@ -3,6 +3,8 @@ use super::*;
 
 #[derive(Component)]
 pub(crate) struct Scrollbar;
+#[derive(Resource,Default)]
+pub(super) struct PointerDrag(Option<(Entity,f32)>);
 #[derive(Component)]
 pub(super) struct Thumb;
 #[derive(Component, Clone)]
@@ -126,8 +128,9 @@ pub(super) fn drag(
     tracks: Query<(Entity, &Track, &Interaction, &Node, &GlobalTransform)>,
     mut lists: Query<(&Node, &Children, &mut MenuScroll)>,
     mut styles: Query<&mut Style, Without<Scrollbar>>,
-    mut dragging: Local<Option<(Entity, f32)>>,
+    mut pointer_drag: ResMut<PointerDrag>,
 ) {
+    let dragging=&mut pointer_drag.0;
     if !mouse.pressed(MouseButton::Left) {
         *dragging = None;
         return;

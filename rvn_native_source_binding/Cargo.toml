@@ -1,0 +1,11 @@
+[package]
+name = "rvn_native_source_binding"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rvn_graph = { path = "../rvn_graph" }
+rvn_parser = { path = "../rvn_parser" }
+rvn_core = { path = "../rvn_core" }
+serde_json = "1.0.149"
+serde = { version = "1.0.228", features = ["derive"] }

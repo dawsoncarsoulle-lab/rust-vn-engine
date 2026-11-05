@@ -2,11 +2,11 @@
 //! editable node alive preserves browser selection, IME and clipboard behavior
 //! when a binding refreshes the rest of an RVN screen.
 use crate::{
-    programmable_ui::{component_font_size, Control, Screens},
+    programmable_ui::{component_font_size, Control, ControlSource, Screens},
     resources::{ScriptErrorMessage, VnState},
 };
 use bevy::prelude::*;
-use rvn_core::ui::UiInput;
+use crate::ui_input_bridge::{decode_batch, BrowserInput};
 use rvn_ui::programmable::{ComponentKind, ScreenEventKind};
 use wasm_bindgen::prelude::*;
 
@@ -14,7 +14,7 @@ use wasm_bindgen::prelude::*;
 const fields = new Map();
 const customFonts = new Map();
 let pending = [], failed = null, lastFocus = '', settingFocus = false, fontStarted = false;
-const identity = (screen, element) => JSON.stringify([screen, element]);
+const identity = (source, element) => JSON.stringify([source, element]);
 function accessibilityShortcut(event) {
     if (event.key !== 'F8') return false;
     // Editing keeps ordinary keys local. Only the accessibility shortcut is
@@ -29,7 +29,7 @@ function accessibilityShortcut(event) {
 }
 function queue(field, kind, value = null, key = null) {
     if (pending.length >= 128) { failed = 'Browser interface event queue exceeded 128 events'; return; }
-    pending.push({screen: field.screen, element: kind === 'key' ? (field.keyTarget || field.element) : field.element, kind, value, key});
+    pending.push({source: field.source, screen: field.screen, element: kind === 'key' ? (field.keyTarget || field.element) : field.element, kind, value, key});
 }
 export function rvn_input_events() {
     if (failed) { const problem = failed; failed = null; pending = []; throw new Error(problem); }
@@ -52,13 +52,14 @@ export function rvn_render_inputs(description, width, height, font, focusScreen,
     const rectangle = canvas.getBoundingClientRect(), sx = rectangle.width / width, sy = rectangle.height / height;
     const seen = new Set();
     for (const item of JSON.parse(description)) {
-        const id = identity(item.screen, item.element); seen.add(id);
+        const id = identity(item.source, item.element); seen.add(id);
         let field = fields.get(id);
         if (!field) {
             const node = document.createElement('input');
             node.type = 'text'; node.autocomplete = 'off'; node.maxLength = 65536;
             node.setAttribute('data-rvn-screen', item.screen); node.setAttribute('data-rvn-element', item.element);
             field = {screen: item.screen, element: item.element, node, keyTarget: null, composing: false};
+            Object.defineProperty(field, 'source', {value:item.source, enumerable:true, writable:false});
             fields.set(id, field); document.body.appendChild(node);
             node.addEventListener('focus', () => { if (!settingFocus) queue(field, 'focus'); });
             node.addEventListener('input', event => { if (!event.isComposing && !field.composing) queue(field, 'change', node.value); });
@@ -105,7 +106,8 @@ export function rvn_render_inputs(description, width, height, font, focusScreen,
         node.style.cssText = `position:fixed;box-sizing:border-box;left:${rectangle.left+(x-w/2)*sx}px;top:${rectangle.top+(y-h/2)*sy}px;width:${w*sx}px;height:${h*sy}px;z-index:${10000+item.layer};display:${hidden?'none':'block'};transform-origin:center;transform:matrix(${a},${b*sy/sx},${c*sx/sy},${d},0,0);border:0;outline:none;border-radius:5px;background:transparent;color:${item.color};font:${item.font_size*sy}px '${family}',sans-serif;text-align:${item.text_align};padding:${item.padding*sy}px;clip-path:polygon(${clip});`;
     }
     for (const [id,field] of fields) { if (!seen.has(id)) { field.node.remove(); fields.delete(id); } }
-    const requested = identity(focusScreen, focusElement), field = fields.get(requested);
+    const field = Array.from(fields.values()).find(field => field.screen === focusScreen && field.element === focusElement);
+    const requested = field ? identity(field.source, field.element) : identity('', '');
     if (requested !== lastFocus) {
         if (field && !field.node.disabled && field.node.style.display !== 'none') {
             settingFocus = true; field.node.focus({preventScroll:true}); settingFocus = false; lastFocus = requested;
@@ -134,35 +136,9 @@ extern "C" {
 pub fn focused() -> bool {
     rvn_input_focused()
 }
-pub fn events() -> Result<Vec<UiInput>, String> {
-    #[derive(serde::Deserialize)]
-    struct BrowserEvent {
-        screen: String,
-        element: String,
-        kind: ScreenEventKind,
-        value: Option<serde_json::Value>,
-        key: Option<String>,
-    }
-    let text = rvn_input_events().map_err(|error| format!("Browser input: {error:?}"))?;
-    let events: Vec<BrowserEvent> =
-        serde_json::from_str(&text).map_err(|error| format!("Browser input event: {error}"))?;
-    events
-        .into_iter()
-        .map(|event| {
-            Ok(UiInput {
-                screen: event.screen,
-                element: event.element,
-                kind: event.kind,
-                value: event
-                    .value
-                    .as_ref()
-                    .map(rvn_core::ui::value_from_json)
-                    .transpose()
-                    .map_err(|error| format!("Browser input value: {error}"))?,
-                key: event.key,
-            })
-        })
-        .collect()
+pub fn events() -> Result<Vec<BrowserInput>, String> {
+    let text=rvn_input_events().map_err(|error|format!("Browser input: {error:?}"))?;
+    decode_batch(&text)
 }
 
 pub fn render(
@@ -174,6 +150,7 @@ pub fn render(
         &GlobalTransform,
         Option<&bevy::ui::CalculatedClip>,
         Option<&Children>,
+        Option<&ControlSource>,
     )>,
     texts: Query<&Text>,
     mut error: ResMut<ScriptErrorMessage>,
@@ -189,7 +166,9 @@ pub fn render(
         .min(window.height() / 1080.0)
         .max(0.25);
     if screens.active && !accessibility.open {
-        for (control, node, transform, clip, children) in &controls {
+        for (control, node, transform, clip, children, source) in &controls {
+            let Some(source) = source else {continue;};
+            let source_wire = match source.0.to_wire() {Ok(source)=>source,Err(problem)=>{error.0=problem;next.set(VnState::Error);return;}};
             if control.option.is_some() {
                 continue;
             }
@@ -265,7 +244,7 @@ pub fn render(
                     )
                     .to_srgba()
                 });
-            fields.push(serde_json::json!({"screen":view.name,"element":component.id,"value":component.value.as_str().unwrap_or_default(),"placeholder":component.placeholder,"label":component.accessible_label.as_deref().filter(|label|!label.is_empty()).unwrap_or(if component.placeholder.is_empty(){&component.id}else{&component.placeholder}),"enabled":enabled,"key_target":key_target,"layer":screens.views.iter().position(|other|other.name==view.name).unwrap_or(0),"rect":[transform.translation().x,transform.translation().y,node.size().x,node.size().y],"matrix":[matrix.x_axis.x,matrix.x_axis.y,matrix.y_axis.x,matrix.y_axis.y],"clip":polygon,"visible":clipped.width()>0.0&&clipped.height()>0.0,"font_size":component_font_size(component.font_size,scale),"padding":if component.padding==0.0{10.0*scale}else{component.padding*scale},"text_align":component.text_align,"font":view.root.effective_font(&component.id),"color":format!("rgba({},{},{},{})",foreground.red*255.0,foreground.green*255.0,foreground.blue*255.0,foreground.alpha)}));
+            fields.push(serde_json::json!({"source":source_wire,"screen":view.name,"element":component.id,"value":component.value.as_str().unwrap_or_default(),"placeholder":component.placeholder,"label":component.accessible_label.as_deref().filter(|label|!label.is_empty()).unwrap_or(if component.placeholder.is_empty(){&component.id}else{&component.placeholder}),"enabled":enabled,"key_target":key_target,"layer":screens.views.iter().position(|other|other.name==view.name).unwrap_or(0),"rect":[transform.translation().x,transform.translation().y,node.size().x,node.size().y],"matrix":[matrix.x_axis.x,matrix.x_axis.y,matrix.y_axis.x,matrix.y_axis.y],"clip":polygon,"visible":clipped.width()>0.0&&clipped.height()>0.0,"font_size":component_font_size(component.font_size,scale),"padding":if component.padding==0.0{10.0*scale}else{component.padding*scale},"text_align":component.text_align,"font":view.root.effective_font(&component.id),"color":format!("rgba({},{},{},{})",foreground.red*255.0,foreground.green*255.0,foreground.blue*255.0,foreground.alpha)}));
         }
     }
     let (screen, element) = screens

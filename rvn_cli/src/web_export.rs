@@ -102,10 +102,12 @@ pub(crate) fn build(
     let location = crate::desktop_export::Location::preflight_at(project, name, crate::desktop_export::OutputRoot::Web)?;
     crate::desktop_paths::validate_web_inputs(project, cfg)?;
     let manifest = fs::read(project.join("rvn.toml"))?;
+    let table_before = crate::string_table_snapshot(project, cfg)?;
     println!("Build web runtime...");
     let runtime = prepare_runtime()?;
     let runtime_before = runtime.snapshot()?;
     unchanged_manifest(project, &manifest, "runtime preparation")?;
+    ensure!(crate::string_table_snapshot(project, cfg)? == table_before, "String-table assets changed during Web runtime preparation");
     crate::desktop_paths::validate_web_inputs(project, cfg)?;
     // Preparation failures above have not created output or moved the old Web
     // export. Every write below belongs to the exclusive, recoverable stage.
@@ -115,6 +117,7 @@ pub(crate) fn build(
         runtime.verify_copy(&runtime_before, stage.path())?;
         println!("Copie fichiers...");
         crate::copy_web_project_files(project, stage.path(), cfg)?;
+        ensure!(crate::string_table_snapshot(stage.path(), cfg)? == table_before, "Copied Web table assets differ from prepared bytes");
         println!("Génération index.html...");
         crate::write_web_index(stage.path(), name)?;
         runtime.verify_copy(&runtime_before, stage.path())?;
@@ -127,6 +130,11 @@ pub(crate) fn build(
             // failure traverses the existing transaction's actual rollback.
             crate::desktop_paths::validate_web_inputs(project, cfg)?;
             unchanged_manifest(project, &manifest, "publication")?;
+            ensure!(crate::string_table_snapshot(project, cfg)? == table_before, "String-table assets changed during Web publication");
+            ensure!(crate::string_table_snapshot(path, cfg)? == table_before, "Staged Web table assets changed before publication");
+            if !cfg.string_tables.is_empty() {
+                ensure!(fs::read(path.join("rvn.toml"))? == manifest, "Staged Web table index changed before publication");
+            }
             ensure!(runtime.snapshot()? == runtime_before, "Web runtime changed during publication; the previous export was retained");
             runtime.verify_copy(&runtime_before, path)
         })
@@ -271,4 +279,74 @@ pub(crate) fn build(
         let error = build(&fixture.project, &fixture.config(), "Safe", || panic!("junction must be refused before runtime"), |_| Ok(())).unwrap_err();
         assert!(format!("{error:#}").contains("symlink/reparse"), "{error:#}");assert_eq!(snapshot(&outside, false), before);assert_eq!(snapshot(&fixture.project, true), inputs);
     }
+    fn table_fixture(fixture: &Fixture) -> Vec<u8> {
+        use rvn_core::{string_table::{StringTableAsset, StringTableEntry}, string_table_file::StringTableFile};
+        let id = "17411a3e431e4c9388b78a2b9825b130";
+        let mut configuration = fs::read_to_string(fixture.project.join("rvn.toml")).unwrap();
+        configuration.push_str(&format!("\n[string_tables]\n\"{id}\"='tables/été %2f.rvnstrings'\n"));
+        fixture.write("rvn.toml", configuration);
+        let bytes = StringTableFile::new(StringTableAsset { id: id.into(), namespace: "VN".into(), entries: BTreeMap::from([
+            ("hello".into(), StringTableEntry {metadata:Default::default(), source: "Bonjour depuis la table".into(), developer_notes: "Context".into() }),
+        ]) }).unwrap().encode().unwrap();
+        fixture.write("assets/tables/été %2f.rvnstrings", &bytes);
+        bytes
+    }
+
+    #[test]
+    fn string_table_host_web_export_writes_declared_manifest_and_retains_exact_asset_bytes() {
+        let fixture = Fixture::new(false); let bytes = table_fixture(&fixture); let cfg = fixture.config();
+        let published = build(&fixture.project, &cfg, "Safe", || Ok(Runtime::Bundled(fixture.runtime.clone())), |_| Ok(())).unwrap();
+        let manifest: toml::Value = toml::from_str(&fs::read_to_string(published.directory.join("rvn_web_assets.toml")).unwrap()).unwrap();
+        assert_eq!(manifest["string_tables"]["17411a3e431e4c9388b78a2b9825b130"].as_str(), Some("tables/été %2f.rvnstrings"));
+        assert_eq!(fs::read(published.directory.join("assets/tables/été %2f.rvnstrings")).unwrap(), bytes);
+        assert_eq!(fs::read(fixture.project.join("assets/tables/été %2f.rvnstrings")).unwrap(), bytes);
+        assert_eq!(fs::read(published.directory.join("rvn.toml")).unwrap(), fs::read(fixture.project.join("rvn.toml")).unwrap());
+    }
+
+    #[test]
+    fn string_table_host_web_export_keeps_version_two_metadata_bytes_and_source_inputs_exact() {
+        let fixture=Fixture::new(false);let legacy=table_fixture(&fixture);
+        let original=rvn_core::string_table_file::StringTableFile::decode(&legacy).unwrap();
+        let extended=original.import_csv("Key,SourceString,DevNotes,Speaker,Category\nhello,Bonjour,Context,Éloïse,Salutation\n".as_bytes()).unwrap();
+        let bytes=extended.encode().unwrap();assert_eq!(serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["format_version"],2);
+        fixture.write("assets/tables/été %2f.rvnstrings",&bytes);let before=snapshot(&fixture.project,true);let cfg=fixture.config();
+        let published=build(&fixture.project,&cfg,"Safe",||Ok(Runtime::Bundled(fixture.runtime.clone())),|_|Ok(())).unwrap();
+        let exported=fs::read(published.directory.join("assets/tables/été %2f.rvnstrings")).unwrap();assert_eq!(exported,bytes);
+        assert_eq!(rvn_core::string_table_file::StringTableFile::decode(&exported).unwrap(),extended);
+        assert_eq!(snapshot(&fixture.project,true),before);
+    }
+
+    #[test]
+    fn string_table_host_web_export_refuses_changed_source_and_rolls_back_bad_staged_table() {
+        for change_source in [true, false] {
+            let fixture = Fixture::new(true); table_fixture(&fixture); let cfg = fixture.config();
+            let result = build(&fixture.project, &cfg, "Safe", || Ok(Runtime::Bundled(fixture.runtime.clone())), |stage| {
+                let table = if change_source { fixture.project.join("assets/tables/été %2f.rvnstrings") }
+                    else { stage.join("assets/tables/été %2f.rvnstrings") };
+                fs::write(table, b"invalid table")?; Ok(())
+            });
+            assert!(result.is_err());
+            assert_eq!(fs::read(fixture.target().join("old.html")).unwrap(), b"previous index");
+            assert_eq!(fs::read(fixture.target().join("data/saves/old.sav")).unwrap(), b"previous progress");
+            assert_eq!(fs::read(fixture.project.join("saves/slot.sav")).unwrap(), b"personal progress");
+        }
+    }
+
+    #[test]
+    fn string_table_host_desktop_preflight_refuses_missing_table_before_preparing_runtime_or_output() {
+        let fixture = Fixture::new(false); table_fixture(&fixture);
+        let mut configuration = fs::read_to_string(fixture.project.join("rvn.toml")).unwrap();
+        configuration = configuration.replace("tables/été %2f.rvnstrings", "tables/missing.rvnstrings");
+        fixture.write("rvn.toml", &configuration); let cfg = fixture.config();
+        let target = fixture.project.join("dist").join(format!("Safe-{}", crate::detect_platform().unwrap()));
+        fs::create_dir_all(&target).unwrap(); fs::write(target.join("old.txt"), b"previous desktop").unwrap();
+        let called = std::cell::Cell::new(false);
+        let result = crate::build_desktop_project_with_runtime(&fixture.project, &cfg, "Safe", || {
+            called.set(true); anyhow::bail!("runtime must not start for an invalid table index")
+        }, |_| Ok(()));
+        assert!(result.is_err()); assert!(!called.get());
+        assert_eq!(fs::read(target.join("old.txt")).unwrap(), b"previous desktop");
+        assert_eq!(fs::read(fixture.project.join("saves/slot.sav")).unwrap(), b"personal progress");
+    }
+
 }

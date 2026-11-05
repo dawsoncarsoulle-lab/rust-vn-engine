@@ -31,8 +31,10 @@ pub enum Chunk {
 }
 struct AudioTrack {
     index: usize,
+    time_base:(i32,i32),
     clock: f64,
     next_seconds: Option<f64>,
+    canonical_next_frame:Option<i64>,
     decoder: ffmpeg::decoder::Audio,
     resampler: software::resampling::Context,
 }
@@ -41,12 +43,15 @@ pub struct Decoder {
     video: ffmpeg::decoder::Video,
     scaler: Option<software::scaling::Context>,
     video_index: usize,
+    video_time_base:(i32,i32),
     video_clock: f64,
     audio: Option<AudioTrack>,
     pub metadata: Metadata,
     ended: bool,
     seek_floor: f64,
     selection: Selection,
+    canonical:bool,
+    canonical_video_pts:std::collections::VecDeque<i64>,
     // A selected picture preview keeps the last frame preceding its seek.
     // Default Both callers retain their existing floor/discard behaviour.
     seek_preview: Option<Chunk>,
@@ -110,6 +115,7 @@ impl Decoder {
             return Err("Only validated WebM VP8 video is supported by this runtime".into());
         }
         let video_index = stream.index();
+        let video_time_base=(stream.time_base().numerator(),stream.time_base().denominator());
         let video_clock: f64 = stream.time_base().into();
         let video = codec::context::Context::from_parameters(stream.parameters())
             .map_err(error)?
@@ -174,8 +180,9 @@ impl Decoder {
                 .map_err(error)?;
                 Ok(Some(AudioTrack {
                     index: stream.index(),
+                    time_base:(stream.time_base().numerator(),stream.time_base().denominator()),
                     clock: stream.time_base().into(),
-                    next_seconds: None,
+                    next_seconds: None,canonical_next_frame:None,
                     decoder,
                     resampler,
                 }))
@@ -192,14 +199,22 @@ impl Decoder {
             video,
             scaler,
             video_index,
+            video_time_base,
             video_clock,
             audio,
             metadata,
             ended: false,
             seek_floor: 0.0,
             selection,
+            canonical:false,canonical_video_pts:Default::default(),
             seek_preview: None,
         })
+    }
+    /// Actual selected streams and native decoding profile, never a seek estimate.
+    pub fn open_canonical(path:&Path)->Result<Self,String>{let mut decoder=Self::open(path)?;decoder.canonical=true;Ok(decoder)}
+    pub fn take_canonical_video_pts(&mut self)->Option<i64>{self.canonical_video_pts.pop_front()}
+    pub fn source_profile(&self)->crate::checkpoint::DecodedSourceProfile{
+        crate::checkpoint::DecodedSourceProfile{version:1,video_stream:self.video_index as u32,audio_stream:self.audio.as_ref().map(|a|a.index as u32),video_time_base:self.video_time_base,audio_time_base:self.audio.as_ref().map(|a|a.time_base),codec_version:ffmpeg::codec::version(),format_version:ffmpeg::format::version(),util_version:ffmpeg::util::version(),configuration:ffmpeg::codec::configuration().into(),sample_rate:48_000,channels:2}
     }
     pub fn seek(&mut self, seconds: f64) -> Result<(), String> {
         if !seconds.is_finite()
@@ -218,7 +233,7 @@ impl Decoder {
         if self.selection != Selection::Audio { self.video.flush(); }
         if let Some(audio) = &mut self.audio {
             audio.decoder.flush();
-            audio.next_seconds = None;
+            audio.next_seconds = None;audio.canonical_next_frame=None;
             // Discard resampler delay too. Reusing it would replay pre-seek sound.
             let input = *audio.resampler.input();
             audio.resampler = software::resampling::Context::get(
@@ -237,6 +252,9 @@ impl Decoder {
         Ok(())
     }
     pub fn next(&mut self) -> Result<Vec<Chunk>, String> {
+        // Provenance describes this returned bounded batch. A direct caller
+        // may discard it; do not accumulate old PTS outside the worker.
+        self.canonical_video_pts.clear();
         if self.ended {
             return Ok(Vec::new());
         }
@@ -296,13 +314,10 @@ impl Decoder {
             if frame.width() != self.metadata.width || frame.height() != self.metadata.height {
                 return Err("Video resolution changed during playback".into());
             }
-            let seconds = frame
-                .timestamp()
-                .or(frame.pts())
-                .ok_or("Video frame has no timestamp")? as f64
-                * self.video_clock;
+            let pts=frame.timestamp().or(frame.pts()).ok_or("Video frame has no timestamp")?;
+            let seconds = pts as f64 * self.video_clock;
             let preserve_before_seek = self.selection == Selection::Video && self.seek_floor > 0.0;
-            if seconds + 0.0001 < self.seek_floor && !preserve_before_seek {
+            if !self.canonical && seconds + 0.0001 < self.seek_floor && !preserve_before_seek {
                 continue;
             }
             let mut rgba = frame::Video::empty();
@@ -339,6 +354,7 @@ impl Decoder {
                 self.seek_preview = Some(chunk);
             } else {
                 if let Some(previous) = self.seek_preview.take() { output.push(previous); }
+                if self.canonical{self.canonical_video_pts.push_back(pts);}
                 output.push(chunk);
             }
             if output.len() > 64 {
@@ -364,11 +380,8 @@ impl Decoder {
             {
                 return Err("Video audio format changed during playback".into());
             }
-            let timestamp = frame
-                .timestamp()
-                .or(frame.pts())
-                .ok_or("Video audio frame has no timestamp")? as f64
-                * audio.clock;
+            let pts=frame.timestamp().or(frame.pts()).ok_or("Video audio frame has no timestamp")?;
+            let timestamp = pts as f64 * audio.clock;
             let seconds = *audio.next_seconds.get_or_insert(timestamp);
             let capacity = (frame.samples() as f64 * 48_000.0 / f64::from(audio.decoder.rate()))
                 .ceil() as usize
@@ -383,19 +396,27 @@ impl Decoder {
             );
             audio.resampler.run(&frame, &mut stereo).map_err(error)?;
             audio.next_seconds = Some(seconds + stereo.samples() as f64 / 48_000.0);
-            Self::append_samples(&stereo, seconds, self.seek_floor, output)?;
+            let start=if self.canonical{Some(Self::canonical_start(audio,Some(pts),stereo.samples(),output)?)}else{None};
+            Self::append_samples(&stereo, seconds, self.seek_floor, start, output)?;
             if output.len() > 64 {
                 return Err("Video packet produced too many audio frames".into());
             }
         }
     }
+    fn canonical_start(audio:&mut AudioTrack,pts:Option<i64>,frames:usize,output:&mut Vec<Chunk>)->Result<i64,String>{
+        let first=audio.canonical_next_frame.is_none();
+        let start=match audio.canonical_next_frame{Some(value)=>value,None=>rescale_sample_ceil(pts.ok_or("Canonical resampler lacks actual initial PTS")?,audio.time_base)?};
+        if first&&start>0{if start>96_000{return Err("Canonical native audio initial gap exceeds2seconds".into());}output.push(Chunk::Audio{seconds:0.0,samples:vec![0.0;start as usize*2]});}
+        audio.canonical_next_frame=Some(start.checked_add(frames as i64).ok_or("Canonical audio sample clock overflow")?);Ok(start)
+    }
     fn append_samples(
         stereo: &frame::Audio,
         seconds: f64,
         floor: f64,
+        canonical_start:Option<i64>,
         output: &mut Vec<Chunk>,
     ) -> Result<(), String> {
-        let skip = ((floor.max(0.0) - seconds).max(0.0) * 48_000.0).ceil() as usize;
+        let skip = if let Some(start)=canonical_start{if start<0{(-start)as usize}else{0}}else{((floor.max(0.0) - seconds).max(0.0) * 48_000.0).ceil() as usize};
         let buffered: usize = output
             .iter()
             .map(|chunk| match chunk {
@@ -444,7 +465,8 @@ impl Decoder {
             );
             let remaining = audio.resampler.flush(&mut stereo).map_err(error)?;
             let seconds = audio.next_seconds.unwrap_or(0.0);
-            Self::append_samples(&stereo, seconds, self.seek_floor, output)?;
+            let start=if self.canonical{Some(Self::canonical_start(audio,None,stereo.samples(),output)?)}else{None};
+            Self::append_samples(&stereo, seconds, self.seek_floor, start, output)?;
             audio.next_seconds = Some(seconds + stereo.samples() as f64 / 48_000.0);
             if remaining.is_none() || stereo.samples() == 0 {
                 return Ok(());
@@ -586,5 +608,26 @@ mod tests {
             }
             assert!(heard && ended);
         }
+    }
+}
+
+/// Rational input PTS -> output frame boundary with specified ceiling. This
+/// aligns actual codec priming/start timestamps; saved cursors never enter it.
+fn rescale_sample_ceil(pts:i64,time_base:(i32,i32))->Result<i64,String>{
+    let(num,den)=time_base;if num<=0||den<=0{return Err("Invalid native sample PTS rational".into());}
+    let value=i128::from(pts)*i128::from(num)*48_000;let den=i128::from(den);let result=value.div_euclid(den)+i128::from(value.rem_euclid(den)!=0);
+    if !(-96_000..=4_147_200_000).contains(&result){return Err("Native PTS exceeds bounded canonical sample clock".into());}i64::try_from(result).map_err(|e|e.to_string())
+}
+#[cfg(test)]
+mod exact_rational_tests{
+    use super::*;
+    #[test]
+    fn actual_pts_priming_and_positive_origin_round_by_integer_ceiling(){
+        assert_eq!(rescale_sample_ceil(-1,(1,96_000)).unwrap(),0);
+        assert_eq!(rescale_sample_ceil(-3,(1,96_000)).unwrap(),-1);
+        assert_eq!(rescale_sample_ceil(1,(1,96_000)).unwrap(),1);
+        assert_eq!(rescale_sample_ceil(3,(1,1_000)).unwrap(),144);
+        assert!(rescale_sample_ceil(i64::MAX,(i32::MAX,1)).is_err());
+        assert!(rescale_sample_ceil(1,(0,1)).is_err());
     }
 }

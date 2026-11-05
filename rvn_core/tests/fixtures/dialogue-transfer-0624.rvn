@@ -1,0 +1,15 @@
+function late_message() {
+    local draw = random(1, 999)
+    return "after"
+}
+init {
+    set message = "before"
+}
+scene label start flow.consume_v2("g3/n1:label|exec_out=1@0", "n2:dialogue|exec_in=2@1,character=3@0,text=4@3~8,exec_out=5@0") {
+        capture "n5:set_variable|exec_in=9@4,name=10@0,value=11@5,exec_out=12@0,value_out=13@0" = message
+        capture "n4:convert_string_to_text|value=7@9,result=8@0" = __rvn_captured_v1("n5:set_variable|exec_in=9@4,name=10@0,value=11@5,exec_out=12@0,value_out=13@0") "[message]" }
+    flow.consume_v1("g3/n1:label|exec_out=1@0", "n5:set_variable|exec_in=9@4,name=10@0,value=11@5,exec_out=12@0,value_out=13@0") {
+        capture "n6:function_call|result=14@0" = late_message() set message = __rvn_captured_v1( "n6:function_call|result=14@0" ) }
+    flow.consume_v2("g3/n1:label|exec_out=1@0", "n7:dialogue|exec_in=15@6,character=16@0,text=17@8~21,exec_out=18@0") {
+        capture "n5:set_variable|exec_in=9@4,name=10@0,value=11@5,exec_out=12@0,value_out=13@0" = message
+        capture "n9:convert_string_to_text|value=20@10,result=21@0" = __rvn_captured_v1("n5:set_variable|exec_in=9@4,name=10@0,value=11@5,exec_out=12@0,value_out=13@0") "[message]" } 

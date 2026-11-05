@@ -11,6 +11,8 @@ use std::collections::HashMap;
 
 #[derive(Resource)]
 pub struct VnEngine(pub Engine<BevyRenderer>);
+#[derive(Resource, Default)]
+pub(crate) struct NarrativeStart(pub Option<String>);
 
 #[derive(Resource, Default)]
 pub struct CgAssetRegistry(pub HashMap<String, String>);
@@ -97,6 +99,10 @@ pub struct MenuState {
 pub struct CharacterRegistry(pub HashMap<String, String>);
 
 impl CharacterRegistry {
+    /// Replace, never merge: rollback/load must remove rejected or retired names.
+    pub fn project_character_state(&mut self, state: &rvn_core::composition::LayeredState) {
+        self.0 = state.display_names.iter().map(|(id, name)| (id.clone(), name.clone())).collect();
+    }
     pub fn display_name<'a>(&'a self, id: &'a str) -> &'a str {
         self.0.get(id).map(String::as_str).unwrap_or(id)
     }
@@ -1044,5 +1050,28 @@ text_color = "#FFFFFF"
         ));
         assert_eq!(theme.title_screen.buttons.spacing, Some(12.0));
         assert_eq!(theme.title_screen.buttons.visibility.quit, Some(false));
+    }
+}
+
+#[cfg(test)]
+mod character_projection_tests {
+    use super::CharacterRegistry;
+    #[test]
+    fn character_registry_projects_exact_authority_and_removes_rolled_back_names() {
+        let mut names=rvn_core::composition::LayeredState::default();
+        names.declare("hero".into(),"Héroïne😀".into()).unwrap();
+        let mut registry=CharacterRegistry::default();registry.0.insert("stale".into(),"Candidate rejected".into());
+        registry.project_character_state(&names);assert_eq!(registry.display_name("hero"),"Héroïne😀");assert_eq!(registry.display_name("stale"),"stale");
+        registry.project_character_state(&Default::default());assert_eq!(registry.display_name("hero"),"hero");
+    }
+    #[test]
+    fn character_world_installer_projects_the_same_published_state() {
+        let mut engine=rvn_core::Engine::new(vec![],rvn_core::renderer::TerminalRenderer,8).unwrap();
+        engine.state.layered.declare("hero".into(),"Authoritative".into()).unwrap();
+        let mut world=bevy::prelude::World::new();world.insert_resource(CharacterRegistry::default());
+        crate::systems::setup::install_character_names(&mut world,&engine.state);
+        assert_eq!(world.resource::<CharacterRegistry>().display_name("hero"),engine.state.layered.display_name("hero"));
+        engine.state.layered.display_names.clear();crate::systems::setup::install_character_names(&mut world,&engine.state);
+        assert_eq!(world.resource::<CharacterRegistry>().display_name("hero"),"hero");
     }
 }

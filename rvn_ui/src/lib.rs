@@ -18,6 +18,7 @@ pub use controls::LocalControl;
 mod animation;
 pub use animation::*;
 pub mod accessibility;
+pub mod widget_fonts;
 pub mod source_menus;
 pub mod composition;
 pub mod custom_canvas;

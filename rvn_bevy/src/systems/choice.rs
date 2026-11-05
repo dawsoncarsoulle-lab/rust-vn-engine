@@ -143,6 +143,7 @@ pub fn update_choice_buttons(
 }
 
 pub fn choice_interaction_system(
+    preview:Option<Res<crate::editor_preview_input::Routing>>,
     custom_menus: Res<crate::menu_documents::Menus>,
     mut interaction_query: Query<
         (&Interaction, &ChoiceButton),
@@ -151,7 +152,7 @@ pub fn choice_interaction_system(
     mut choice_focus: ResMut<ChoiceFocus>,
     mut player_events: EventWriter<PlayerInput>,
 ) {
-    if !custom_menus.choices_interactive() {
+    if preview.is_some() || !custom_menus.choices_interactive() {
         return;
     }
     for (interaction, choice_button) in interaction_query.iter_mut() {

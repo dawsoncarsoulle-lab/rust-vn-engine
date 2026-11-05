@@ -196,14 +196,11 @@ fn reroutes_follow_reconnected_sources_and_keep_downstream_conflicts_visible() {
     raw_connect(&mut g, route, "value_out", text_cast, "value");
     g.remove_edge(edge);
     let number = literal(&mut g, PropertyValue::Int(3));
-    let connection = g
-        .connect_with_conversions(
-            pin(&g, number, "value"),
-            pin(&g, route, "value"),
-            [0.0, 0.0],
-        )
-        .unwrap();
-    assert!(connection.conversions.is_empty());
+    // A historical document can contain this contradictory source. Preserve
+    // its diagnostic, while new gestures are covered by strict-admission tests.
+    g.edges.insert(edge, GraphEdge {
+        id: edge, output: pin(&g,number,"value"), input: pin(&g,route,"value"),
+    });
     assert_eq!(ty(&g, route, "value"), ValueType::Int);
     assert_eq!(ty(&g, route, "value_out"), ValueType::Int);
     assert!(g

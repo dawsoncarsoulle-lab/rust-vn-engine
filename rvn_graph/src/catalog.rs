@@ -66,6 +66,23 @@ pub fn node_definition(kind: NodeKind) -> NodeDefinition {
     use NodeCategory as Category;
     use NodeKind as Kind;
     let mut definition = match kind {
+        Kind::WidgetClassValue => definition!(kind, Category::Expression, "Classe de widget", ["widget", "class", "userwidget"]),
+        Kind::WidgetObjectClass => definition!(kind, Category::Expression, "Get Class", ["widget", "object", "class", "get class"]),
+        Kind::WidgetAddToViewport => definition!(kind, Category::Interaction, "Ajouter au viewport", ["widget", "viewport", "add to viewport"]),
+        Kind::WidgetRemoveFromParent => definition!(kind, Category::Interaction, "Retirer du parent", ["widget", "remove from parent", "viewport"]),
+        Kind::WidgetCreate => definition!(kind, Category::Interaction, "Créer un widget", ["widget", "create", "userwidget"]),
+        Kind::TextFromStringTable => definition!(kind, Category::Expression, "Make Text from String Table (Advanced)", ["string table", "text", "name", "table id"]),
+        Kind::GetStringTableIdAndKey => definition!(kind, Category::Expression, "Get String Table ID and Key from Text", ["string table", "text", "history", "table id", "key"]),
+        Kind::StringTableId => definition!(kind, Category::Expression, "Obtenir l’identifiant de la table de chaînes", ["string table", "table de chaînes", "table id", "object"]),
+        Kind::StringTableAsset => definition!(kind, Category::Structure, "Asset table de chaînes", ["string table", "table de chaînes", "asset", "reference"]),
+        Kind::StringTableRegistered => definition!(kind, Category::Expression, "La table de chaînes est enregistrée", ["string table", "table de chaînes", "registered"]),
+        Kind::StringTableEntryRegistered => definition!(kind, Category::Expression, "L’entrée de table de chaînes est enregistrée", ["string table", "table de chaînes", "key", "registered"]),
+        Kind::StringTableNamespace => definition!(kind, Category::Expression, "Obtenir l’espace de noms de la table de chaînes", ["string table", "table de chaînes", "namespace"]),
+        Kind::StringTableSource => definition!(kind, Category::Expression, "Obtenir la source d’une entrée de table de chaînes", ["string table", "table de chaînes", "source"]),
+        Kind::StringTableMetadata => definition!(kind, Category::Expression, "Obtenir une métadonnée de table de chaînes", ["string table", "table de chaînes", "metadata"]),
+        Kind::RegisteredStringTables => definition!(kind, Category::Expression, "Obtenir les tables de chaînes enregistrées", ["string table", "table de chaînes", "registered", "array"]),
+        Kind::StringTableKeys => definition!(kind, Category::Expression, "Obtenir les clés de la table de chaînes", ["string table", "table de chaînes", "key", "array"]),
+        Kind::StringTableMetadataIds => definition!(kind, Category::Expression, "Obtenir les identifiants de métadonnées d’une entrée", ["string table", "table de chaînes", "metadata", "array"]),
         Kind::MenuExecute | Kind::MenuAction | Kind::MenuStartScene | Kind::MenuOpenPage | Kind::MenuSlot | Kind::MenuProtect
         | Kind::MenuSavePage | Kind::MenuNumberPreference | Kind::MenuBoolPreference | Kind::MenuLanguage
         | Kind::MenuAdvance | Kind::MenuSkipTypewriter | Kind::MenuChoose | Kind::MenuGalleryCg | Kind::MenuGalleryTab
@@ -409,12 +426,20 @@ pub fn node_definition(kind: NodeKind) -> NodeDefinition {
             "Arrêter la lecture vocale",
             ["accessibility", "speech", "stop", "voice", "tts"]
         ),
+        Kind::UnitCall => definition!(kind, Category::Flow, "Appeler une fonction", ["unit", "call", "effect"]),
+        Kind::UnitReturn => definition!(kind, Category::Flow, "Terminer la fonction", ["unit", "return"]),
         Kind::FunctionReturn => definition!(
             kind,
             Category::Flow,
             "Retourner une valeur",
             ["return", "function", "result", "résultat"]
         ),
+        Kind::DoOnce => definition!(kind, Category::Flow, "Do Once", ["once", "reset", "gate"]),
+        Kind::DoN => definition!(kind, Category::Flow, "Do N", ["counter", "reset", "limit"]),
+        Kind::FlipFlop => definition!(kind, Category::Flow, "Flip Flop", ["alternate", "a", "b"]),
+        Kind::Gate => definition!(kind, Category::Flow, "Gate", ["open", "close", "toggle"]),
+        Kind::Sequence => definition!(kind, Category::Flow, "Séquence", ["sequence", "then", "ordre"], dynamic),
+        Kind::ForLoopWithBreak => definition!(kind, Category::Flow, "Boucle avec arrêt", ["forloopwithbreak", "for_loop", "for", "loop", "break", "index", "boucle"]),
         Kind::While => definition!(
             kind,
             Category::Flow,
@@ -746,6 +771,24 @@ pub fn node_definition(kind: NodeKind) -> NodeDefinition {
             "Lire une variable",
             ["get", "variable", "persistent"]
         ),
+        Kind::ConvertBoolToInt => definition!(
+            kind,
+            Category::Expression,
+            "Convertir Booléen en Entier",
+            ["convertir", "conversion", "booléen", "entier", "bool", "int"]
+        ),
+        Kind::ConvertBoolToFloat => definition!(
+            kind,
+            Category::Expression,
+            "Convertir Booléen en Décimal",
+            ["convertir", "conversion", "booléen", "décimal", "bool", "float"]
+        ),
+        Kind::ConvertIntToBool => definition!(
+            kind,
+            Category::Expression,
+            "Convertir Entier en Booléen",
+            ["convertir", "conversion", "entier", "booléen", "int", "bool"]
+        ),
         Kind::ConvertIntToFloat => definition!(
             kind,
             Category::Expression,
@@ -810,6 +853,14 @@ pub fn node_definition(kind: NodeKind) -> NodeDefinition {
                 "text",
                 "string"
             ]
+        ),
+        Kind::ConvertStringToName => definition!(
+            kind, Category::Expression, "Convertir Chaîne en Nom",
+            ["convertir", "conversion", "chaîne", "nom", "string", "name"]
+        ),
+        Kind::ConvertNameToString => definition!(
+            kind, Category::Expression, "Convertir Nom en Chaîne",
+            ["convertir", "conversion", "nom", "chaîne", "name", "string"]
         ),
         Kind::VariableReference => definition!(
             kind,
@@ -937,6 +988,16 @@ pub fn node_definition(kind: NodeKind) -> NodeDefinition {
 }
 
 pub const ALL_NODE_KINDS: &[NodeKind] = &[
+    NodeKind::WidgetClassValue,
+    NodeKind::WidgetObjectClass,
+    NodeKind::WidgetAddToViewport,
+    NodeKind::WidgetRemoveFromParent,
+    NodeKind::WidgetCreate,
+    NodeKind::TextFromStringTable, NodeKind::GetStringTableIdAndKey,
+    NodeKind::StringTableId, NodeKind::StringTableAsset,
+    NodeKind::StringTableRegistered, NodeKind::StringTableEntryRegistered,
+    NodeKind::StringTableNamespace, NodeKind::StringTableSource, NodeKind::StringTableMetadata,
+    NodeKind::RegisteredStringTables, NodeKind::StringTableKeys, NodeKind::StringTableMetadataIds,
     NodeKind::MenuExecute, NodeKind::MenuAction, NodeKind::MenuStartScene, NodeKind::MenuOpenPage,
     NodeKind::MenuSlot, NodeKind::MenuProtect, NodeKind::MenuSavePage, NodeKind::MenuNumberPreference,
     NodeKind::MenuBoolPreference, NodeKind::MenuLanguage, NodeKind::MenuAdvance, NodeKind::MenuSkipTypewriter,
@@ -988,6 +1049,14 @@ pub const ALL_NODE_KINDS: &[NodeKind] = &[
     NodeKind::AccessibilitySpeak,
     NodeKind::AccessibilityStop,
     NodeKind::FunctionReturn,
+    NodeKind::UnitCall,
+    NodeKind::UnitReturn,
+    NodeKind::DoOnce,
+    NodeKind::DoN,
+    NodeKind::FlipFlop,
+    NodeKind::Gate,
+    NodeKind::Sequence,
+    NodeKind::ForLoopWithBreak,
     NodeKind::While,
     NodeKind::ForEach,
     NodeKind::Use,
@@ -1053,11 +1122,16 @@ pub const ALL_NODE_KINDS: &[NodeKind] = &[
     NodeKind::TransitionWipe,
     NodeKind::TransitionBlur,
     NodeKind::VariableGet,
+    NodeKind::ConvertBoolToInt,
+    NodeKind::ConvertBoolToFloat,
+    NodeKind::ConvertIntToBool,
     NodeKind::ConvertIntToFloat,
     NodeKind::ConvertNumberToText,
     NodeKind::ConvertTextToInt,
     NodeKind::ConvertStringToText,
     NodeKind::ConvertTextToString,
+    NodeKind::ConvertStringToName,
+    NodeKind::ConvertNameToString,
     NodeKind::VariableReference,
     NodeKind::BinaryOperator,
     NodeKind::UnaryOperator,

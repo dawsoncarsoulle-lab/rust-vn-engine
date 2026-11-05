@@ -3,11 +3,161 @@ use rvn_core::{Engine, GameState, MusicState, Renderer, SpriteState};
 use rvn_parser::{parse, Hotspot, Position, Transition, Value};
 use rvn_ui::programmable::{ScreenEventKind, ScreenView};
 
+fn typed_ui_locale(pattern: &str) -> rvn_core::locale::LocaleManager {
+    use rvn_core::locale::{LocaleManager, LocaleTable};
+    use rvn_parser::localized_text::TextIdentity;
+    use std::collections::HashMap;
+    let key = |owner: &str, namespace: &str, key: &str| TextIdentity {
+        owner: owner.into(), namespace: namespace.into(), key: key.into(),
+    }.locale_key();
+    LocaleManager::from_tables("unused", "en", "fr", vec!["en".into(), "fr".into()], HashMap::from([
+        ("en".into(), LocaleTable { lang: "en".into(), strings: HashMap::new() }),
+        ("fr".into(), LocaleTable { lang: "fr".into(), strings: HashMap::from([
+            (key("asset:1", "VN", "welcome"), pattern.into()),
+            (key("asset:2", "Names", "visitor"), "Éloïse".into()),
+        ]) }),
+    ]))
+}
+
+const TYPED_UI: &str = r#"
+function translated() {return text_to_string(message)}
+function paint(state,props,frame) {return [canvas_text(translated(),[0,0],[1,1,1,1],18)]}
+screen localized() {
+    return component("root","column",{},[
+        component("greeting","button",{"text":translated(),"events":{"click":"selected"}},[]),
+        component("painted","canvas",{"draw":"paint","state":{}},[])
+    ])
+}
+handler selected(event) {set observed=translated()}
+init {
+    set pattern=__rvn_localizable_text("Hello {Name}!", "asset:1", "VN", "welcome", "Kept notes")
+    set person=__rvn_localizable_text("Visitor", "asset:2", "Names", "visitor")
+    set message=__rvn_format_text(pattern,{"Name":person})
+    set observed=""
+}
+scene label start
+ui.open("localized",[],false,0)
+"Waiting"
+"#;
+
+fn assert_typed_ui<R: Renderer>(game: &Engine<R>, expected: &str) {
+    let views = game.interface_views().unwrap();
+    assert_eq!(views[0].root.find("greeting").unwrap().text, expected);
+    let drawing = views[0].root.find("painted").unwrap().drawing.as_ref().unwrap();
+    assert!(matches!(&drawing.primitives[0], rvn_ui::custom_canvas::CanvasPrimitive::Text { text, .. } if text == expected));
+}
+
+#[test]
+fn string_table_text_reaches_screens_canvas_handlers_cold_save_and_resource_revisions() {
+    use rvn_core::string_table::{StringTableAsset, StringTableEntry, StringTableResources};
+    let asset = |pattern: &str| StringTableAsset { id: "asset:table".into(), namespace: "VN".into(),
+        entries: [("welcome".into(), StringTableEntry {metadata:Default::default(), source: pattern.into(), developer_notes: String::new() })].into() };
+    let mut resources = StringTableResources::default(); resources.publish(asset("Hello {Name}!")).unwrap();
+    let source = TYPED_UI.replace("__rvn_localizable_text(\"Hello {Name}!\", \"asset:1\", \"VN\", \"welcome\", \"Kept notes\")", "__rvn_string_table_text(\"asset:table\",\"welcome\")");
+    let mut game = Engine::new_with_text_resources(parse(&source).unwrap(), Headless::default(), 16, resources).unwrap();
+    game.step_until_interaction().unwrap(); assert_typed_ui(&game, "Hello Visitor!");
+    let reference = game.state.vars["message"].clone();
+    let random = (game.state.random, game.state.display_random, game.state.ui.screens[0].random);
+    game.text_resources_mut().publish(asset("Welcome {Name}.")).unwrap();
+    assert_typed_ui(&game, "Welcome Visitor.");
+    game.refresh_interfaces().unwrap();
+    game.interface_event(UiInput { screen: "localized".into(), element: "greeting".into(), kind: ScreenEventKind::Click, value: None, key: None }).unwrap();
+    assert_eq!(game.state.vars["observed"], Value::Str("Welcome Visitor.".into()));
+    assert_eq!((game.state.random, game.state.display_random, game.state.ui.screens[0].random), random);
+    let save = rvn_core::save::SaveData::try_from_state(&game.state, 1, "start".into(), "table.rvn".into()).unwrap();
+    assert_eq!(save.format_version, 13);
+    let mut cold = game.fresh(Headless::default(), 16).unwrap();
+    cold.text_resources_mut().publish(asset("Returned {Name}.")).unwrap();
+    cold.load_data(serde_json::from_str(&serde_json::to_string(&save).unwrap()).unwrap()).unwrap();
+    assert_typed_ui(&cold, "Returned Visitor."); assert_eq!(cold.state.vars["message"], reference);
+    // Removing the asset never serves the previously cached translated view.
+    let before = serde_json::to_value(&cold.state).unwrap();
+    cold.text_resources_mut().unload("asset:table").unwrap();
+    assert_typed_ui(&cold, rvn_core::string_table::MISSING_STRING_TABLE_ENTRY);
+    assert_eq!(serde_json::to_value(&cold.state).unwrap(), before);
+    cold.text_resources_mut().publish(asset("Recovered {Name}.")).unwrap();
+    assert_typed_ui(&cold, "Recovered Visitor.");
+    assert_eq!(serde_json::to_value(&cold.state).unwrap(), before);
+}
+
+#[test]
+fn typed_ui_locale_reaches_screens_canvas_handlers_and_invalidates_cached_language_and_tables() {
+    let mut game = Engine::new(parse(TYPED_UI).unwrap(), Headless::default(), 16).unwrap();
+    game.locale = Some(typed_ui_locale("Bonjour {Name}!"));
+    game.step_until_interaction().unwrap();
+    let original_text = game.state.vars["message"].clone();
+    let random = (game.state.random, game.state.display_random, game.state.ui.screens[0].random);
+    assert_typed_ui(&game, "Bonjour Éloïse!");
+    assert_typed_ui(&game, "Bonjour Éloïse!");
+    game.locale.as_mut().unwrap().set_language("en").unwrap();
+    assert_typed_ui(&game, "Hello Visitor!");
+    game.locale = Some(typed_ui_locale("Bienvenue {Name}."));
+    assert_typed_ui(&game, "Bienvenue Éloïse.");
+    game.refresh_interfaces().unwrap();
+    game.interface_event(UiInput { screen: "localized".into(), element: "greeting".into(), kind: ScreenEventKind::Click, value: None, key: None }).unwrap();
+    assert_eq!(game.state.vars["observed"], Value::Str("Bienvenue Éloïse.".into()));
+    assert_eq!(game.state.vars["message"], original_text);
+    assert_eq!((game.state.random, game.state.display_random, game.state.ui.screens[0].random), random);
+    let save = rvn_core::save::SaveData::try_from_state(&game.state, 1, "start".into(), "text.rvn".into()).unwrap();
+    assert_eq!(save.format_version, 12);
+    let mut cold = game.fresh(Headless::default(), 16).unwrap();
+    cold.locale = Some(typed_ui_locale("Bonjour {Name}!"));
+    cold.locale.as_mut().unwrap().set_language("en").unwrap();
+    cold.load_data(serde_json::from_str(&serde_json::to_string(&save).unwrap()).unwrap()).unwrap();
+    assert_typed_ui(&cold, "Hello Visitor!");
+    assert_eq!(cold.state.vars["message"], original_text);
+}
+
+#[test]
+fn locale_free_ui_apis_keep_source_projection_and_canvas_purity_rejects_random() {
+    use rvn_core::eval::FunctionLibrary;
+    use rvn_core::ui::{CanvasBudget, UiLibrary, UiState};
+    use rvn_core::random::RandomState;
+    let script = parse(TYPED_UI).unwrap();
+    let functions = FunctionLibrary::from_script(&script).unwrap();
+    let init = script.iter().find_map(|s| if let rvn_parser::Statement::Init { body } = s {Some(body)} else {None}).unwrap();
+    let mut random = RandomState::seeded(7);
+    let globals = functions.execute(init, &Default::default()).unwrap();
+    let ui = UiLibrary::from_script(&script).unwrap();
+    let mut state = UiState::default();
+    let command = rvn_core::eval::UiCommand::Open { name: "localized".into(), arguments: vec![], modal: false, layer: 0, host_role: None, inherit_host: false };
+    ui.command(&mut state, command, &functions, &globals, &mut random).unwrap();
+    assert_eq!(ui.views(&state, &functions, &globals).unwrap()[0].root.find("greeting").unwrap().text, "Hello Visitor!");
+    let bad = FunctionLibrary::from_script(&parse("function bad(state,props,frame){return text_to_string(__rvn_invariant_text(\"\"+random(1,9)))}").unwrap()).unwrap();
+    assert!(bad.canvas_function_with_locale("bad", vec![Value::Dict(Default::default());3], &globals, &mut CanvasBudget::default(), Some(&typed_ui_locale("Bonjour {Name}!"))).is_err());
+}
+
+#[test]
+fn nested_text_float_signed_zero_invalidates_interface_cache_by_bits() {
+    use rvn_parser::localized_text::{DeferredText, TextArgument};
+    let mut game = Engine::new(parse(TYPED_UI).unwrap(), Headless::default(), 16).unwrap();
+    game.step_until_interaction().unwrap();
+    let text = |number: f32| Value::Text(Box::new(DeferredText::Format {
+        pattern: Box::new(DeferredText::invariant("{value}")),
+        arguments: [("value".into(), TextArgument::Text(Box::new(DeferredText::Format {
+            pattern: Box::new(DeferredText::invariant("{number}")),
+            arguments: [("number".into(), TextArgument::Float(number))].into(),
+        })))].into(),
+    }));
+    game.state.vars.insert("message".into(), text(-0.0));
+    assert_typed_ui(&game, "-0");
+    assert_eq!(text(-0.0), text(0.0)); // RVN equality is intentionally numerical.
+    game.state.vars.insert("message".into(), text(0.0));
+    assert_typed_ui(&game, "0");
+}
+
 #[derive(Default)]
 struct Headless {
     views: Vec<ScreenView>,
 }
 impl Renderer for Headless {
+    fn supports_custom_canvas(&self) -> bool { true }
+    fn validate_scene_batch(&self, _: &rvn_core::renderer::SceneRenderBatch) -> Result<(), String> {
+        Ok(())
+    }
+    fn publish_scene_batch(&mut self, batch: rvn_core::renderer::SceneRenderBatch) {
+        self.views = batch.interfaces;
+    }
     fn supports_programmable_ui(&self) -> bool {
         true
     }

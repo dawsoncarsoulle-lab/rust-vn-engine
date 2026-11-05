@@ -759,3 +759,165 @@ fn variadic_boolean_operator_adds_a_visible_defaulted_operand() {
     );
     assert_eq!(graph.materialize_visible_defaults().unwrap(), 0);
 }
+
+
+#[test]
+fn connected_inline_fallback_survives_load_cleanup_and_disconnect() {
+    for (kind,key,value) in [
+        (NodeKind::SetVariable,"value",PropertyValue::Int(2)),
+        (NodeKind::LocalVariable,"value",PropertyValue::Int(3)),
+        (NodeKind::MathAdd,"left",PropertyValue::Int(4)),
+        (NodeKind::If,"condition",PropertyValue::Bool(false)),
+    ] {
+        let mut graph=GraphDocument::new(GraphId::new(42),GraphKind::Label{name:"start".into()});
+        graph.add_variable("score",ValueType::Int,PropertyValue::Int(0)).unwrap();
+        let owner=graph.add_catalog_node(kind,[224.0,16.0]).unwrap();
+        if matches!(kind,NodeKind::SetVariable|NodeKind::LocalVariable) {
+            graph.set_property(owner,"name",PropertyValue::String("score".into())).unwrap();
+        }
+        graph.set_pin_default(owner,key,value.clone()).unwrap();
+        let literal=graph.add_catalog_node(NodeKind::Literal,[32.0,80.0]).unwrap();
+        graph.set_property(literal,"value",match value {PropertyValue::Bool(_)=>PropertyValue::Bool(true),_=>PropertyValue::Int(99)}).unwrap();
+        let output=graph.pin_by_key(literal,"value").unwrap().id;
+        let input=graph.pin_by_key(owner,key).unwrap().id;
+        let edge=graph.connect(output,input).unwrap();
+        assert_eq!(graph.pins[&input].default_value,Some(value.clone()),"connect already preserves the inline fallback");
+        let bytes=graph.to_pretty_json().unwrap();
+        let mut reopened=GraphDocument::from_json(&bytes).unwrap();
+        assert_eq!(reopened.clear_shadowed_input_defaults(),0,"load cleanup must retain authored fallback for {kind:?}");
+        assert_eq!(reopened,graph,"opening must preserve all IDs, positions, edges and hidden defaults");
+        reopened.remove_edge(edge);
+        assert_eq!(reopened.pins[&input].default_value,Some(value));
+        assert_eq!(graph.to_pretty_json().unwrap(),bytes);
+    }
+}
+
+
+#[test]
+fn asset_defaults1021_all_catalogue_asset_inputs_retain_selection_behind_wire() {
+    for (kind, key, source_kind) in [
+        (NodeKind::Scene, "background", NodeKind::SceneAsset),
+        (NodeKind::CinematicShow, "cinematic", NodeKind::CinematicAsset),
+        (NodeKind::MusicPlay, "file", NodeKind::MusicAsset),
+        (NodeKind::SfxPlay, "file", NodeKind::SoundEffectAsset),
+        (NodeKind::SfxStop, "file", NodeKind::SoundEffectAsset),
+        (NodeKind::VoicePlay, "file", NodeKind::VoiceAsset),
+        (NodeKind::Imagemap, "background", NodeKind::SceneAsset),
+        (NodeKind::Imagemap, "hover", NodeKind::HoverImageAsset),
+        (NodeKind::CharacterValue, "sprite", NodeKind::SpriteAsset),
+        (NodeKind::StringTableId, "asset", NodeKind::StringTableAsset),
+    ] {
+        let mut graph = GraphDocument::new(GraphId::new(1021), GraphKind::Label { name: "start".into() });
+        let owner = graph.add_catalog_node(kind, [200.0, 0.0]).unwrap();
+        let fallback = PropertyValue::String("authored/fallback".into());
+        graph.set_pin_default(owner, key, fallback.clone()).unwrap();
+        let producer = graph.add_catalog_node(source_kind, [0.0, 0.0]).unwrap();
+        graph.set_property(producer, if source_kind == NodeKind::StringTableAsset { "table" } else { "path" }, PropertyValue::String("wired/selection".into())).unwrap();
+        let input = graph.pin_by_key(owner, key).unwrap().id;
+        let output = graph.pin_by_key(producer, "value").unwrap().id;
+        assert!(matches!(graph.pins[&input].value_type, ValueType::Asset(_)));
+        let edge = graph.connect(output, input).unwrap();
+        assert_eq!(graph.pins[&input].default_value, Some(fallback.clone()), "{kind:?}.{key}");
+        assert_eq!(graph.clear_shadowed_input_defaults(), 0);
+        let bytes = graph.to_pretty_json().unwrap();
+        let mut reopened = GraphDocument::from_json(&bytes).unwrap();
+        assert_eq!(reopened, graph, "JSON keeps the exact graph, pin and edge identities");
+        assert_eq!(reopened.clear_shadowed_input_defaults(), 0);
+        reopened.remove_edge(edge);
+        assert_eq!(reopened.pins[&input].default_value, Some(fallback));
+        assert!(reopened.nodes.contains_key(&producer));
+        assert_eq!(graph.to_pretty_json().unwrap(), bytes, "disconnecting the candidate does not mutate its source snapshot");
+    }
+}
+
+#[test]
+fn asset_defaults1021_wrong_asset_connection_refuses_before_selection_or_graph_mutation() {
+    let mut graph = GraphDocument::new(GraphId::new(1022), GraphKind::Label { name: "start".into() });
+    let effect = graph.add_catalog_node(NodeKind::SfxPlay, [200.0, 0.0]).unwrap();
+    graph.set_pin_default(effect, "file", PropertyValue::String("fallback.wav".into())).unwrap();
+    let music = graph.add_catalog_node(NodeKind::MusicAsset, [0.0, 0.0]).unwrap();
+    graph.set_property(music, "path", PropertyValue::String("wrong.ogg".into())).unwrap();
+    let output = graph.pin_by_key(music, "value").unwrap().id;
+    let input = graph.pin_by_key(effect, "file").unwrap().id;
+    let before = graph.clone();
+    assert!(matches!(graph.connect(output, input), Err(GraphEditError::IncompatibleTypes { .. })));
+    assert_eq!(graph, before);
+}
+
+
+#[test]
+fn asset_defaults1021_legacy_ambiguous_real_neighbor_mapping_refuses_before_graph_mutation() {
+    // Two editable real consumers share one actual Asset output and have no
+    // distinguishing execution neighbor. Numeric allocation order is not proof
+    // that either freshly imported consumer owns fallback A or fallback D.
+    let mut prior = GraphDocument::new(GraphId::new(1023), GraphKind::Label { name: "start".into() });
+    prior.add_catalog_node(NodeKind::Label, [0.0, 0.0]).unwrap();
+    let producer = prior.add_catalog_node(NodeKind::SoundEffectAsset, [-200.0, 0.0]).unwrap();
+    prior.set_property(producer, "path", PropertyValue::String("B.wav".into())).unwrap();
+    let output = prior.pin_by_key(producer, "value").unwrap().id;
+    for (index, value) in ["A.wav", "D.wav"].into_iter().enumerate() {
+        let consumer = prior.add_catalog_node(NodeKind::SfxPlay, [200.0, index as f64 * 180.0]).unwrap();
+        prior.set_pin_default(consumer, "file", PropertyValue::String(value.into())).unwrap();
+        let input = prior.pin_by_key(consumer, "file").unwrap().id;
+        prior.connect(output, input).unwrap();
+    }
+    let mut imported = GraphDocument::from_json(&prior.to_pretty_json().unwrap()).unwrap();
+    for pin in imported.pins.values_mut().filter(|pin| pin.key == "file") { pin.default_value = None; }
+    let previous_bytes = prior.to_pretty_json().unwrap();
+    let imported_bytes = imported.to_pretty_json().unwrap();
+    let error = imported.reconcile_import(&prior).unwrap_err();
+    assert!(error.contains("Ambiguous retained Asset slot"));
+    assert_eq!(imported.to_pretty_json().unwrap(), imported_bytes, "no IDs, allocators, links or presentation commit on ambiguity");
+    assert_eq!(prior.to_pretty_json().unwrap(), previous_bytes);
+}
+
+// All three real scalar consumer kinds share the same authoring-slot policy.
+fn scalar_fallback1021_document(kind: NodeKind, key: &str, a: PropertyValue, b: PropertyValue, c: PropertyValue) {
+    let mut graph=GraphDocument::new(GraphId::new(102103),GraphKind::Label{name:"start".into()});
+    let command=graph.add_catalog_node(kind,[300.0,20.0]).unwrap();
+    graph.set_pin_default(command,key,a.clone()).unwrap();
+    let input=graph.pin_by_key(command,key).unwrap().id;
+    let producer=graph.add_catalog_node(NodeKind::Literal,[0.0,20.0]).unwrap();
+    graph.set_property(producer,"value",b).unwrap();
+    let output=graph.pin_by_key(producer,"value").unwrap().id;
+    let first=graph.connect(output,input).unwrap();
+    assert_eq!(graph.pins[&input].default_value,Some(a.clone()),"a real cable must retain this consumer's authored scalar A");
+    let bytes=graph.to_pretty_json().unwrap();
+    let mut cold=GraphDocument::from_json(&bytes).unwrap();
+    assert_eq!(cold.clear_shadowed_input_defaults(),0);
+    assert_eq!(cold,graph);
+    let replacement=cold.add_catalog_node(NodeKind::Literal,[0.0,100.0]).unwrap();
+    cold.set_property(replacement,"value",c).unwrap();
+    let next=cold.pin_by_key(replacement,"value").unwrap().id;
+    let before=cold.clone();
+    assert!(cold.connect(next,input).is_err(),"occupied input must still refuse without replacement authority");
+    assert_eq!(cold,before);
+    assert!(cold.connect(input,next).is_err(),"reverse direction cannot edit any default");
+    assert_eq!(cold,before);
+    cold.remove_edge(first).unwrap();
+    cold.remove_node(producer).unwrap();
+    let second=cold.connect(next,input).unwrap();
+    assert_eq!(cold.pins[&input].default_value,Some(a.clone()));
+    let bad=cold.add_catalog_node(NodeKind::Literal,[0.0,180.0]).unwrap();
+    cold.set_property(bad,"value",PropertyValue::String("wrong scalar type".into())).unwrap();
+    let wrong=cold.pin_by_key(bad,"value").unwrap().id;
+    cold.remove_edge(second).unwrap();
+    let before=cold.clone();
+    assert!(cold.connect(wrong,input).is_err());assert_eq!(cold,before);
+    assert_eq!(cold.pins[&input].default_value,Some(a.clone()),"disconnect exposes the original scalar A, never producer C");
+    assert_eq!(cold.pin_by_key(command,key).unwrap().id,input);
+    assert_eq!(GraphDocument::from_json(&cold.to_pretty_json().unwrap()).unwrap(),cold);
+}
+#[test]
+fn scalar_fallback1021_bool_connect_rewire_disconnect_json_and_refusals() {
+    scalar_fallback1021_document(NodeKind::TypewriterSet,"enabled",PropertyValue::Bool(false),PropertyValue::Bool(true),PropertyValue::Bool(false));
+}
+#[test]
+fn scalar_fallback1021_int_connect_rewire_disconnect_json_and_refusals() {
+    scalar_fallback1021_document(NodeKind::TypewriterSpeed,"speed",PropertyValue::Int(11),PropertyValue::Int(23),PropertyValue::Int(47));
+}
+#[test]
+fn scalar_fallback1021_float_connect_rewire_disconnect_json_and_refusals() {
+    scalar_fallback1021_document(NodeKind::MusicVolume,"level",PropertyValue::Float(0.125),PropertyValue::Float(0.5),PropertyValue::Float(0.75));
+}
+

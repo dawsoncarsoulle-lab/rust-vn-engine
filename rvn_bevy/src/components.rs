@@ -51,7 +51,7 @@ pub struct ChoiceButton(pub usize);
 #[derive(Component)]
 pub struct ChoiceContainer;
 
-#[cfg(not(target_arch = "wasm32"))]
+/// Logical current-track identity, including checkpointed browser audio.
 #[derive(Component)]
 pub struct MusicMarker;
 

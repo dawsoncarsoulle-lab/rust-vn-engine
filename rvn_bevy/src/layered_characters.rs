@@ -1,7 +1,7 @@
 //! Layered sprites use the ordinary sprite stage, transforms and ordering.
 //! Keep hidden-layer assets alive too: switching an attribute is not an unload.
 use crate::{
-    components::{SpriteBaseTransform, VnSprite},
+    components::{SpriteAnimation, SpriteBaseTransform, VnSprite},
     resources::{ScriptErrorMessage, VnState},
     systems::sprite::SpriteStage,
     vn_command::VnCommand,
@@ -25,7 +25,7 @@ pub(crate) struct CompositionRoot {
 }
 #[derive(Component)]
 pub(crate) struct LayeredFade {
-    animation: crate::components::FadeAnim,
+    pub(crate) animation: crate::components::FadeAnim,
     pub(crate) base: Transform,
 }
 #[derive(Resource, Default)]
@@ -35,18 +35,23 @@ struct Cast {
     images: std::collections::BTreeMap<String, Handle<Image>>,
     pending: Vec<VnCommand>,
 }
+pub(crate) fn install_scene(world: &mut World, views: Vec<LayeredView>) {
+    let mut cast = world.remove_resource::<Cast>().unwrap_or_default();
+    if cast.views != views { cast.views = views; cast.dirty = true; }
+    world.insert_resource(cast);
+}
 impl Plugin for LayeredCharactersPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Cast>().add_systems(
             Update,
-            (
-                receive.after(crate::systems::sprite_system),
+            ((
+                receive.run_if(crate::scene_publication::projection_ready).after(crate::systems::sprite_system),
                 synchronize.after(receive),
-                animate
+                animate.run_if(crate::scene_publication::ready)
                     .after(crate::systems::sprite_animation_system)
-                    .before(crate::systems::fade_system),
+                    .before(crate::systems::fade_system).in_set(crate::scene_publication::HostClockSet),
                 asset_errors.after(synchronize),
-            ),
+            )).distributive_run_if(crate::runtime_restart::presentation_available),
         );
     }
 }
@@ -54,8 +59,14 @@ fn receive(
     mut events: EventReader<VnCommand>,
     mut cast: ResMut<Cast>,
     assets: Res<AssetServer>,
-    engine: Res<crate::resources::VnEngine>,
+    engine: Option<Res<crate::resources::VnEngine>>,
+    startup: Option<Res<crate::debugger_startup::DebugBootstrap>>,
 ) {
+    let state = match (engine.as_deref(), startup.as_deref()) {
+        (Some(engine), None) => &engine.0.state,
+        (None, Some(startup)) => startup.owner.state(),
+        _ => return,
+    };
     for event in events.read() {
         match event {
             VnCommand::LayeredCharacters(views) => {
@@ -70,9 +81,16 @@ fn receive(
             | VnCommand::AnimateSprite { id, .. }
             | VnCommand::StopSpriteAnimation { id }
             | VnCommand::SetSpriteEffect { id, .. }
-                if engine.0.state.layered.characters.contains_key(id) =>
+                if state.layered.characters.contains_key(id) =>
             {
-                cast.pending.push(event.clone());
+                let mut current = event.clone();
+                if state.scene_execution.is_some() {
+                    match &mut current {
+                        VnCommand::ShowSprite {transition,..}|VnCommand::HideSprite {transition,..} => *transition=rvn_parser::Transition::None,
+                        _=>{}
+                    }
+                }
+                cast.pending.push(current);
                 cast.dirty = true;
             }
             _ => {}
@@ -110,7 +128,7 @@ pub(crate) fn synchronize(world: &mut World) {
     let views = world.resource::<Cast>().views.clone();
     let pending = std::mem::take(&mut world.resource_mut::<Cast>().pending);
     let roots: Vec<_> = world
-        .query::<(Entity, &VnSprite, &CompositionRoot)>()
+        .query_filtered::<(Entity, &VnSprite, &CompositionRoot), Without<crate::scene_retired::RetiredProjection>>()
         .iter(world)
         .map(|(e, s, _)| (e, s.id.clone()))
         .collect();
@@ -147,7 +165,7 @@ pub(crate) fn synchronize(world: &mut World) {
         .next();
     for view in views {
         let mut root = world
-            .query::<(Entity, &VnSprite)>()
+            .query_filtered::<(Entity, &VnSprite), Without<crate::scene_retired::RetiredProjection>>()
             .iter(world)
             .find(|(_, sprite)| sprite.id == view.character)
             .map(|(entity, _)| entity);
@@ -208,6 +226,7 @@ pub(crate) fn synchronize(world: &mut World) {
             .map(|children| children.iter().copied().collect())
             .unwrap_or_default();
         for child in current {
+            if world.get::<crate::scene_retired::RetiredProjection>(child).is_some() {continue;}
             if world
                 .get::<LayerTarget>(child)
                 .is_some_and(|target| !view.layers.iter().any(|layer| layer == &target.description))
@@ -220,6 +239,7 @@ pub(crate) fn synchronize(world: &mut World) {
                 children
                     .iter()
                     .find(|child| {
+                        if world.get::<crate::scene_retired::RetiredProjection>(**child).is_some() {return false;}
                         world
                             .get::<LayerTarget>(**child)
                             .is_some_and(|target| target.description == layer)
@@ -345,8 +365,14 @@ pub(crate) fn synchronize(world: &mut World) {
     }
 }
 fn animate(world: &mut World) {
+    animate_projection(world,false);
+}
+pub(crate) fn sample_owned(world:&mut World) {
+    animate_projection(world,true);
+}
+fn animate_projection(world:&mut World,owned_only:bool) {
     use crate::components::TransitionKind;
-    if world
+    if !owned_only && world
         .get_resource::<crate::accessibility::Accessibility>()
         .is_some_and(|access| access.blocked)
     {
@@ -357,27 +383,48 @@ fn animate(world: &mut World) {
         .is_some_and(|access| access.settings.reduced_motion);
     let delta = world.resource::<Time>().delta_seconds();
     let roots: Vec<_> = world
-        .query_filtered::<Entity, With<CompositionRoot>>()
+        .query_filtered::<Entity, (With<CompositionRoot>, Without<crate::scene_retired::RetiredProjection>)>()
         .iter(world)
         .collect();
     for root in roots {
+        let owned=world.get::<crate::scene_effects::FadeLease>(root).is_some();
+        if owned != owned_only && (owned || world.get::<LayeredFade>(root).is_some()) {continue;}
+        if !owned_only && !crate::scene_effects::allowed(world.get_resource::<crate::resources::VnEngine>(),world.get_resource::<State<VnState>>(),None) {continue;}
         let mut alpha = 1.0;
         let mut remove = false;
+        let clock=world.get::<crate::scene_effects::FadeLease>(root).and_then(|lease|crate::scene_effects::authoritative_effect(world,&lease.0)).map(|effect|effect.clock);
+        if owned && clock.is_none() {continue;}
+        let mut sampled_animation=None;
+        if owned {
+            if let (Some(animation),Some(base),Some(lease))=(world.get::<SpriteAnimation>(root),world.get::<SpriteBaseTransform>(root),world.get::<crate::scene_effects::AnimationLease>(root)) {
+                let mut pose=world.get::<LayeredFade>(root).map(|fade|fade.base).unwrap_or_default();
+                if let Some(effect)=crate::scene_effects::authoritative_effect(world,&lease.0) {
+                    crate::systems::sprite::sample_owned_sprite_animation(animation,base,&mut pose,reduced,effect.clock.elapsed,effect.clock.duration);
+                }
+                sampled_animation=Some(pose);
+            }
+        }
         if let Some(mut fade) = world.get_mut::<LayeredFade>(root) {
-            fade.animation.elapsed_secs += delta;
-            let t = if reduced {
+            if !owned {fade.animation.elapsed_secs += delta;}
+            let legacy_t = if reduced {
                 1.0
             } else {
                 (fade.animation.elapsed_secs / fade.animation.duration_secs.max(0.001))
                     .clamp(0.0, 1.0)
             };
-            alpha = fade.animation.from + (fade.animation.to - fade.animation.from) * t;
+            let t=if owned {if reduced {1.0}else{crate::scene_effects::effect_progress(clock.as_ref().unwrap())}} else {f64::from(legacy_t)};
+            alpha=if owned {(f64::from(fade.animation.from)+(f64::from(fade.animation.to)-f64::from(fade.animation.from))*t) as f32}
+                else {fade.animation.from+(fade.animation.to-fade.animation.from)*legacy_t};
             let progress = if fade.animation.to > fade.animation.from {
-                1.0 - t
+                1.0 - legacy_t
             } else {
-                t
+                legacy_t
             };
-            let mut transform = fade.base;
+            let mut transform = sampled_animation.unwrap_or(fade.base);
+            if owned {
+                let sampled=transform;
+                crate::scene_effects::apply_owned_visual_pose(&fade.animation,&sampled,&mut transform,t);
+            } else {
             match fade.animation.kind {
                 TransitionKind::SlideLeft => transform.translation.x += 1920.0 * progress,
                 TransitionKind::SlideRight => transform.translation.x -= 1920.0 * progress,
@@ -387,8 +434,9 @@ fn animate(world: &mut World) {
                 TransitionKind::ZoomOut => transform.scale *= 1.0 + 0.5 * progress,
                 _ => {}
             }
-            remove = t >= 1.0 && fade.animation.despawn_on_finish;
-            let complete = t >= 1.0;
+            }
+            remove = !owned && t >= 1.0 && fade.animation.despawn_on_finish;
+            let complete = !owned && t >= 1.0;
             world.entity_mut(root).insert(transform);
             if complete {
                 world.entity_mut(root).remove::<LayeredFade>();
@@ -404,6 +452,7 @@ fn animate(world: &mut World) {
             .map(|children| children.iter().copied().collect())
             .unwrap_or_default();
         for child in children {
+            if world.get::<crate::scene_retired::RetiredProjection>(child).is_some() {continue;}
             let opacity = world
                 .get::<LayerTarget>(child)
                 .map(|target| target.description.opacity)
@@ -537,5 +586,42 @@ mod tests {
             .abs_diff_eq(Vec3::new(-61.2, 91.8, 0.04), 0.001));
         let (_, full) = geometry([600.0, 1000.0], None, 0);
         assert_eq!(full.translation, Vec3::ZERO);
+    }
+}
+
+#[cfg(test)]
+mod retired_current_contract_tests {
+    use super::*;
+
+    fn game(source:&str)->rvn_core::Engine<crate::bevy_renderer::BevyRenderer> {
+        let mut game=rvn_core::Engine::from_program(rvn_parser::parse_program(source).unwrap(),crate::bevy_renderer::BevyRenderer::new(),32).unwrap();
+        game.step_until_interaction().unwrap();
+        game
+    }
+    fn outgoing(game:&rvn_core::Engine<crate::bevy_renderer::BevyRenderer>)->rvn_core::scene_resources::ResourceToken {
+        let execution=game.state.scene_execution.as_ref().unwrap();
+        let tasks:Vec<_>=execution.resources.tasks.iter().filter(|task|task.effect.as_ref().is_some_and(|effect|effect.presentation.is_some())).collect();
+        assert_eq!(tasks.len(),1);
+        execution.resources.effect_token(game.runtime_epoch(),&tasks[0].key,execution.owner()).unwrap()
+    }
+    fn assets(app:&mut App) {
+        app.add_plugins((MinimalPlugins,bevy::asset::AssetPlugin{watch_for_changes_override:Some(false),..default()}));
+        app.init_asset::<Image>();
+    }
+
+    #[test]
+    fn current_layered_synchronize_and_local_animation_leave_retired_root_and_leaf_untouched() {
+        let game=game("scene label A\nhero.show(\"old\")\nhero.hide() with fade(2000)\n\"hold\"\n");let token=outgoing(&game);
+        let mut app=App::new();app.init_resource::<Time>().init_resource::<crate::accessibility::Accessibility>().init_resource::<Cast>();
+        let pose=Transform::from_xyz(17.0,23.0,10.0);
+        let root=app.world_mut().spawn((VnSprite{id:"hero".into()},CompositionRoot{extent:Vec2::new(300.0,600.0),position:rvn_parser::Position::Center,tint:Color::srgba(0.3,0.4,0.5,0.6)},pose,crate::scene_retired::RetiredProjection{token:token.clone()},LayeredFade{base:pose,animation:crate::components::FadeAnim{from:1.0,to:0.0,duration_secs:2.0,elapsed_secs:0.25,despawn_on_finish:true,kind:crate::components::TransitionKind::Fade}})).id();
+        let description:ImageLayer=serde_json::from_value(serde_json::json!({"id":"body","image":"body.png","opacity":0.8})).unwrap();
+        let child=app.world_mut().spawn((LayerTarget{character:"hero".into(),layer:"body".into(),description},Sprite{color:Color::srgba(0.2,0.3,0.4,0.5),..default()},crate::scene_retired::RetiredProjection{token:token.clone()})).id();app.world_mut().entity_mut(root).add_child(child);
+        app.world_mut().resource_mut::<Cast>().dirty=true;synchronize(app.world_mut());
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs(10));animate_projection(app.world_mut(),false);animate_projection(app.world_mut(),true);
+        assert_eq!(*app.world().get::<Transform>(root).unwrap(),pose);assert_eq!(app.world().get::<LayeredFade>(root).unwrap().animation.elapsed_secs,0.25);
+        assert_eq!(app.world().get::<Sprite>(child).unwrap().color,Color::srgba(0.2,0.3,0.4,0.5));
+        assert_eq!(app.world().get::<Children>(root).unwrap().as_ref(),&[child]);
+        assert_eq!(&app.world().get::<crate::scene_retired::RetiredProjection>(child).unwrap().token,&token);
     }
 }

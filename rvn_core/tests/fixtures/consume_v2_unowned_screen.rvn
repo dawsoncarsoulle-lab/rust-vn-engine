@@ -1,0 +1,9 @@
+init {set prior = 1 / 0}
+screen panel() {
+    flow.consume_v2("screen:panel", "unattached") {
+        capture "effect" = random(1, 1)
+        return component("root", "text", {"text":"unattached"}, [])
+    }
+}
+scene label start
+"done"

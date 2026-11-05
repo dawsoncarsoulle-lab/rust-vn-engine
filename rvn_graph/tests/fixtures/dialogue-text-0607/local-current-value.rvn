@@ -1,0 +1,8 @@
+function actual_initial_message() {
+    local draw=random(1,999)
+    return "initial"
+}
+scene label start
+local message=actual_initial_message()
+set message="late"
+"[message]"

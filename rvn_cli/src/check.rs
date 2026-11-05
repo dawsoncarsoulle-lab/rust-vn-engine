@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use rvn_core::parse_text_tags;
 use rvn_parser::{
-    parse_recovering, AnimationParam, AnimationValue, Expr, Hotspot, InterpolatedText, ParseError,
+    parse_recovering_with_context, NarrativeContext, AnimationParam, AnimationValue, Expr, Hotspot, InterpolatedText, ParseError,
     ParseErrorKind, Rect, Script, Statement, TextSegment,
 };
 
@@ -288,6 +288,7 @@ struct Symbols {
     functions: HashMap<String, Location>,
     labels: HashMap<String, Location>,
     label_order: Vec<String>,
+    scenes: HashSet<String>,
     duplicate_labels: Vec<(String, Location)>,
     explicit_label_refs: Vec<(String, Location, &'static str)>,
     declared_characters: HashMap<String, Location>,
@@ -300,6 +301,8 @@ struct Symbols {
     sfx_files: Vec<(String, Location)>,
     assigned_vars: HashMap<String, Location>,
     local_vars: HashSet<String>,
+    lexical_body: bool,
+    lexical_source_start: usize,
     used_vars: Vec<(String, Location)>,
     locale_keys: HashSet<String>,
     locale_prefixes: HashSet<String>,
@@ -350,6 +353,9 @@ impl<'a> CheckContext<'a> {
             }
         };
 
+        if let Err(error)=rvn_bevy::enum_runtime_loader1025::check_project(project_dir,&cfg.paths.assets){
+            self.diagnostics.push(Diagnostic::error("enum-assets",error).at(Some(Location{file:project_dir.join("rvn.toml"),line:1,column:1,source_line:None,span_len:None})));
+        }
         let main_script = project_dir.join(&cfg.project.main_script);
         let scripts = match load_scripts(&main_script, &mut self.diagnostics) {
             Ok(scripts) => scripts,
@@ -415,6 +421,31 @@ fn load_scripts(
     main_script: &Path,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<ProjectScripts, String> {
+    let diagnostic_start = diagnostics.len();
+    if let Ok(program) = rvn_parser::parse_file_program_with_uses(main_script) {
+        // Reuse the runtime's canonical frozen-source/root/pin admission before
+        // the checker separates imported roots into per-file lexical units.
+        // These source identities are metadata, never user variable bindings.
+        if let Err(error) = rvn_parser::scheduled_source::scheduled_step_sources(&program) {
+            diagnostics.push(Diagnostic::error("scheduled-source", error).at(Some(Location {
+                file: main_script.to_path_buf(), line: 1, column: 1,
+                source_line: None, span_len: None,
+            })));
+        }
+        let files: Vec<_> = program.sources.into_iter().map(|source| SourceFile {
+            path: source.path.expect("file loader supplies actual origins"), source: source.source,
+        }).collect();
+        let mut units: Vec<ScriptUnit> = Vec::new();
+        for (statement, origin) in program.script.into_iter().zip(program.origins) {
+            let file_index = files.iter().position(|file| Some(&file.path) == origin.source.as_ref())
+                .expect("resolved statement belongs to a frozen source");
+            if let Some(last) = units.last_mut().filter(|unit| unit.file_index == file_index) { last.script.push(statement); }
+            else { units.push(ScriptUnit { file_index, script: vec![statement] }); }
+        }
+        return Ok(ProjectScripts { files, units });
+    }
+    // Recovery still reports independent syntax errors. Discover the entire
+    // imported closure first; only then decide whether root locals are legal.
     let mut files = Vec::new();
     let mut units = Vec::new();
     let mut loaded = HashSet::new();
@@ -427,6 +458,18 @@ fn load_scripts(
         &mut stack,
         diagnostics,
     )?;
+    let context = NarrativeContext::from_script(&units.iter().flat_map(|unit| unit.script.clone()).collect());
+    diagnostics.truncate(diagnostic_start);
+    for unit in &mut units {
+        let file = &files[unit.file_index];
+        match parse_recovering_with_context(&file.source, context) {
+            Ok(recovered) => {
+                for error in &recovered.errors { if let Some(diag) = parser_diagnostic(&file.path,error) { diagnostics.push(diag); } }
+                unit.script = recovered.script.into_iter().filter(|statement| !matches!(statement,Statement::Use{..})).collect();
+            }
+            Err(error) => { unit.script.clear(); if let Some(diag) = parser_diagnostic(&file.path,&error) { diagnostics.push(diag); } }
+        }
+    }
     Ok(ProjectScripts { files, units })
 }
 
@@ -455,7 +498,7 @@ fn load_script_inner(
     stack.push(canonical.clone());
     let source = fs::read_to_string(&canonical)
         .map_err(|e| format!("impossible de lire `{}`: {e}", canonical.display()))?;
-    let recovered = match parse_recovering(&source) {
+    let recovered = match parse_recovering_with_context(&source, NarrativeContext::ExplicitScenes) {
         Ok(recovered) => recovered,
         Err(error) => {
             if let Some(diag) = parser_diagnostic(&canonical, &error) {
@@ -594,20 +637,60 @@ fn collect_symbols(scripts: &ProjectScripts, diagnostics: &mut Vec<Diagnostic>) 
     symbols
 }
 
+// Static metadata reads borrow the actual current consumer's immutable AST.
+// They do not evaluate calls, flatten producer DAGs or grant runtime authority.
+type InterfaceCaptures<'a> = HashMap<&'a str, &'a Expr>;
+
 fn collect_block(
     stmts: &[Statement],
     source: &SourceFile,
     symbols: &mut Symbols,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    collect_block_with_captures(stmts, source, symbols, diagnostics, &InterfaceCaptures::new());
+}
+
+fn collect_block_with_captures<'a>(
+    stmts: &'a [Statement],
+    source: &SourceFile,
+    symbols: &mut Symbols,
+    diagnostics: &mut Vec<Diagnostic>,
+    captures: &InterfaceCaptures<'a>,
+) {
     detect_dead_code(stmts, source, diagnostics);
     for stmt in stmts {
-        let loc = locate_stmt(source, stmt);
-        collect_interface_metadata(stmt, symbols, &loc);
+        let previous_locals = symbols.local_vars.clone();
+        let first_use = symbols.used_vars.len();
+        let loc = locate_stmt_from(source, stmt, symbols.lexical_source_start);
+        collect_interface_metadata_with_captures(stmt, symbols, &loc, captures);
         match stmt {
+            Statement::FunctionLibrary{..}=>{
+                diagnostics.push(Diagnostic::error("qualified-library-admission-required","Function Libraries require their original membership index and qualified compiler; legacy CLI checking cannot admit this scope").at(Some(loc.clone())));
+            },
+            Statement::LibraryUnitCall{call}=>{
+                for(_,value)in call.arguments(){collect_expr_vars(value,&mut symbols.used_vars,&loc);}
+                diagnostics.push(Diagnostic::error("qualified-library-admission-required","Qualified Library calls require their original membership index and compiler").at(Some(loc.clone())));
+            },
             Statement::Use { .. } => {}
-            Statement::Init { body } => collect_block(body, source, symbols, diagnostics),
-            Statement::Function {
+            Statement::Init { body } => collect_block_with_captures(body, source, symbols, diagnostics, captures),
+            Statement::ScheduledConsumer { steps, body, .. } => {
+                // Captures and inspections are ordered expression dependencies,
+                // not variable declarations or a new lexical definition scope.
+                for step in steps {
+                    let value = match step {
+                        rvn_parser::ConsumerStep::Capture { value, .. }
+                        | rvn_parser::ConsumerStep::InspectTextTable { value, .. } => value,
+                    };
+                    collect_expr_vars(value, &mut symbols.used_vars, &loc);
+                }
+                let current: InterfaceCaptures<'_> = steps.iter().filter_map(|step| match step {
+                    rvn_parser::ConsumerStep::Capture { producer, value } => Some((producer.as_str(), value)),
+                    rvn_parser::ConsumerStep::InspectTextTable { .. } => None,
+                }).collect();
+                collect_block_with_captures(body, source, symbols, diagnostics, &current);
+            }
+            Statement::UnitFunction { name, parameters, body }
+            | Statement::Function {
                 name,
                 parameters,
                 body,
@@ -637,13 +720,15 @@ fn collect_block(
                     );
                 }
                 let mut local = Symbols::default();
+                local.lexical_body=true;
+                local.lexical_source_start=definition_offset(source,&loc);
                 for parameter in parameters {
                     local.assigned_vars.insert(parameter.clone(), loc.clone());
                 }
                 local.local_vars.extend(parameters.iter().cloned());
                 collect_block(body, source, &mut local, diagnostics);
-                if matches!(stmt, Statement::Handler { .. }) {
-                    // A handler's `set` updates game state, unless the binding
+                if matches!(stmt, Statement::Handler { .. } | Statement::UnitFunction { .. }) {
+                    // Handler/Unit `set` updates game state, unless the binding
                     // was explicitly local (including parameters/loop items).
                     symbols.used_vars.extend(
                         local
@@ -665,6 +750,11 @@ fn collect_block(
                             .filter(|(name, _)| !local.assigned_vars.contains_key(name)),
                     );
                 }
+                symbols.backgrounds.extend(local.backgrounds);
+                symbols.cinematics.extend(local.cinematics);
+                symbols.sprites.extend(local.sprites);
+                symbols.music_files.extend(local.music_files);
+                symbols.sfx_files.extend(local.sfx_files);
                 symbols.interface_bindings.extend(local.interface_bindings);
                 symbols.interface_images.extend(local.interface_images);
                 symbols.video_files.extend(local.video_files);
@@ -674,6 +764,18 @@ fn collect_block(
                 symbols.used_characters.extend(local.used_characters);
                 symbols.locale_keys.extend(local.locale_keys);
                 symbols.locale_prefixes.extend(local.locale_prefixes);
+            }
+            Statement::UnitCall { arguments, .. } => {
+                for value in arguments { collect_expr_vars(value, &mut symbols.used_vars, &loc); }
+            }
+            Statement::UnitReturn => {}
+            Statement::StandardMacroDispatch { dispatch } => {
+                // Immutable expression dependencies are inspected, never evaluated.
+                // The parser/Core still own source and instance admission.
+                for value in dispatch.operand_expressions() {
+                    collect_expr_vars(value, &mut symbols.used_vars, &loc);
+                }
+                for branch in &dispatch.branches { collect_block_with_captures(&branch.body, source, symbols, diagnostics, captures); }
             }
             Statement::FunctionReturn { value } => {
                 collect_expr_vars(value, &mut symbols.used_vars, &loc)
@@ -692,6 +794,11 @@ fn collect_block(
                     collect_expr_vars(value, &mut symbols.used_vars, &loc);
                 }
             }
+            Statement::WidgetAddToViewport { object, z_order } => {
+                collect_expr_vars(object, &mut symbols.used_vars, &loc);
+                collect_expr_vars(z_order, &mut symbols.used_vars, &loc);
+            }
+            Statement::WidgetRemoveFromParent { object } => collect_expr_vars(object, &mut symbols.used_vars, &loc),
             Statement::UiClose { name } => collect_expr_vars(name, &mut symbols.used_vars, &loc),
             Statement::UiFocus { name, element } => {
                 collect_expr_vars(name, &mut symbols.used_vars, &loc);
@@ -760,9 +867,16 @@ fn collect_block(
             | Statement::VideoWait { name } => {
                 collect_expr_vars(name, &mut symbols.used_vars, &loc)
             }
+            Statement::Sequence{branches}=>for b in branches{collect_block_with_captures(b,source,symbols,diagnostics, captures);},
+            Statement::ForLoopWithBreak{name,first,last,body}=>{
+                collect_expr_vars(first,&mut symbols.used_vars,&loc);collect_expr_vars(last,&mut symbols.used_vars,&loc);
+                if symbols.lexical_body{symbols.local_vars.insert(name.clone());}
+                if !symbols.local_vars.contains(name){symbols.assigned_vars.entry(name.clone()).or_insert(loc.clone());}
+                collect_block_with_captures(body,source,symbols,diagnostics, captures);
+            }
             Statement::While { condition, body } => {
                 collect_expr_vars(condition, &mut symbols.used_vars, &loc);
-                collect_block(body, source, symbols, diagnostics);
+                collect_block_with_captures(body, source, symbols, diagnostics, captures);
             }
             Statement::ForEach {
                 name,
@@ -770,12 +884,9 @@ fn collect_block(
                 body,
             } => {
                 collect_expr_vars(collection, &mut symbols.used_vars, &loc);
-                symbols
-                    .assigned_vars
-                    .entry(name.clone())
-                    .or_insert(loc.clone());
-                symbols.local_vars.insert(name.clone());
-                collect_block(body, source, symbols, diagnostics);
+                if symbols.lexical_body {symbols.local_vars.insert(name.clone());}
+                if !symbols.local_vars.contains(name) {symbols.assigned_vars.entry(name.clone()).or_insert(loc.clone());}
+                collect_block_with_captures(body, source, symbols, diagnostics, captures);
             }
             Statement::CharacterCreate { id, .. } => {
                 if let Some(prev) = symbols.declared_characters.insert(id.clone(), loc.clone()) {
@@ -808,18 +919,19 @@ fn collect_block(
                     let locale_key = text_to_locale_key(&opt.label);
                     validate_text_tags(&locale_key, &loc, diagnostics);
                     symbols.locale_keys.insert(locale_key);
-                    collect_block(&opt.body, source, symbols, diagnostics);
+                    collect_block_with_captures(&opt.body, source, symbols, diagnostics, captures);
                 }
             }
-            Statement::SetVar { name, value } | Statement::LocalVar { name, value } => {
+            Statement::SetVar { name, value } => {
                 collect_expr_vars(value, &mut symbols.used_vars, &loc);
-                if matches!(stmt, Statement::LocalVar { .. }) {
-                    symbols.local_vars.insert(name.clone());
-                }
-                symbols
+                if !symbols.local_vars.contains(name) { symbols
                     .assigned_vars
                     .entry(name.clone())
-                    .or_insert(loc.clone());
+                    .or_insert(loc.clone()); }
+            }
+            Statement::LocalVar { name, value } => {
+                collect_expr_vars(value, &mut symbols.used_vars, &loc);
+                symbols.local_vars.insert(name.clone());
             }
             Statement::If {
                 condition,
@@ -827,10 +939,11 @@ fn collect_block(
                 else_branch,
             } => {
                 collect_expr_vars(condition, &mut symbols.used_vars, &loc);
-                collect_block(then_branch, source, symbols, diagnostics);
-                collect_block(else_branch, source, symbols, diagnostics);
+                collect_block_with_captures(then_branch, source, symbols, diagnostics, captures);
+                collect_block_with_captures(else_branch, source, symbols, diagnostics, captures);
             }
-            Statement::Label { name } => {
+            Statement::Label { name } | Statement::SceneLabel { name } => {
+                if matches!(stmt,Statement::SceneLabel { .. }) { symbols.local_vars.clear(); symbols.scenes.insert(name.clone()); }
                 if symbols.labels.contains_key(name) {
                     symbols.duplicate_labels.push((name.clone(), loc.clone()));
                 } else {
@@ -847,6 +960,11 @@ fn collect_block(
                 symbols
                     .explicit_label_refs
                     .push((target.clone(), loc.clone(), "call"))
+            }
+            Statement::Timer { action, .. } => {
+                if let Some((kind,target))=timer_target(action) {
+                    symbols.explicit_label_refs.push((target.to_string(),loc.clone(),kind));
+                }
             }
             Statement::Scene { background, .. } => {
                 symbols.backgrounds.push((background.clone(), loc.clone()))
@@ -892,6 +1010,15 @@ fn collect_block(
                         .push((target.clone(), arg.clone(), loc.clone()));
                 }
             }
+            Statement::MusicVolumeValue { level } => {
+                collect_expr_vars(level, &mut symbols.used_vars, &loc);
+            }
+            Statement::TypewriterSpeedValue { chars_per_sec } => {
+                collect_expr_vars(chars_per_sec, &mut symbols.used_vars, &loc);
+            }
+            Statement::TypewriterSetValue { enabled } => {
+                collect_expr_vars(enabled, &mut symbols.used_vars, &loc);
+            }
             Statement::MusicPlay { file, .. } => {
                 symbols.music_files.push((file.clone(), loc.clone()))
             }
@@ -911,10 +1038,11 @@ fn collect_block(
                 }
                 validate_imagemap_overlaps(hotspots, &loc, diagnostics);
                 for hotspot in hotspots {
-                    collect_block(&hotspot.body, source, symbols, diagnostics);
+                    collect_block_with_captures(&hotspot.body, source, symbols, diagnostics, captures);
                 }
             }
             Statement::Config { .. }
+            | Statement::LoopBreak
             | Statement::Return
             | Statement::MusicStop { .. }
             | Statement::MusicVolume { .. }
@@ -922,8 +1050,13 @@ fn collect_block(
             | Statement::TypewriterSpeed { .. }
             | Statement::VoiceStop
             | Statement::SpriteEffect { .. }
-            | Statement::Timer { .. }
             | Statement::TimerCancel => {}
+        }
+        // Definition bodies have already resolved their own lexical bindings.
+        // An outer scene local cannot satisfy a global read in such a body.
+        if !matches!(stmt, Statement::Function { .. } | Statement::UnitFunction { .. } | Statement::Screen { .. } | Statement::Handler { .. }) {
+            let new_uses: Vec<_> = symbols.used_vars.drain(first_use..).collect();
+            symbols.used_vars.extend(new_uses.into_iter().filter(|(name,_)| !previous_locals.contains(name)));
         }
         if let Statement::SpriteAnimate {
             animation, params, ..
@@ -982,7 +1115,7 @@ fn validate_symbols(
                 match *kind {
                     "jump" => format!("unknown jump target `{target}`"),
                     "call" => format!("unknown call target `{target}`"),
-                    _ => format!("cible de {kind} introuvable"),
+                    _ => format!("cible de {kind} `{target}` introuvable"),
                 },
             )
             .at(Some(loc.clone()))
@@ -1089,10 +1222,12 @@ fn analyze_control_flow(
     let Some(entry) = entry else { return };
 
     let mut blocks: HashMap<String, Vec<&Statement>> = HashMap::new();
+    // Units retain resolved source order; an import can split one label's
+    // statement stream without starting a new control-flow block.
+    let mut current: Option<String> = None;
     for unit in &scripts.units {
-        let mut current: Option<String> = None;
         for stmt in &unit.script {
-            if let Statement::Label { name } = stmt {
+            if let Statement::Label { name } | Statement::SceneLabel { name } = stmt {
                 current = Some(name.clone());
                 blocks.entry(name.clone()).or_default();
             } else if let Some(label) = &current {
@@ -1201,6 +1336,19 @@ fn collect_flow_targets(
 ) {
     for stmt in stmts {
         match stmt {
+            Statement::ScheduledConsumer { body, .. } => {
+                let body: Vec<_> = body.iter().collect();
+                collect_flow_targets(&body, targets, terminates);
+                if *terminates { return; }
+            }
+            Statement::StandardMacroDispatch { dispatch } => {
+                for branch in &dispatch.branches { collect_nested_flow_targets(&branch.body, targets); }
+            }
+            Statement::Sequence { branches } => {
+                for branch in branches { collect_nested_flow_targets(branch, targets); }
+            }
+            Statement::While { body, .. } | Statement::ForEach { body, .. }
+                | Statement::ForLoopWithBreak { body, .. } => collect_nested_flow_targets(body, targets),
             Statement::Jump { target } => {
                 targets.insert(target.clone());
                 *terminates = true;
@@ -1208,6 +1356,9 @@ fn collect_flow_targets(
             }
             Statement::Call { target } => {
                 targets.insert(target.clone());
+            }
+            Statement::Timer { action, .. } => {
+                if let Some((_,target))=timer_target(action) {targets.insert(target.to_string());}
             }
             Statement::Return => {
                 *terminates = true;
@@ -1239,8 +1390,22 @@ fn collect_flow_targets(
 fn collect_nested_flow_targets(stmts: &[Statement], targets: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
+            Statement::ScheduledConsumer { body, .. } => {
+                collect_nested_flow_targets(body, targets);
+            }
+            Statement::StandardMacroDispatch { dispatch } => {
+                for branch in &dispatch.branches { collect_nested_flow_targets(&branch.body, targets); }
+            }
+            Statement::Sequence { branches } => {
+                for branch in branches { collect_nested_flow_targets(branch, targets); }
+            }
+            Statement::While { body, .. } | Statement::ForEach { body, .. }
+                | Statement::ForLoopWithBreak { body, .. } => collect_nested_flow_targets(body, targets),
             Statement::Jump { target } | Statement::Call { target } => {
                 targets.insert(target.clone());
+            }
+            Statement::Timer { action, .. } => {
+                if let Some((_,target))=timer_target(action) {targets.insert(target.to_string());}
             }
             Statement::Choice { options } => {
                 for opt in options {
@@ -1264,11 +1429,17 @@ fn collect_nested_flow_targets(stmts: &[Statement], targets: &mut HashSet<String
         }
     }
 }
+fn timer_target(action:&str)->Option<(&'static str,&str)> {
+    let (kind,target)=action.trim().split_once(' ')?;
+    let kind=match kind {"jump"=>"timer jump","call"=>"timer call",_=>return None};
+    let target=target.trim();
+    (!target.is_empty()).then_some((kind,target))
+}
 
 fn detect_dead_code(stmts: &[Statement], source: &SourceFile, diagnostics: &mut Vec<Diagnostic>) {
     let mut terminated_by: Option<&'static str> = None;
     for stmt in stmts {
-        if matches!(stmt, Statement::Label { .. }) {
+        if matches!(stmt, Statement::Label { .. } | Statement::SceneLabel { .. }) {
             terminated_by = None;
         }
         if let Some(kind) = terminated_by {
@@ -1281,9 +1452,12 @@ fn detect_dead_code(stmts: &[Statement], source: &SourceFile, diagnostics: &mut 
             );
             continue;
         }
-        match stmt {
+        let executed = if let Statement::ScheduledConsumer { body, .. } = stmt {
+            body.first().unwrap_or(stmt)
+        } else { stmt };
+        match executed {
             Statement::Jump { .. } => terminated_by = Some("jump"),
-            Statement::Return => terminated_by = Some("return"),
+            Statement::Return | Statement::UnitReturn | Statement::FunctionReturn { .. } => terminated_by = Some("return"),
             _ => {}
         }
     }
@@ -2321,25 +2495,51 @@ fn collect_text_vars(text: &InterpolatedText, out: &mut Vec<(String, Location)>,
 }
 
 fn collect_interface_metadata(statement: &Statement, symbols: &mut Symbols, loc: &Location) {
-    fn key(value: &Expr, symbols: &mut Symbols) {
-        fn prefix(value: &Expr) -> String {
-            match value {
-                Expr::Str(text) => text.clone(),
-                Expr::BinOp {
-                    op: rvn_parser::BinOpKind::Add,
-                    left,
-                    ..
-                } => prefix(left),
-                _ => String::new(),
+    collect_interface_metadata_with_captures(statement, symbols, loc, &InterfaceCaptures::new());
+}
+
+// Resolve only a chain of captured references to its borrowed source shape.
+// Unresolved, malformed and cyclic chains remain unknown; arbitrary calls are
+// never executed, and producer subtrees are never cloned or expanded.
+fn interface_metadata_value<'a>(mut value: &'a Expr, captures: &InterfaceCaptures<'a>) -> Option<&'a Expr> {
+    for _ in 0..=captures.len() {
+        match value {
+            Expr::Call { name, args } if name == "__rvn_captured_v1" => {
+                let [Expr::Str(id)] = args.as_slice() else { return None; };
+                value = *captures.get(id.as_str())?;
+            }
+            _ => return Some(value),
+        }
+    }
+    None
+}
+
+fn collect_interface_metadata_with_captures<'a>(
+    statement: &'a Statement, symbols: &mut Symbols, loc: &Location, captures: &InterfaceCaptures<'a>,
+) {
+    fn key<'a>(value: &'a Expr, symbols: &mut Symbols, captures: &InterfaceCaptures<'a>) {
+        let Some(value) = interface_metadata_value(value, captures) else { symbols.locale_prefixes.insert(String::new()); return; };
+        fn prefix<'a>(mut value: &'a Expr, captures: &InterfaceCaptures<'a>) -> String {
+            let mut seen = HashSet::new();
+            loop {
+                let Some(resolved) = interface_metadata_value(value, captures) else { return String::new(); };
+                // Cycle guard over borrowed syntax only, never a source identity.
+                if !seen.insert(resolved as *const Expr) { return String::new(); }
+                match resolved {
+                    Expr::Str(text) => return text.clone(),
+                    Expr::BinOp { op: rvn_parser::BinOpKind::Add, left, .. } => value = left,
+                    _ => return String::new(),
+                }
             }
         }
         if let Expr::Str(text) = value {
             symbols.locale_keys.insert(text.clone());
         } else {
-            symbols.locale_prefixes.insert(prefix(value));
+            symbols.locale_prefixes.insert(prefix(value, captures));
         }
     }
-    fn properties(value: &Expr, symbols: &mut Symbols, loc: &Location) {
+    fn properties<'a>(value: &'a Expr, symbols: &mut Symbols, loc: &Location, captures: &InterfaceCaptures<'a>) {
+        let Some(value) = interface_metadata_value(value, captures) else { symbols.locale_prefixes.insert(String::new()); return; };
         let Expr::Call { name, args } = value else {
             symbols.locale_prefixes.insert(String::new());
             return;
@@ -2349,10 +2549,11 @@ fn collect_interface_metadata(statement: &Statement, symbols: &mut Symbols, loc:
             return;
         }
         for pair in args.chunks_exact(2) {
-            let Expr::Str(name) = &pair[0] else {
+            let Some(Expr::Str(name)) = interface_metadata_value(&pair[0], captures) else {
                 continue;
             };
-            match (name.as_str(), &pair[1]) {
+            let value = interface_metadata_value(&pair[1], captures).unwrap_or(&pair[1]);
+            match (name.as_str(), value) {
                 ("binding", Expr::Str(name)) => {
                     symbols.interface_bindings.push((name.clone(), loc.clone()))
                 }
@@ -2360,11 +2561,11 @@ fn collect_interface_metadata(statement: &Statement, symbols: &mut Symbols, loc:
                     symbols.interface_images.push((path.clone(), loc.clone()))
                 }
                 ("text_key" | "placeholder_key" | "accessible_label_key", value) => {
-                    key(value, symbols)
+                    key(value, symbols, captures)
                 }
                 ("option_keys", Expr::ListLit(values)) => {
                     for value in values {
-                        key(value, symbols);
+                        key(value, symbols, captures);
                     }
                 }
                 ("option_keys", _) => {
@@ -2379,39 +2580,40 @@ fn collect_interface_metadata(statement: &Statement, symbols: &mut Symbols, loc:
             }
         }
     }
-    fn walk(value: &Expr, symbols: &mut Symbols, loc: &Location) {
+    fn walk<'a>(value: &'a Expr, symbols: &mut Symbols, loc: &Location, captures: &InterfaceCaptures<'a>) {
         match value {
+            Expr::LibraryCall{call}=>for(_,value)in call.arguments(){walk(value,symbols,loc,captures);},
             Expr::Call { name, args } => {
                 if name == "component" && args.len() == 4 {
-                    properties(&args[2], symbols, loc);
+                    properties(&args[2], symbols, loc, captures);
                 }
                 if name == "canvas_image" {
-                    if let Some(Expr::Str(path)) = args.first() {
+                    if let Some(Expr::Str(path)) = args.first().and_then(|value| interface_metadata_value(value, captures)) {
                         symbols.interface_images.push((path.clone(), loc.clone()));
                     }
                 }
                 if name == "motion_frames" {
-                    if let Some(Expr::ListLit(images)) = args.first() {
+                    if let Some(Expr::ListLit(images)) = args.first().and_then(|value| interface_metadata_value(value, captures)) {
                         for image in images {
-                            if let Expr::Str(path) = image {
+                            if let Some(Expr::Str(path)) = interface_metadata_value(image, captures) {
                                 symbols.interface_images.push((path.clone(), loc.clone()));
                             }
                         }
                     }
                 }
                 if name == "image_layer" {
-                    if let Some(Expr::Str(path)) = args.get(1) {
+                    if let Some(Expr::Str(path)) = args.get(1).and_then(|value| interface_metadata_value(value, captures)) {
                         symbols.interface_images.push((path.clone(), loc.clone()));
                     }
                 }
                 if name == "image_layers" {
-                    if let Some(Expr::ListLit(images)) = args.get(1) {
-                        let marker = match args.first() {
+                    if let Some(Expr::ListLit(images)) = args.get(1).and_then(|value| interface_metadata_value(value, captures)) {
+                        let marker = match args.first().and_then(|value| interface_metadata_value(value, captures)) {
                             Some(Expr::Str(prefix)) => Some(format!("{prefix}__")),
                             _ => None,
                         };
                         for image in images {
-                            if let Expr::Str(path) = image {
+                            if let Some(Expr::Str(path)) = interface_metadata_value(image, captures) {
                                 if marker.as_ref().is_none_or(|marker| {
                                     path.rsplit('/')
                                         .next()
@@ -2424,14 +2626,15 @@ fn collect_interface_metadata(statement: &Statement, symbols: &mut Symbols, loc:
                     }
                 }
                 if name == "video_clip" {
-                    if let Some(Expr::Str(path)) = args.first() {
+                    if let Some(Expr::Str(path)) = args.first().and_then(|value| interface_metadata_value(value, captures)) {
                         symbols.video_files.push((path.clone(), loc.clone()));
                     }
-                    if let Some(Expr::Call { name, args }) = args.get(1) {
+                    if let Some(Expr::Call { name, args }) = args.get(1).and_then(|value| interface_metadata_value(value, captures)) {
                         if name == "dict" {
                             for pair in args.chunks_exact(2) {
-                                if let Expr::Str(property) = &pair[0] {
-                                    match (property.as_str(), &pair[1]) {
+                                if let Some(Expr::Str(property)) = interface_metadata_value(&pair[0], captures) {
+                                    let value = interface_metadata_value(&pair[1], captures).unwrap_or(&pair[1]);
+                                    match (property.as_str(), value) {
                                         ("poster" | "fallback", Expr::Str(path)) => symbols
                                             .interface_images
                                             .push((path.clone(), loc.clone())),
@@ -2440,12 +2643,12 @@ fn collect_interface_metadata(statement: &Statement, symbols: &mut Symbols, loc:
                                         }
                                         ("subtitles", Expr::ListLit(cues)) => {
                                             for cue in cues {
-                                                if let Expr::Call { name, args } = cue {
+                                                if let Some(Expr::Call { name, args }) = interface_metadata_value(cue, captures) {
                                                     if name == "dict" {
                                                         for field in args.chunks_exact(2) {
-                                                            if matches!(&field[0],Expr::Str(name) if name=="text")
+                                                            if matches!(interface_metadata_value(&field[0], captures),Some(Expr::Str(name)) if name=="text")
                                                             {
-                                                                key(&field[1], symbols);
+                                                                key(&field[1], symbols, captures);
                                                             }
                                                         }
                                                     }
@@ -2460,31 +2663,54 @@ fn collect_interface_metadata(statement: &Statement, symbols: &mut Symbols, loc:
                     }
                 }
                 for value in args {
-                    walk(value, symbols, loc);
+                    walk(value, symbols, loc, captures);
                 }
             }
             Expr::BinOp { left, right, .. } | Expr::And(left, right) | Expr::Or(left, right) => {
-                walk(left, symbols, loc);
-                walk(right, symbols, loc);
+                walk(left, symbols, loc, captures);
+                walk(right, symbols, loc, captures);
             }
             Expr::Index { target, index } => {
-                walk(target, symbols, loc);
-                walk(index, symbols, loc);
+                walk(target, symbols, loc, captures);
+                walk(index, symbols, loc, captures);
             }
-            Expr::Neg(value) | Expr::Not(value) => walk(value, symbols, loc),
+            Expr::Neg(value) | Expr::Not(value) => walk(value, symbols, loc, captures),
+            Expr::StandardMacroData { .. } => {} // A live cell identity has no nested expression/variable metadata.
             Expr::ListLit(values) => {
                 for value in values {
-                    walk(value, symbols, loc);
+                    walk(value, symbols, loc, captures);
                 }
             }
             _ => {}
         }
     }
     match statement {
+        Statement::ScheduledConsumer { steps, .. } => {
+            let mut active = InterfaceCaptures::new();
+            for step in steps {
+                let (rvn_parser::ConsumerStep::Capture { value, .. }
+                    | rvn_parser::ConsumerStep::InspectTextTable { value, .. }) = step;
+                walk(value, symbols, loc, &active);
+                if let rvn_parser::ConsumerStep::Capture { producer, value } = step { active.insert(producer.as_str(), value); }
+            }
+        }
+        Statement::StandardMacroDispatch { dispatch } => {
+            let mut active = InterfaceCaptures::new();
+            for step in dispatch.operand_steps() {
+                let (rvn_parser::ConsumerStep::Capture { value, .. }
+                    | rvn_parser::ConsumerStep::InspectTextTable { value, .. }) = step;
+                walk(value, symbols, loc, &active);
+                if let rvn_parser::ConsumerStep::Capture { producer, value } = step { active.insert(producer.as_str(), value); }
+            }
+            if let Some(value) = &dispatch.operand { walk(value, symbols, loc, &active); }
+        }
+        Statement::UnitCall { arguments, .. } => {
+            for value in arguments { walk(value, symbols, loc, captures); }
+        }
         Statement::FunctionReturn { value }
         | Statement::SetVar { value, .. }
-        | Statement::LocalVar { value, .. } => walk(value, symbols, loc),
-        Statement::MenuExecute { request } => walk(request, symbols, loc),
+        | Statement::LocalVar { value, .. } => walk(value, symbols, loc, captures),
+        Statement::MenuExecute { request } => walk(request, symbols, loc, captures),
         Statement::UiOpen {
             name,
             arguments,
@@ -2493,13 +2719,15 @@ fn collect_interface_metadata(statement: &Statement, symbols: &mut Symbols, loc:
                 ..
         } => {
             for value in [name, arguments, modal, layer] {
-                walk(value, symbols, loc);
+                walk(value, symbols, loc, captures);
             }
         }
-        Statement::UiClose { name } => walk(name, symbols, loc),
+        Statement::WidgetAddToViewport { object, z_order } => { walk(object, symbols, loc, captures); walk(z_order, symbols, loc, captures); }
+        Statement::WidgetRemoveFromParent { object } => walk(object, symbols, loc, captures),
+        Statement::UiClose { name } => walk(name, symbols, loc, captures),
         Statement::UiFocus { name, element } => {
-            walk(name, symbols, loc);
-            walk(element, symbols, loc);
+            walk(name, symbols, loc, captures);
+            walk(element, symbols, loc, captures);
         }
         Statement::UiSetState {
             name,
@@ -2507,40 +2735,41 @@ fn collect_interface_metadata(statement: &Statement, symbols: &mut Symbols, loc:
             state,
         } => {
             for value in [name, element, state] {
-                walk(value, symbols, loc);
+                walk(value, symbols, loc, captures);
             }
         }
         Statement::MotionPlay { target, definition } => {
-            walk(target, symbols, loc);
-            walk(definition, symbols, loc);
+            walk(target, symbols, loc, captures);
+            walk(definition, symbols, loc, captures);
         }
         Statement::CharacterCompose {
             character,
             definition,
         } => {
-            walk(character, symbols, loc);
-            walk(definition, symbols, loc);
+            walk(character, symbols, loc, captures);
+            walk(definition, symbols, loc, captures);
         }
         Statement::CharacterAttributes {
             character,
             attributes,
         } => {
-            walk(character, symbols, loc);
-            walk(attributes, symbols, loc);
+            walk(character, symbols, loc, captures);
+            walk(attributes, symbols, loc, captures);
         }
         Statement::MotionStop { target } | Statement::MotionWait { target } => {
-            walk(target, symbols, loc)
+            walk(target, symbols, loc, captures)
         }
         Statement::VideoPlay { name, definition } => {
-            walk(name, symbols, loc);
-            walk(definition, symbols, loc);
+            walk(name, symbols, loc, captures);
+            walk(definition, symbols, loc, captures);
         }
-        Statement::AccessibilityConfigure { settings } => walk(settings, symbols, loc),
-        Statement::AccessibilitySpeak { text } => walk(text, symbols, loc),
+        Statement::AccessibilityConfigure { settings } => walk(settings, symbols, loc, captures),
+        Statement::AccessibilitySpeak { text } => walk(text, symbols, loc, captures),
         Statement::If { condition, .. } | Statement::While { condition, .. } => {
-            walk(condition, symbols, loc)
+            walk(condition, symbols, loc, captures)
         }
-        Statement::ForEach { collection, .. } => walk(collection, symbols, loc),
+        Statement::ForLoopWithBreak{first,last,..}=>{walk(first,symbols,loc,captures);walk(last,symbols,loc,captures);},
+        Statement::ForEach { collection, .. } => walk(collection, symbols, loc, captures),
         _ => {}
     }
 }
@@ -2553,13 +2782,15 @@ fn validate_text_tags(text: &str, loc: &Location, diagnostics: &mut Vec<Diagnost
 
 fn collect_expr_vars(expr: &Expr, out: &mut Vec<(String, Location)>, loc: &Location) {
     match expr {
+        Expr::LibraryCall{call}=>for(_,value)in call.arguments(){collect_expr_vars(value,out,loc);},
         Expr::Var(name) => out.push((name.clone(), loc.clone())),
         Expr::BinOp { left, right, .. } | Expr::And(left, right) | Expr::Or(left, right) => {
             collect_expr_vars(left, out, loc);
             collect_expr_vars(right, out, loc);
         }
         Expr::Neg(inner) | Expr::Not(inner) => collect_expr_vars(inner, out, loc),
-        Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Str(_) => {}
+        Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Str(_)
+            | Expr::StandardMacroData { .. } => {}
         Expr::Call { args, .. } => {
             for arg in args {
                 collect_expr_vars(arg, out, loc);
@@ -2589,6 +2820,14 @@ fn text_to_locale_key(text: &InterpolatedText) -> String {
 
 fn expr_to_display(expr: &Expr) -> String {
     match expr {
+        Expr::LibraryCall{call}=>format!("functions.value_v1({:?}, {:?}, {{{}}})",call.reference().library.as_str(),call.reference().graph_id.to_string(),call.arguments().iter().map(|(id,value)|format!("{:?}:{}",id.as_str(),expr_to_display(value))).collect::<Vec<_>>().join(",")),
+        Expr::StandardMacroData { site, output, .. } => {
+            use rvn_parser::scheduled_source::standard_macro_contract::DataOutput;
+            let method = match output { DataOutput::Counter => "flow.macro_counter_v1", DataOutput::IsA => "flow.macro_is_a_v1" };
+            // Site's canonical source identifiers are bounded ASCII. Rust's
+            // quoted string spelling preserves those exact parser strings.
+            format!("{method}({:?}, {:?})", site.scope_source(), site.node_source())
+        }
         Expr::Int(n) => n.to_string(),
         Expr::Float(f) => f.to_string(),
         Expr::Bool(b) => b.to_string(),
@@ -2618,17 +2857,34 @@ fn expr_to_display(expr: &Expr) -> String {
     }
 }
 
+fn definition_offset(source: &SourceFile, location: &Location) -> usize {
+    let line_start=source.source.split_inclusive('\n')
+        .take(location.line.saturating_sub(1)).map(str::len).sum::<usize>();
+    let line=source.source[line_start..].split('\n').next().unwrap_or("");
+    let column_offset=line.char_indices().nth(location.column.saturating_sub(1))
+        .map(|(offset,_)|offset).unwrap_or(line.len());
+    line_start+column_offset
+}
+
 fn locate_stmt(source: &SourceFile, stmt: &Statement) -> Location {
+    locate_stmt_from(source,stmt,0)
+}
+
+fn locate_stmt_from(source: &SourceFile, stmt: &Statement, start: usize) -> Location {
     if let Statement::MenuExecute { request } = stmt {
         // Distinguish separate request handlers before falling back to the
         // command token, whose spelling alone can occur elsewhere in the file.
-        if let Some(mut location)=find_location(&source.path,&source.source,&format!("menu.execute({}",expr_to_display(request))) {
+        if let Some(mut location)=find_location_from(&source.path,&source.source,&format!("menu.execute({}",expr_to_display(request)),start) {
             location.span_len=Some("menu.execute(".len());
             return location;
         }
     }
     let needles: Vec<String> = match stmt {
-        Statement::Function { name, .. } => vec![format!("function {name}")],
+        Statement::ScheduledConsumer { version, .. } => vec![format!("flow.consume_v{version}(")],
+        Statement::Function { name, .. } | Statement::UnitFunction { name, .. } => vec![format!("function {name}")],
+        Statement::UnitCall { name, .. } => vec![format!("call {name}(")],
+        Statement::UnitReturn => vec!["return".into()],
+        Statement::StandardMacroDispatch { .. } => vec!["flow.macro_dispatch_v1(".into()],
         Statement::Screen { name, .. } => vec![format!("screen {name}")],
         Statement::Handler { name, .. } => vec![format!("handler {name}")],
         Statement::LocalVar { name, .. } => vec![format!("local {name}")],
@@ -2637,13 +2893,19 @@ fn locate_stmt(source: &SourceFile, stmt: &Statement) -> Location {
         Statement::MotionPlay { .. } => vec!["motion.play(".into()],
         Statement::MotionStop { .. } => vec!["motion.stop(".into()],
         Statement::MotionWait { .. } => vec!["motion.wait(".into()],
+        Statement::WidgetAddToViewport { .. } => vec!["widget.add_to_viewport(".into()],
+        Statement::WidgetRemoveFromParent { .. } => vec!["widget.remove_from_parent(".into()],
         Statement::UiClose { .. } => vec!["ui.close(".into()],
         Statement::UiFocus { .. } => vec!["ui.focus(".into()],
         Statement::UiSetState { .. } => vec!["ui.set_state(".into()],
         Statement::FunctionReturn { .. } => vec!["return ".into()],
+        Statement::Sequence{..}=>vec!["flow.sequence(".into()],
+        Statement::ForLoopWithBreak{..}=>vec!["flow.for_loop(".into()],
+        Statement::LoopBreak=>vec!["flow.break(".into()],
         Statement::While { .. } => vec!["while ".into()],
         Statement::ForEach { name, .. } => vec![format!("for {name}")],
         Statement::Label { name } => vec![format!("label {name}")],
+        Statement::SceneLabel { name } => vec![format!("scene label {name}")],
         Statement::Jump { target } => vec![format!("jump {target}")],
         Statement::Call { target } => vec![format!("call {target}")],
         Statement::SetVar { name, .. } => vec![format!("set {name}")],
@@ -2670,9 +2932,13 @@ fn locate_stmt(source: &SourceFile, stmt: &Statement) -> Location {
         Statement::SpriteStopAnimation { character_id } => {
             vec![format!("{character_id}.stop_animation")]
         }
+        Statement::TypewriterSpeed { .. } | Statement::TypewriterSpeedValue { .. }
+        | Statement::TypewriterSet { .. } | Statement::TypewriterSetValue { .. }
+        | Statement::TypewriterSpeed { .. } => vec!["typewriter".to_string()],
         Statement::MusicPlay { .. }
         | Statement::MusicStop { .. }
-        | Statement::MusicVolume { .. } => vec!["music.".to_string()],
+        | Statement::MusicVolume { .. }
+        | Statement::MusicVolumeValue { .. } => vec!["music.".to_string()],
         Statement::SfxPlay { .. }
         | Statement::SfxStop { .. }
         | Statement::VoicePlay { .. }
@@ -2680,7 +2946,7 @@ fn locate_stmt(source: &SourceFile, stmt: &Statement) -> Location {
         _ => vec![],
     };
     for needle in needles {
-        if let Some(loc) = find_location(&source.path, &source.source, &needle) {
+        if let Some(loc) = find_location_from(&source.path, &source.source, &needle, start) {
             return loc;
         }
     }
@@ -2694,7 +2960,11 @@ fn locate_stmt(source: &SourceFile, stmt: &Statement) -> Location {
 }
 
 fn find_location(path: &Path, source: &str, needle: &str) -> Option<Location> {
-    let offset = source.find(needle)?;
+    find_location_from(path,source,needle,0)
+}
+
+fn find_location_from(path: &Path, source: &str, needle: &str, start: usize) -> Option<Location> {
+    let offset = start.checked_add(source.get(start..)?.find(needle)?)?;
     let prefix = &source[..offset];
     let line = prefix.bytes().filter(|b| *b == b'\n').count() + 1;
     let column = prefix.rsplit('\n').next().unwrap_or(prefix).chars().count() + 1;
@@ -2785,6 +3055,179 @@ mod tests {
 
     fn kinds(report: &CheckReport) -> Vec<&'static str> {
         report.diagnostics.iter().map(|d| d.kind).collect()
+    }
+
+    #[test]
+    fn viewport1003_checker_collects_actual_object_and_order_variables_at_each_method_line() {
+        // Syntax/diagnostics only: no Widget source/class/runtime admission.
+        let root=fixture("scene label start\nlocal held=0\nwidget.add_to_viewport(held,missing_z)\nwidget.remove_from_parent(missing_object)\nreturn\n");
+        let report=check_project(root.to_str().unwrap(),CheckOptions::default());
+        let unknown:Vec<_>=report.diagnostics.iter().filter(|d|d.kind=="unassigned-variable").collect();
+        assert_eq!(unknown.len(),2,"{report:?}");
+        for(name,line)in [("missing_z",3),("missing_object",4)] {
+            let diagnostic=unknown.iter().find(|d|d.message.contains(name)).unwrap();
+            assert_eq!(diagnostic.line,Some(line));assert_eq!(diagnostic.column,Some(1));
+        }
+        assert!(unknown.iter().all(|d|!d.message.contains("'held'")&&!d.message.contains("'widget'")),"{report:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn viewport1003_checker_keeps_nested_interface_metadata_without_granting_object_admission() {
+        // Deliberately unadmitted object expression: syntax tooling must still
+        // report nested metadata; collecting it does not create a WidgetObject.
+        let source=SourceFile{path:"viewport-metadata.rvn".into(),source:"widget.remove_from_parent(component(\"probe\",\"text\",{\"binding\":\"needle\",\"image\":\"missing.png\"},[]))\n".into()};
+        let script=rvn_parser::parse(&source.source).unwrap();let loc=locate_stmt(&source,&script[0]);let mut symbols=Symbols::default();
+        collect_interface_metadata(&script[0],&mut symbols,&loc);
+        assert_eq!(symbols.interface_bindings.iter().map(|(name,_)|name.as_str()).collect::<Vec<_>>(),vec!["needle"]);
+        assert_eq!(symbols.interface_images.iter().map(|(path,_)|path.as_str()).collect::<Vec<_>>(),vec!["missing.png"]);
+        assert!(symbols.interface_bindings.iter().chain(&symbols.interface_images).all(|(_,loc)|loc.line==1&&loc.column==1));
+    }
+    #[test]
+    fn scheduled_consumer_visits_capture_inspection_and_body_variables_without_variable_ids() {
+        let root=fixture("scene label start\nlocal scene_value=1\nflow.consume_v2(\"scope\",\"volume\"){\ncapture \"value\"=scene_value+missing_capture\ninspect \"inspection\"=__rvn_invariant_text(missing_inspect)\nmusic.volume(__rvn_captured_v1(\"value\")+missing_body)\n}\n\"Ready\"\n");
+        let report=check_project(root.to_str().unwrap(),CheckOptions::default());
+        assert!(report.diagnostics.iter().filter(|d|d.severity==Severity::Error).all(|d|d.kind=="unassigned-variable"),"{report:?}");
+        let unknown:HashSet<_>=report.diagnostics.iter().filter(|d|d.kind=="unassigned-variable").map(|d|d.message.clone()).collect();
+        for name in ["missing_capture","missing_inspect","missing_body"] {assert!(unknown.iter().any(|d|d.contains(name)),"{name}: {report:?}");}
+        assert_eq!(unknown.len(),3,"scope/producer IDs and the actual scene local must never become unknown variables: {report:?}");
+        let body=report.diagnostics.iter().find(|d|d.kind=="unassigned-variable"&&d.message.contains("missing_body")).unwrap();assert_eq!(body.line,Some(6));
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn scheduled_consumer_keeps_parameter_scope_and_analyzes_calls_inside_dependencies() {
+        let root=fixture("function scale(level){flow.consume_v1(\"fn\",\"return\"){capture \"sample\"=level+secret return __rvn_captured_v1(\"sample\")}}\nhandler on_event(event){flow.consume_v1(\"handler\",\"assignment\"){capture \"input\"=max(event) set result=__rvn_captured_v1(\"input\")}}\nscene label start\nlocal secret=1\nflow.consume_v2(\"story\",\"set\"){capture \"bad\"=abs(1,2) set actual=__rvn_captured_v1(\"bad\")}\n\"Ready\"\n");
+        let report=check_project(root.to_str().unwrap(),CheckOptions::default());
+        let unknown:Vec<_>=report.diagnostics.iter().filter(|d|d.kind=="unassigned-variable").collect();assert_eq!(unknown.len(),1,"{report:?}");assert!(unknown[0].message.contains("secret"),"{report:?}");assert_eq!(unknown[0].line,Some(1));
+        assert!(report.diagnostics.iter().any(|d|d.severity==Severity::Error&&d.message.contains("abs")),"invalid captured function arity must not be hidden: {report:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn speed0993_dynamic_integer_expression_reaches_actual_checker_scope_and_line() {
+        let root=fixture("scene label start\ntypewriter.speed(missing_speed+1)\n\"Ready\"\n");
+        let report=check_project(root.to_str().unwrap(),CheckOptions::default());let unknown:Vec<_>=report.diagnostics.iter().filter(|d|d.kind=="unassigned-variable").collect();assert_eq!(unknown.len(),1,"{report:?}");assert!(unknown[0].message.contains("missing_speed"));assert_eq!(unknown[0].line,Some(2));
+        fs::write(root.join("scripts/main.rvn"),"scene label start\nlocal rate=20\ntypewriter.speed(rate+1)\ntypewriter.speed(0)\n\"Ready\"\n").unwrap();let valid=check_project(root.to_str().unwrap(),CheckOptions::default());assert!(!valid.diagnostics.iter().any(|d|d.severity==Severity::Error||d.kind=="unassigned-variable"),"{valid:?}");fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn typewriter0985_dynamic_boolean_expression_reaches_actual_checker_scope() {
+        let root=fixture("scene label start\ntypewriter=not missing_bool\n\"Ready\"\n");
+        let report=check_project(root.to_str().unwrap(),CheckOptions::default());
+        let unknown:Vec<_>=report.diagnostics.iter().filter(|d|d.kind=="unassigned-variable").collect();
+        assert_eq!(unknown.len(),1,"{report:?}");assert!(unknown[0].message.contains("missing_bool"));assert_eq!(unknown[0].line,Some(2));
+        fs::write(root.join("scripts/main.rvn"),"scene label start\nlocal enabled=false\ntypewriter=not enabled\ntypewriter=true\n\"Ready\"\n").unwrap();
+        let valid=check_project(root.to_str().unwrap(),CheckOptions::default());
+        assert!(!valid.diagnostics.iter().any(|d|d.severity==Severity::Error||d.kind=="unassigned-variable"),"{valid:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn dynamic_music_volume_visits_its_expression_and_keeps_historical_literals() {
+        let root=fixture("scene label start\nmusic.volume(missing_volume+0.1)\n\"Ready\"\n");let report=check_project(root.to_str().unwrap(),CheckOptions::default());
+        let unknown:Vec<_>=report.diagnostics.iter().filter(|d|d.kind=="unassigned-variable").collect();assert_eq!(unknown.len(),1,"{report:?}");assert!(unknown[0].message.contains("missing_volume"));assert_eq!(unknown[0].line,Some(2));
+        fs::write(root.join("scripts/main.rvn"),"scene label start\nlocal level=0.2\nmusic.volume(level+0.1)\nmusic.volume(0.3)\nmusic.volume(\"0.4\")\n\"Ready\"\n").unwrap();let valid=check_project(root.to_str().unwrap(),CheckOptions::default());assert!(!valid.diagnostics.iter().any(|d|d.severity==Severity::Error||d.kind=="unassigned-variable"),"{valid:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn scheduled_source_checker_reuses_frozen_declared_pin_contract_across_imports() {
+        let root=fixture("use \"producer.rvn\"\nscene label start\n\"Ready\"\n");
+        let source="function probe(){flow.consume_v1(\"g9/n1:function_entry|exec=11@0\",\"n2:function_return|exec=12@0,result=13@0\"){capture \"n3:random|a=14@0,b=15@0,result=16@0\"=random(1,9) return __rvn_captured_v1(\"n3:random|a=14@0,b=15@0,result=16@0\")}}\n";
+        fs::write(root.join("scripts/producer.rvn"),source).unwrap();let valid=check_project(root.to_str().unwrap(),CheckOptions::default());assert!(!valid.diagnostics.iter().any(|d|d.severity==Severity::Error),"{valid:?}");
+        fs::write(root.join("scripts/producer.rvn"),source.replace("result=16@0","result=15@0")).unwrap();let invalid=check_project(root.to_str().unwrap(),CheckOptions::default());assert!(invalid.diagnostics.iter().any(|d|d.kind=="scheduled-source"&&d.severity==Severity::Error),"colliding real declared pins must use the canonical source validator: {invalid:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+
+    #[test]
+    fn scheduled_control_body_keeps_real_label_edges_and_termination() {
+        let root=fixture("scene label start\nflow.consume_v2(\"story\",\"jump\"){jump done}\n\"Dead\"\nscene label skipped\n\"Skipped\"\nscene label done\n\"Done\"\n");let report=check_project(root.to_str().unwrap(),CheckOptions::default());
+        assert!(!report.diagnostics.iter().any(|d|d.severity==Severity::Error),"{report:?}");
+        let unreachable:Vec<_>=report.diagnostics.iter().filter(|d|d.kind=="unreachable-label").collect();assert_eq!(unreachable.len(),1,"{report:?}");assert!(unreachable[0].message.contains("'skipped'"),"{report:?}");assert!(report.diagnostics.iter().any(|d|d.kind=="dead-code"&&d.message.contains("jump")),"{report:?}");
+        fs::write(root.join("scripts/main.rvn"),"scene label start\nflow.consume_v2(\"story\",\"conditional\"){if true {flow.consume_v2(\"story\",\"nested\"){jump done}}}\nscene label done\n\"Done\"\n").unwrap();let nested=check_project(root.to_str().unwrap(),CheckOptions::default());assert!(!nested.diagnostics.iter().any(|d|d.severity==Severity::Error||d.kind=="unreachable-label"||d.kind=="unreferenced-label"),"{nested:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn explicit_scene_entries_are_start_targets_but_locals_do_not_assign_other_scenes_or_functions() {
+        let root=fixture("function read(){return scene_only}\nscene label start\nlocal scene_only=2\n\"[scene_only]\"\njump next\nscene label next\n\"[scene_only]\"\n");
+        let report=check_project(root.to_str().unwrap(),CheckOptions::default());
+        assert!(!kinds(&report).contains(&"missing-start-label"),"{report:?}");
+        assert!(!kinds(&report).contains(&"unknown-label-target"),"{report:?}");
+        let uses:Vec<_>=report.diagnostics.iter().filter(|diagnostic|diagnostic.kind=="unassigned-variable" && diagnostic.message.contains("scene_only")).collect();
+        assert_eq!(uses.len(),2,"{report:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn resolved_import_context_accepts_local_fragments_only_in_an_explicit_scene_program() {
+        let root=fixture("scene label start\nuse \"fragment.rvn\"\n\"[score]\"\n");
+        fs::write(root.join("scripts/fragment.rvn"),"local score=2\n").unwrap();
+        let report=check_project(root.to_str().unwrap(),CheckOptions::default());
+        assert!(!report.diagnostics.iter().any(|diagnostic|diagnostic.severity==Severity::Error),"{report:?}");
+        assert!(!kinds(&report).contains(&"unassigned-variable"),"{report:?}");
+        fs::write(root.join("scripts/main.rvn"),"label start\nuse \"fragment.rvn\"\n\"[score]\"\n").unwrap();
+        let legacy=check_project(root.to_str().unwrap(),CheckOptions::default());
+        assert!(legacy.diagnostics.iter().any(|diagnostic|diagnostic.severity==Severity::Error),"{legacy:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn foreach_item_stays_lexical_and_does_not_supply_another_scene_global() {
+        let root=fixture("scene label start\nlocal item=0\nfor item in [1,2]{\"[item]\"}\njump next\nscene label next\n\"[item]\"\n");
+        let report=check_project(root.to_str().unwrap(),CheckOptions::default());
+        assert_eq!(report.diagnostics.iter().filter(|diagnostic|diagnostic.kind=="unassigned-variable" && diagnostic.message.contains("item")).count(),1,"{report:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn function_only_import_keeps_the_surrounding_label_control_flow() {
+        let root=fixture("scene label start\nuse \"functions.rvn\"\njump done\nscene label unreachable\n\"dead\"\nscene label done\n\"done\"\n");
+        fs::write(root.join("scripts/functions.rvn"),"function helper(){return 1}\n").unwrap();
+        let report=check_project(root.to_str().unwrap(),CheckOptions::default());
+        assert!(!report.diagnostics.iter().any(|diagnostic|diagnostic.severity==Severity::Error),"{report:?}");
+        let unreachable:Vec<_>=report.diagnostics.iter().filter(|diagnostic|diagnostic.kind=="unreachable-label").collect();
+        assert_eq!(unreachable.len(),1,"{report:?}");
+        assert!(unreachable[0].message.contains("'unreachable'"),"{report:?}");
+        fs::write(root.join("scripts/main.rvn"),"label start\nuse \"functions.rvn\"\nreturn\nlabel unreachable\n\"dead\"\n").unwrap();
+        let returned=check_project(root.to_str().unwrap(),CheckOptions::default());
+        assert!(kinds(&returned).contains(&"unreachable-label"),"{returned:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn outer_scene_locals_cannot_mask_lexical_global_reads_in_definitions() {
+        let source="scene label start\nlocal secret=1\nfunction probe(){return secret}\nscreen hud(){return component(\"root\",\"text\",{\"text\":secret},[])}\nhandler on_event(event){set result=secret}\n\"[secret]\"\n";
+        let root=fixture(source);
+        let anchors=|report:&CheckReport|report.diagnostics.iter()
+            .filter(|diagnostic|diagnostic.kind=="unassigned-variable" && diagnostic.message.contains("secret"))
+            .map(|diagnostic|(diagnostic.line,diagnostic.column,diagnostic.source_line.clone()))
+            .collect::<Vec<_>>();
+        let expected=|first_line:usize| -> Vec<(Option<usize>,Option<usize>,Option<String>)> {vec![
+            (Some(first_line),Some(18),Some("function probe(){return secret}".into())),
+            (Some(first_line+1),Some(14),Some("screen hud(){return component(\"root\",\"text\",{\"text\":secret},[])}".into())),
+            (Some(first_line+2),Some(25),Some("handler on_event(event){set result=secret}".into())),
+        ]};
+        let report=check_project(root.to_str().unwrap(),CheckOptions::default());
+        assert!(report.failed,"Missing lexical globals must be errors: {report:?}");
+        assert!(report.diagnostics.iter().filter(|diagnostic|diagnostic.severity==Severity::Error).all(|diagnostic|diagnostic.kind=="unassigned-variable" && diagnostic.message.contains("secret")),"{report:?}");
+        assert_eq!(report.diagnostics.iter().filter(|diagnostic|diagnostic.kind=="unassigned-variable" && diagnostic.message.contains("secret")).count(),3,"{report:?}");
+        assert_eq!(anchors(&report),expected(3),"Each definition must own exactly one diagnostic, not three equal-name counts: {report:?}");
+        // Real project bytes change both the UTF-8 byte offset and line endings.
+        let unicode_source=format!("// préface 🙂\r\n{}",source.replace('\n',"\r\n"));
+        fs::write(root.join("scripts/main.rvn"),&unicode_source).unwrap();
+        let unicode=check_project(root.to_str().unwrap(),CheckOptions::default());
+        assert!(unicode.failed,"{unicode:?}");
+        assert_eq!(anchors(&unicode),expected(4),"Raw Unicode/CRLF provenance must stay exact: {unicode:?}");
+        fs::write(root.join("scripts/main.rvn"),format!("// préface 🙂\r\ninit {{set secret=2}}\r\n{}",source.replace('\n',"\r\n"))).unwrap();
+        let resolved=check_project(root.to_str().unwrap(),CheckOptions::default());
+        assert!(!resolved.diagnostics.iter().any(|diagnostic|diagnostic.severity==Severity::Error),"A real Game global must satisfy all three lexical reads: {resolved:?}");
+        assert!(!resolved.failed,"{resolved:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn scene_timer_targets_participate_in_label_validation_and_async_reachability() {
+        let root=fixture("scene label start\ntimer 1 => call next\njump done\nscene label next\n\"timer\"\nreturn\nlabel done\n\"waiting\"\n");
+        let report=check_project(root.to_str().unwrap(),CheckOptions::default());
+        assert!(!kinds(&report).contains(&"unknown-label-target") && !kinds(&report).contains(&"unreachable-label"),"{report:?}");
+        fs::write(root.join("scripts/main.rvn"),"scene label start\ntimer 1 => jump missing\n\"waiting\"\n").unwrap();
+        let invalid=check_project(root.to_str().unwrap(),CheckOptions::default());
+        assert!(invalid.diagnostics.iter().any(|diagnostic|diagnostic.kind=="unknown-label-target" && diagnostic.message.contains("missing")),"{invalid:?}");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -3271,4 +3714,131 @@ mod tests {
         assert!(errors.is_empty(), "unexpected errors: {errors:?}");
         let _ = fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn unit_cli1021_globals_parameters_locals_and_call_modes_follow_real_source() {
+        let source = "init {set count=0}\nfunction effect(value)->(){\nlocal scratch=value\nfor item in [1] {set count=count+item+scratch}\nset scratch=2\nset value=3\nset observed=secret\nreturn\nset dead=missing_dead\n}\nscene label start\nlocal secret=4\ncall effect(secret+missing_arg)\nreturn\n";
+        let root = fixture(source);
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(!report.diagnostics.iter().any(|d| matches!(d.kind, "parse" | "parse-eof" | "lex" | "script-load")), "{report:?}");
+        let unknown = report.diagnostics.iter().filter(|d| d.kind == "unassigned-variable").collect::<Vec<_>>();
+        assert_eq!(unknown.len(), 3, "{report:?}");
+        for name in ["secret", "missing_dead", "missing_arg"] {
+            assert!(unknown.iter().any(|d| d.message.contains(&format!("'{name}'"))), "{report:?}");
+        }
+        assert!(report.diagnostics.iter().any(|d| d.kind == "dead-code" && d.message.contains("return")), "{report:?}");
+        assert!(!kinds(&report).contains(&"unknown-label-target"), "Unit calls are not narrative label calls: {report:?}");
+        fs::write(root.join("scripts/main.rvn"), "function effect(value)->(){return}\nfunction scalar(value){return value}\nscene label start\ncall effect()\ncall scalar(1)\nreturn\n").unwrap();
+        let invalid = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(kinds(&invalid).contains(&"unit-call-arity"), "{invalid:?}");
+        assert!(kinds(&invalid).contains(&"unit-call-target"), "{invalid:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    // Genuine Graph->source fixture. Catalogue/Graph APIs allocate every source
+    // identity; no Site literal, Widget owner, cell, PC or runtime grant is made.
+    fn actual_connected_macro_cli_source(expression: &str, value: &str) -> (String, rvn_parser::scheduled_source::standard_macro_contract::Site) {
+        use rvn_graph::{GraphKind, NodeKind as K, PropertyValue};
+        let raw = format!("init{{set sink=0}}\nhandler allowed(event){{set operand_probe={expression} set sink={value}}}\nscene label start\nreturn\n");
+        let mut graphs = rvn_graph::import_script(&rvn_parser::parse(&raw).unwrap()).unwrap();
+        let graph = graphs.iter_mut().find(|g| matches!(g.kind, GraphKind::Handler { .. })).unwrap();
+        let probe = graph.nodes.values().find(|n| n.kind == K::SetVariable
+            && n.properties.get("name") == Some(&PropertyValue::String("operand_probe".into()))).unwrap().id;
+        let input = graph.pin_by_key(probe, "value").unwrap().id;
+        let producer = graph.edges.values().find(|e| e.input == input).unwrap().output;
+        let exec_in = graph.pin_by_key(probe, "exec_in").unwrap().id;
+        let exec_out = graph.pin_by_key(probe, "exec_out").unwrap().id;
+        let previous = graph.edges.values().find(|e| e.input == exec_in).unwrap().output;
+        let next = graph.edges.values().find(|e| e.output == exec_out).unwrap().input;
+        graph.remove_node(probe).unwrap();
+        let node = graph.add_catalog_node(K::DoN, [300.0, 0.0]).unwrap();
+        graph.connect(previous, graph.pin_by_key(node, "exec_in").unwrap().id).unwrap();
+        graph.connect(graph.pin_by_key(node, "exit").unwrap().id, next).unwrap();
+        graph.connect(producer, graph.pin_by_key(node, "n").unwrap().id).unwrap();
+        graph.enable_native_frame_preparation().unwrap();
+        let compiled = rvn_graph::transpile_project(&graphs).unwrap();
+        assert!(compiled.source.contains("operand_v1 {"));
+        let mut pending = compiled.ast.iter().collect::<Vec<_>>();
+        let site = loop {
+            let statement = pending.pop().expect("genuine generated macro dispatch");
+            match statement {
+                Statement::StandardMacroDispatch { dispatch } => break dispatch.site.clone(),
+                Statement::Handler { body, .. } | Statement::ScheduledConsumer { body, .. } => pending.extend(body),
+                _ => {}
+            }
+        };
+        (compiled.source, site)
+    }
+
+    #[test]
+    fn macro_cli1021_deferred_and_nested_consumer_metadata_reach_existing_checks() {
+        let (source, _) = actual_connected_macro_cli_source(
+            r#"len(component("capture","image",{"image":"capture.png","text_key":"ui.capture"},[]))"#,
+            r#"component("branch","text",{"text_key":"ui.branch"},[])"#);
+        let root = fixture(&source);
+        write_locale(&root, "en.toml", "[strings]\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(!report.diagnostics.iter().any(|d| matches!(d.kind, "parse" | "parse-eof" | "lex" | "script-load")), "{report:?}");
+        assert!(report.diagnostics.iter().any(|d| d.kind == "missing-interface-image" && d.message.contains("capture.png")), "{report:?}");
+        for name in ["ui.capture", "ui.branch"] {
+            assert!(report.diagnostics.iter().any(|d| d.kind == "missing-locale-key" && d.message.contains(name)), "{report:?}");
+        }
+        assert!(!kinds(&report).contains(&"script-load"), "{report:?}");
+        fs::write(root.join("assets/capture.png"), include_bytes!("../../examples/animations/assets/card-one.png")).unwrap();
+        write_locale(&root, "en.toml", "[strings]\n\"ui.capture\"=\"Capture\"\n\"ui.branch\"=\"Branch\"\n");
+        let complete = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(!complete.diagnostics.iter().any(|d| matches!(d.kind, "missing-interface-image" | "missing-locale-key" | "unused-locale-key")), "{complete:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn macro_cli1021_live_data_is_not_a_variable_and_uses_canonical_source_display() {
+        let (_, site) = actual_connected_macro_cli_source("random(1,1)", "1");
+        let source = format!("set sample=flow.macro_counter_v1({:?},{:?})", site.scope_source(), site.node_source());
+        let parsed = rvn_parser::parse(&source).unwrap();
+        let [Statement::SetVar { value, .. }] = parsed.as_slice() else { panic!("actual parsed live data"); };
+        assert!(matches!(value, Expr::StandardMacroData { .. }));
+        let location = Location { file: PathBuf::from("diagnostic.rvn"), line: 1, column: 1, source_line: Some(source), span_len: None };
+        let mut variables = Vec::new();
+        collect_expr_vars(value, &mut variables, &location);
+        assert!(variables.is_empty());
+        let displayed = expr_to_display(value);
+        assert!(displayed.starts_with("flow.macro_counter_v1("));
+        let reparsed = rvn_parser::parse(&format!("set sample={displayed}")).unwrap();
+        let [Statement::SetVar { value: restored, .. }] = reparsed.as_slice() else { panic!("display must remain an actual expression"); };
+        assert_eq!(restored, value);
+    }
+
+    #[test]
+    fn macro_cli1021_definition_resources_and_unit_argument_metadata_reach_existing_checks() {
+        let root = fixture("function accept(value)->(){return}\nhandler sound(event){video.play(\"probe\",video_clip(\"missing.webm\",{}))}\nscene label start\ncall accept(component(\"call\",\"image\",{\"image\":\"call.png\",\"text_key\":\"ui.call\"},[]))\nreturn\n");
+        write_locale(&root, "en.toml", "[strings]\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(!report.diagnostics.iter().any(|d| matches!(d.kind, "parse" | "parse-eof" | "lex" | "script-load")), "{report:?}");
+        assert!(report.diagnostics.iter().any(|d| d.kind == "invalid-video-resource" && d.message.contains("missing.webm")), "{report:?}");
+        assert!(report.diagnostics.iter().any(|d| d.kind == "missing-interface-image" && d.message.contains("call.png")), "{report:?}");
+        assert!(report.diagnostics.iter().any(|d| d.kind == "missing-locale-key" && d.message.contains("ui.call")), "{report:?}");
+        assert!(!kinds(&report).contains(&"script-load"), "{report:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn macro_cli1021_unrelated_captured_dictionary_is_not_component_metadata() {
+        // Real DoN producer DAG: these ordinary dictionary keys are not UI
+        // metadata merely because their names resemble component properties.
+        let (source, _) = actual_connected_macro_cli_source(
+            r#"len(dict("image","unrelated.png","text_key","ui.unrelated"))"#, "1");
+        let root = fixture(&source);
+        write_locale(&root, "en.toml", "[strings]\n");
+        let report = check_project(root.to_str().unwrap(), CheckOptions::default());
+        assert!(!report.diagnostics.iter().any(|d| matches!(d.kind, "parse" | "parse-eof" | "lex" | "script-load")), "{report:?}");
+        assert!(!report.diagnostics.iter().any(|d| d.kind == "missing-interface-image" && d.message.contains("unrelated.png")), "{report:?}");
+        assert!(!report.diagnostics.iter().any(|d| d.kind == "missing-locale-key" && d.message.contains("ui.unrelated")), "{report:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
 }
+
+#[cfg(test)]
+#[path="enum_cli_check_tests1025.rs"]
+mod enum_assets1025_tests;

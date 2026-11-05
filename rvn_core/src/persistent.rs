@@ -146,7 +146,8 @@ impl PersistentDataManager {
             return Ok(PersistentData::default());
         }
         let json = fs::read_to_string(&self.path)?;
-        Ok(serde_json::from_str(&json)?)
+        let data:PersistentData=serde_json::from_str(&json)?;
+        validate_widget_reference_context(&data)?;Ok(data)
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -162,11 +163,13 @@ impl PersistentDataManager {
         else {
             return Ok(PersistentData::default());
         };
-        Ok(serde_json::from_str(&json)?)
+        let data:PersistentData=serde_json::from_str(&json)?;
+        validate_widget_reference_context(&data)?;Ok(data)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     pub fn save(&self, data: &PersistentData) -> Result<(), PersistentDataError> {
+        validate_widget_reference_context(data)?;
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -189,6 +192,7 @@ impl PersistentDataManager {
 
     #[cfg(target_arch = "wasm32")]
     pub fn save(&self, data: &PersistentData) -> Result<(), PersistentDataError> {
+        validate_widget_reference_context(data)?;
         let json = serde_json::to_string_pretty(data)?;
         Self::local_storage()?
             .set_item(&self.storage_key(), &json)
@@ -276,4 +280,9 @@ mod tests {
         assert_eq!(data.seen_endings.len(), 1);
         let _ = fs::remove_dir_all(&dir);
     }
+}
+
+fn validate_widget_reference_context(data:&PersistentData)->Result<(),PersistentDataError>{
+ for value in data.script_vars.values(){crate::widget_reference_values_0974::reject_widget_values(value).map_err(|error|PersistentDataError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData,error)))?;}
+ Ok(())
 }

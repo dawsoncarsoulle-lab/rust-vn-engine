@@ -98,26 +98,26 @@ pub fn setup_ui(mut commands: Commands, theme: Res<Theme>, asset_server: Res<Ass
     ));
 }
 
-pub fn build_character_registry(engine: Res<VnEngine>, mut registry: ResMut<CharacterRegistry>) {
-    fn scan(stmts: &[rvn_parser::Statement], registry: &mut CharacterRegistry) {
-        for stmt in stmts {
-            match stmt {
-                rvn_parser::Statement::CharacterCreate { id, display_name } => {
-                    registry.0.insert(id.clone(), display_name.clone());
-                    info!(
-                        "[registry] personnage enregistré : {} → \"{}\"",
-                        id, display_name
-                    );
-                }
-                rvn_parser::Statement::Init { body } => scan(body, registry),
-                _ => {}
-            }
+/// Data-only projection of an already published Core state. Call only after
+/// the real Core/World publication fence has accepted the candidate.
+pub fn install_character_names(world: &mut World, state: &rvn_core::GameState) {
+    world.init_resource::<CharacterRegistry>();
+    world.resource_mut::<CharacterRegistry>().project_character_state(&state.layered);
+}
+
+pub fn build_character_registry(engine: Option<Res<VnEngine>>, mut registry: ResMut<CharacterRegistry>) {
+    if let Some(engine) = engine { registry.project_character_state(&engine.0.state.layered); }
+    else { registry.0.clear(); }
+}
+
+/// Historical Game driver: schedule before dialogue/history/accessibility.
+/// Startup has no VnEngine; its installer supplies the accepted batch instead.
+pub fn synchronize_character_registry(engine: Option<Res<VnEngine>>, mut registry: ResMut<CharacterRegistry>) {
+    if let Some(engine) = engine {
+        // Core can be ahead of an unaccepted World publication. Its candidate
+        // names cannot relabel the old display or history before installation.
+        if !engine.0.renderer.scene_batch_pending() && !engine.0.renderer.scene_frame_failed {
+            registry.project_character_state(&engine.0.state.layered);
         }
     }
-
-    scan(&engine.0.script, &mut registry);
-    info!(
-        "[registry] {} personnage(s) enregistré(s)",
-        registry.0.len()
-    );
 }

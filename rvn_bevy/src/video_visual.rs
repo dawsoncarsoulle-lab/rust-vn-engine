@@ -1,14 +1,78 @@
 //! Shared scene/UI placement and subtitles for both desktop and browser video.
 use bevy::prelude::*;
+#[cfg(test)]
 use rvn_ui::video::VideoClip;
+/// Browser messages carry this opaque host nonce, never a rounded JS integer
+/// or a player alias standing in for a Core resource capability.
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Default)]
+pub(crate) struct VideoProjections {
+    next: u64,
+    entries: std::collections::BTreeMap<String, VideoProjection>,
+}
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone)]
+struct VideoProjection {
+    nonce: u64,
+    resource_nonce: u64,
+    view: rvn_core::video::VideoView,
+}
+#[cfg(any(target_arch = "wasm32", test))]
+fn same_video_projection(a: &rvn_core::video::VideoView, b: &rvn_core::video::VideoView) -> bool {
+    let mut clip=a.track.clip.clone();
+    clip.volume=b.track.clip.volume;
+    a.id==b.id && a.epoch==b.epoch && a.resource_token==b.resource_token && clip==b.track.clip
+}
+#[cfg(any(target_arch = "wasm32", test))]
+fn same_video_resource(a: &rvn_core::video::VideoView, b: &rvn_core::video::VideoView) -> bool {
+    a.id==b.id && a.epoch==b.epoch && a.track.clip.source==b.track.clip.source && a.track.clip.mask==b.track.clip.mask
+        && match (&a.resource_token,&b.resource_token) {
+            (Some(a),Some(b))=>a.task.runtime_epoch==b.task.runtime_epoch && a.task.key==b.task.key && a.target==b.target,
+            (None,None)=>true,
+            _=>false,
+        }
+}
+#[cfg(any(target_arch = "wasm32", test))]
+impl VideoProjections {
+    pub(crate) fn reconcile(&mut self, views: &[rvn_core::video::VideoView]) -> Result<(), String> {
+        let mut candidate=self.clone();
+        candidate.entries.retain(|id,_|views.iter().any(|view|view.id==*id));
+        let mut seen=std::collections::BTreeSet::new();
+        for view in views {
+            if !seen.insert(&view.id) {return Err("Duplicate browser video projection".into());}
+            let reusable=candidate.entries.get(&view.id).is_some_and(|old|same_video_projection(&old.view,view));
+            if reusable {candidate.entries.get_mut(&view.id).unwrap().view=view.clone();}
+            else {
+                candidate.next=candidate.next.checked_add(1).ok_or("Browser video projection generation exhausted")?;
+                let resource_nonce=candidate.entries.get(&view.id).filter(|old|same_video_resource(&old.view,view)).map(|old|old.resource_nonce).unwrap_or(candidate.next);
+                candidate.entries.insert(view.id.clone(),VideoProjection{nonce:candidate.next,resource_nonce,view:view.clone()});
+            }
+        }
+        *self=candidate;
+        Ok(())
+    }
+    pub(crate) fn nonce(&self, view: &rvn_core::video::VideoView) -> Option<String> {
+        self.entries.get(&view.id).filter(|entry|same_video_projection(&entry.view,view)).map(|entry|entry.nonce.to_string())
+    }
+    pub(crate) fn accepts(&self, view: &rvn_core::video::VideoView, epoch: &str, nonce: &str) -> bool {
+        epoch==view.epoch.to_string() && self.nonce(view).as_deref()==Some(nonce)
+    }
+    pub(crate) fn resource_nonce(&self, view: &rvn_core::video::VideoView) -> Option<String> {
+        self.entries.get(&view.id).filter(|entry|same_video_projection(&entry.view,view)).map(|entry|entry.resource_nonce.to_string())
+    }
+}
 #[cfg(test)]
 #[path = "video_visual_tests.rs"]
-mod tests;
+pub(crate) mod tests;
 pub(crate) fn create(
     world: &mut World,
-    clip: &VideoClip,
+    view: &rvn_core::video::VideoView,
     image: Handle<Image>,
 ) -> Option<(Entity, Entity)> {
+    if !projection_visible(view) {
+        return None;
+    }
+    let clip = &view.track.clip;
     let texture = clip
         .poster
         .as_ref()
@@ -18,10 +82,11 @@ pub(crate) fn create(
     let entity = if let Some(target) = &clip.target {
         let (screen, element) = target.strip_prefix("ui:")?.split_once('/')?;
         let parent = world
-            .query::<(Entity, &crate::composed_motion::InterfaceTarget)>()
+            .query::<(Entity, &crate::composed_motion::InterfaceTarget, Option<&crate::composed_motion::InterfaceProjectionTarget>)>()
             .iter(world)
-            .find(|(_, target)| target.screen == screen && target.element == element)
-            .map(|(entity, _)| entity)?;
+            .find(|(_, target, exact)| crate::composed_motion::interface_target_matches(
+                target, *exact, screen, element, view.ui_projection.as_ref()))
+            .map(|(entity, _, _)| entity)?;
         let entity = world
             .spawn(ImageBundle {
                 style: Style {
@@ -127,6 +192,19 @@ pub(crate) fn create(
     };
     Some((entity, caption))
 }
+pub(crate) fn projection_visible(view: &rvn_core::video::VideoView) -> bool {
+    !view.ui_projection.as_ref().is_some_and(|binding|
+        binding.residence == rvn_core::ui_residency::ProjectionResidence::Parked)
+}
+/// Retire presentation only. Player, soundtrack, texture and authority remain
+/// owned by their original resource while its interface is suspended.
+pub(crate) fn retire_visual(world: &mut World, entity: &mut Option<Entity>, caption: &mut Option<Entity>) {
+    for entity in [entity.take(), caption.take()].into_iter().flatten() {
+        if let Some(entity) = world.get_entity_mut(entity) {
+            entity.despawn_recursive();
+        }
+    }
+}
 pub(crate) fn set_texture(world: &mut World, entity: Entity, texture: Handle<Image>) {
     if let Some(mut image) = world.get_mut::<UiImage>(entity) {
         image.texture = texture;
@@ -216,7 +294,8 @@ pub(crate) fn cinematic_input(
     } else if (keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::Enter))
         && engine.0.state.videos.tracks[&id].clip.skippable
     {
-        if engine.0.skip_video(&id).is_ok() {
+        let view=engine.0.video_views().ok().and_then(|views|views.into_iter().find(|view|view.id==id));
+        if view.as_ref().is_some_and(|view|matches!(engine.0.skip_video_from_view(view),Ok(true))) {
             for command in engine.0.renderer.take_pending() {
                 commands.send(command);
             }

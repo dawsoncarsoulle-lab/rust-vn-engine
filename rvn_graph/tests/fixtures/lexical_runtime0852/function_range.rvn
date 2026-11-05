@@ -1,0 +1,9 @@
+function supplier0852(){local draw=random(1,1) return [11,22,33]}
+function first0852(){local draw=random(1,1) return 0}
+function last0852(){local draw=random(1,1) return 2}
+init{set observed0852=0}
+function target0852(){local seen=0 flow.for_loop(i,first0852(),last0852()){set seen=i} return seen}
+scene label start
+set observed0852=target0852()
+"Ready0852"
+return

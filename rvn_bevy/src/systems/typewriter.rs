@@ -5,14 +5,49 @@ use crate::components::DialogueText;
 use crate::resources::{TypewriterConfig, TypewriterState};
 use crate::vn_command::VnCommand;
 
+// Story configuration remains saved; player preferences compose only at presentation.
+pub(crate) fn narrative_text_speed(authored: f32, settings: Option<&super::settings_menu::Settings>) -> f32 {
+    let enabled = settings.is_none_or(|settings| settings.typewriter);
+    if !enabled || authored <= 0.0 {
+        return 0.0;
+    }
+    let multiplier = settings.map(|settings| settings.text_speed).unwrap_or(1.0);
+    authored * multiplier
+}
+
 pub fn typewriter_config_system(
     mut vn_events: EventReader<VnCommand>,
     mut tw_config: ResMut<TypewriterConfig>,
+    mut engine: Option<ResMut<crate::resources::VnEngine>>,
+    reveal_binding: Option<Res<crate::display_reveal::DialogueRevealBinding>>,
+    settings: Option<Res<super::settings_menu::Settings>>,
+    mut tw_state: Option<ResMut<TypewriterState>>,
+    mut text_query: Query<&mut Text, With<DialogueText>>,
 ) {
     for cmd in vn_events.read() {
         if let VnCommand::SetTypewriterConfig { speed_cps } = cmd {
-            tw_config.enabled = *speed_cps > 0.0;
-            tw_config.chars_per_sec = *speed_cps;
+            let speed = if engine.as_ref().is_some_and(|engine| engine.0.state.scene_execution.is_some()) {
+                narrative_text_speed(*speed_cps, settings.as_deref())
+            } else {
+                *speed_cps
+            };
+            tw_config.enabled = speed > 0.0;
+            tw_config.chars_per_sec = speed;
+            // Only an active modern reveal consumes this presentation change.
+            // Inactive cursors and the historical legacy command policy remain intact.
+            if engine.as_ref().is_some_and(|engine| engine.0.state.scene_execution.is_some()) {
+                if let Some(typing) = tw_state.as_deref_mut().filter(|typing| typing.typing) {
+                    if speed > 0.0 {
+                        typing.chars_per_sec = speed;
+                    } else {
+                        typing.skip();
+                        if let Ok(mut text) = text_query.get_single_mut() {
+                            apply_visible_sections(&mut text, typing);
+                        }
+                    }
+                    crate::display_reveal::feedback(engine.as_deref_mut(),typing,reveal_binding.as_deref());
+                }
+            }
         }
     }
 }
@@ -22,6 +57,8 @@ pub fn typewriter_system(
     mut tw_state: ResMut<TypewriterState>,
     mut text_query: Query<&mut Text, With<DialogueText>>,
     accessibility: Res<crate::accessibility::Accessibility>,
+    mut engine: Option<ResMut<crate::resources::VnEngine>>,
+    binding: Option<Res<crate::display_reveal::DialogueRevealBinding>>,
 ) {
     if accessibility.blocked {
         return;
@@ -35,6 +72,7 @@ pub fn typewriter_system(
         if let Ok(mut text) = text_query.get_single_mut() {
             apply_visible_sections(&mut text, &tw_state);
         }
+        crate::display_reveal::feedback(engine.as_deref_mut(),&tw_state,binding.as_deref());
         return;
     }
     if !tw_state.typing {
@@ -82,6 +120,7 @@ pub fn typewriter_system(
     if tw_state.visible_chars >= total_chars {
         tw_state.typing = false;
     }
+    crate::display_reveal::feedback(engine.as_deref_mut(),&tw_state,binding.as_deref());
 }
 
 pub fn apply_visible_sections(text: &mut Text, tw_state: &TypewriterState) {

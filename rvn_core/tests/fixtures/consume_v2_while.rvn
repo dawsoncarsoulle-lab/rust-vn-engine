@@ -1,0 +1,21 @@
+function condition(index) {local draw = random(1, 1) return index < 3}
+function caller() {
+    local index = 0
+    flow.consume_v2("function:caller", "loop") {
+        capture "condition" = condition(index)
+        while __rvn_captured_v1("condition") {
+            flow.consume_v2("function:caller", "increment") {local index = index + 1}
+        }
+    }
+    return index
+}
+scene label start
+set index = 0
+flow.consume_v2("scene:start", "loop") {
+    capture "condition" = condition(index)
+    while __rvn_captured_v1("condition") {
+        flow.consume_v2("scene:start", "increment") {set index = index + 1}
+    }
+}
+set result = caller()
+"done"

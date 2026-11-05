@@ -1,0 +1,4 @@
+function producer(){local draw=random(1,1) return __rvn_localizable_text("Hello","asset:caption","VN","title","")}
+scene label start
+flow.consume_v2("scene:start","work"){capture "p"=producer() set result=text_to_string(__rvn_captured_v1("p"))}
+"done"

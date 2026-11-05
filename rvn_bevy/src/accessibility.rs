@@ -10,6 +10,9 @@ use crate::{
 use bevy::prelude::*;
 use rvn_ui::accessibility::{AccessibilitySettings, SpeechRequest};
 
+#[path="widget_retirement_speech_0975.rs"]
+pub(crate) mod retired_speech_0975;
+
 #[derive(Resource, Default)]
 pub(crate) struct Accessibility {
     pub settings: AccessibilitySettings,
@@ -32,7 +35,7 @@ pub(crate) struct Accessibility {
 #[derive(Component)]
 struct PanelRoot;
 #[derive(Component)]
-struct PanelButton(usize);
+pub(crate) struct PanelButton(usize);
 #[derive(Component)]
 struct PanelText;
 #[derive(Component)]
@@ -48,6 +51,14 @@ struct OriginalText(Vec<(f32, Color, f32, Color)>);
 #[derive(Component)]
 struct OriginalBackground(Color, Color);
 impl Accessibility {
+    // A completed choice backdrop has no live reveal authority. Keep only the
+    // repeat cache aligned with its approved visible line; do not auto-speak it.
+    pub(crate) fn retain_dialogue_backdrop(&mut self, name: &str, text: &str) {
+        self.dialogue_scroll = 0.0;
+        self.last_dialogue = if name.is_empty() { text.to_owned() }
+            else { format!("{name}. {text}") };
+    }
+
     #[cfg(target_arch = "wasm32")]
     pub(super) fn browser_error(&mut self, problem: String) {
         self.status = problem;
@@ -62,7 +73,7 @@ impl Plugin for AccessibilityPlugin {
         app.init_resource::<Accessibility>()
             .add_event::<bevy::a11y::ActionRequest>()
             .insert_non_send_resource(Speech::default())
-            .add_systems(First, reset_text)
+            .add_systems(First, reset_text.run_if(crate::runtime_restart::presentation_available).after(crate::runtime_restart::activate).before(crate::debugger_startup::driver::drain_runtime))
             .add_systems(
                 PreUpdate,
                 keyboard
@@ -79,7 +90,7 @@ impl Plugin for AccessibilityPlugin {
             .add_systems(
                 Update,
                 (
-                    receive,
+                    receive.run_if(crate::runtime_restart::presentation_available).after(crate::systems::dialogue_system),
                     buttons.after(receive),
                     voice_status.after(receive),
                     panel.after(buttons).after(voice_status),
@@ -90,8 +101,8 @@ impl Plugin for AccessibilityPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    visuals.before(bevy::ui::widget::measure_text_system),
-                    dialogue_layout.before(bevy::ui::UiSystem::Layout),
+                    visuals.run_if(crate::runtime_restart::presentation_available).before(bevy::ui::widget::measure_text_system),
+                    dialogue_layout.run_if(crate::runtime_restart::presentation_available).before(bevy::ui::UiSystem::Layout),
                     panel_focus.before(bevy::ui::UiSystem::Layout),
                     panel_scroll.after(bevy::ui::UiSystem::Layout),
                 ),
@@ -303,6 +314,9 @@ fn receive(
     locale: Res<Settings>,
     characters: Res<crate::resources::CharacterRegistry>,
     time: Res<Time>,
+    engine: Option<Res<crate::resources::VnEngine>>,
+    presented: Option<Res<Events<crate::display_reveal::PresentedDialogue>>>,
+    mut presented_reader: Local<bevy::ecs::event::ManualEventReader<crate::display_reveal::PresentedDialogue>>,
 ) {
     initialize(&mut runtime, &persistent);
     if runtime.language != locale.language {
@@ -335,13 +349,14 @@ fn receive(
                     }
                 }
             }
+            VnCommand::RetiredWidgetSpeech(frozen) => frozen.deliver(&mut runtime,&speech),
             VnCommand::Speech(SpeechRequest::Speak(text)) => {
                 say(&mut runtime, &speech, text.clone())
             }
             VnCommand::Speech(SpeechRequest::Stop) => {
                 let _ = speech.request(&runtime.settings, SpeechRequest::Stop);
             }
-            VnCommand::ShowDialogue { character, text } => {
+            VnCommand::ShowDialogue { character, text } if !engine.as_ref().is_some_and(|engine|engine.0.state.scene_execution.is_some()) => {
                 runtime.dialogue_scroll = 0.0;
                 runtime.last_dialogue = character
                     .as_ref()
@@ -365,6 +380,15 @@ fn receive(
                     .join(". "),
             ),
             _ => {}
+        }
+    }
+    if let Some(presented)=presented {
+        for display in presented_reader.read(&presented) {
+            if !engine.as_ref().is_some_and(|engine|engine.0.accepts_display_reveal_source(&display.source)) {continue;}
+            runtime.dialogue_scroll=0.0;
+            runtime.last_dialogue=display.character.as_ref().map(|id|characters.display_name(id))
+                .filter(|name|!name.is_empty()).map(|name|format!("{name}. {}",display.text)).unwrap_or_else(||display.text.clone());
+            if runtime.settings.self_voicing {let text=runtime.last_dialogue.clone();say(&mut runtime,&speech,text);}
         }
     }
 }
@@ -591,9 +615,10 @@ fn assistive_panel(
     mut persistent: ResMut<PersistentDataResource>,
     speech: NonSend<Speech>,
     hierarchy: SemanticHierarchy,
+    presentation: crate::runtime_restart::InputAccess,
 ) {
     use bevy::a11y::accesskit::Action;
-    for request in requests.read() {
+    for (request,id) in requests.read_with_id() {
         let Ok(entity) = Entity::try_from_bits(request.0.target.0) else {
             continue;
         };
@@ -620,7 +645,7 @@ fn assistive_panel(
                 action(&mut runtime, panel.0, 1.0, &mut persistent, &speech);
                 runtime.blocked = true;
             }
-        } else if !runtime.blocked {
+        } else if !runtime.blocked && presentation.accepts::<bevy::a11y::ActionRequest>(id.id) {
             // Legacy menu buttons share Bevy's button semantics. They retain
             // their existing handlers, including confirmation and validation.
             if request.0.action == Action::Focus {
@@ -1351,6 +1376,53 @@ fn panel(
             });
         });
 }
+/// Install typed Widget text and its authored baseline atomically. The same
+/// authority applies subsequent accessibility changes; the legacy deferred
+/// first-observation route remains unchanged.
+pub(crate) fn initialize_widget_text(mut bundle: TextBundle, settings: &AccessibilitySettings) -> impl Bundle {
+    let mut original = OriginalText(bundle.text.sections.iter().map(|section| (
+        section.style.font_size, section.style.color,
+        section.style.font_size, section.style.color,
+    )).collect());
+    apply_text_visuals(&mut bundle.text, &mut original, settings);
+    (bundle, original)
+}
+fn apply_text_visuals(text: &mut Text, original: &mut OriginalText, settings: &AccessibilitySettings) {
+    while original.0.len() < text.sections.len() {
+        let section = &text.sections[original.0.len()];
+        original.0.push((
+            section.style.font_size,
+            section.style.color,
+            section.style.font_size,
+            section.style.color,
+        ));
+    }
+    for (section, (size, color, last_size, last_color)) in
+        text.sections.iter_mut().zip(&mut original.0)
+    {
+        if section.style.font_size != *last_size {
+            *size = section.style.font_size;
+        }
+        if section.style.color != *last_color {
+            *color = section.style.color;
+        }
+        let next_size = *size * settings.text_scale;
+        let next_color = if settings.high_contrast {
+            Color::WHITE
+        } else {
+            *color
+        };
+        if section.style.font_size != next_size {
+            section.style.font_size = next_size;
+        }
+        if section.style.color != next_color {
+            section.style.color = next_color;
+        }
+        *last_size = next_size;
+        *last_color = next_color;
+    }
+}
+
 fn visuals(
     mut commands: Commands,
     runtime: Res<Accessibility>,
@@ -1381,39 +1453,7 @@ fn visuals(
             ));
             continue;
         };
-        while original.0.len() < text.sections.len() {
-            let section = &text.sections[original.0.len()];
-            original.0.push((
-                section.style.font_size,
-                section.style.color,
-                section.style.font_size,
-                section.style.color,
-            ));
-        }
-        for (section, (size, color, last_size, last_color)) in
-            text.sections.iter_mut().zip(&mut original.0)
-        {
-            if section.style.font_size != *last_size {
-                *size = section.style.font_size;
-            }
-            if section.style.color != *last_color {
-                *color = section.style.color;
-            }
-            let next_size = *size * runtime.settings.text_scale;
-            let next_color = if runtime.settings.high_contrast {
-                Color::WHITE
-            } else {
-                *color
-            };
-            if section.style.font_size != next_size {
-                section.style.font_size = next_size;
-            }
-            if section.style.color != next_color {
-                section.style.color = next_color;
-            }
-            *last_size = next_size;
-            *last_color = next_color;
-        }
+        apply_text_visuals(&mut text, &mut original, &runtime.settings);
     }
     for (entity, mut background, original) in &mut backgrounds {
         let Some(mut original) = original else {
@@ -1439,16 +1479,7 @@ fn visuals(
 // Typewriter redraws copy the preceding style. Restore its authored font
 // before it creates new rich-text sections, rather than multiplying an already
 // enlarged font once again each time a new segment appears.
-fn reset_text(
-    mut texts: Query<(&mut Text, &OriginalText)>,
-    typewriter: Option<Res<crate::resources::TypewriterState>>,
-) {
-    // Settled dialogue does not need a style reset every frame. Avoid marking
-    // text/layout dirty while the player is simply reading enlarged text.
-    if typewriter.is_some_and(|state| !state.typing) {
-        return;
-    }
-    for (mut text, original) in &mut texts {
+fn restore_text_style(text:&mut Text,original:&OriginalText){
         for (section, (size, color, last_size, last_color)) in
             text.sections.iter_mut().zip(&original.0)
         {
@@ -1459,7 +1490,16 @@ fn reset_text(
                 section.style.color = *color;
             }
         }
-    }
+}
+fn text_reset_allowed(state:Option<&crate::resources::TypewriterState>)->bool{!state.is_some_and(|state|!state.typing)}
+fn reset_text(mut texts:Query<(&mut Text,&OriginalText)>,typewriter:Option<Res<crate::resources::TypewriterState>>){
+    if !text_reset_allowed(typewriter.as_deref()){return;}
+    for(mut text,original)in &mut texts{restore_text_style(&mut text,original);}
+}
+pub(crate) fn reset_for_owner_replacement(world:&mut World){
+    if !text_reset_allowed(world.get_resource::<crate::resources::TypewriterState>()){return;}
+    let mut texts=world.query::<(&mut Text,&OriginalText)>();
+    for(mut text,original)in texts.iter_mut(world){restore_text_style(&mut text,original);}
 }
 fn dialogue_layout(
     mut runtime: ResMut<Accessibility>,
@@ -1510,11 +1550,11 @@ pub(crate) fn install_qa(app: &mut App) {
     app.init_resource::<QaKeys>()
         .add_systems(
             PreUpdate,
-            qa_keys
+            qa_keys.in_set(crate::qa_playthrough::QaGameReady)
                 .after(bevy::input::InputSystem)
                 .before(AccessibilityInput),
         )
-        .add_systems(Last, qa_drive);
+        .add_systems(Last, qa_drive.in_set(crate::qa_playthrough::QaGameReady));
 }
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Resource, Default)]
@@ -2647,3 +2687,261 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod portable_reveal_accessibility_tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    static NEXT_FIXTURE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    fn fixture()->(App,std::path::PathBuf) {
+        let mut app=crate::display_reveal::tests::ready();
+        let directory=std::env::temp_dir().join(format!("rvn-reveal-access-{}-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),NEXT_FIXTURE.fetch_add(1,std::sync::atomic::Ordering::Relaxed)));
+        std::fs::create_dir(&directory).unwrap();
+        app.insert_resource(PersistentDataResource{manager:rvn_core::PersistentDataManager::new(&directory).unwrap(),data:Default::default()})
+            .insert_resource(Settings::default()).insert_non_send_resource(Speech::default());
+        app.world_mut().resource_mut::<Accessibility>().initialized=true;
+        (app,directory)
+    }
+    #[test]
+    fn reveal_accessibility_rejects_raw_modern_dialogue_and_announces_only_the_accepted_source() {
+        let (mut app,directory)=fixture();
+        app.world_mut().send_event(VnCommand::ShowDialogue{character:None,text:"Unscoped foreign utterance".into()});
+        app.world_mut().run_system_once(receive);
+        // The accepted presenter event came from the real dialogue consumer.
+        assert_eq!(app.world().resource::<Accessibility>().last_dialogue,"é🌟 longue");
+        assert!(!app.world().resource::<Accessibility>().last_dialogue.contains("foreign"));
+        assert!(!app.world().resource::<Accessibility>().settings.self_voicing);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn reveal_accessibility_rejects_old_producer_before_text_after_independent_engine_replacement() {
+        let (mut app,directory)=fixture();
+        let old=app.world().resource::<crate::resources::VnEngine>().0.display_reveal_source().unwrap();
+        let mut replacement=rvn_core::Engine::from_program(rvn_parser::parse_program("scene label P\n\"replacement\"\n").unwrap(),crate::bevy_renderer::BevyRenderer::new(),32).unwrap();
+        replacement.step_until_interaction().unwrap();app.world_mut().insert_resource(crate::resources::VnEngine(replacement));
+        app.world_mut().send_event(crate::display_reveal::PresentedDialogue{source:old,character:None,text:"x".repeat(rvn_core::display_reveal::MAX_REVEAL_TEXT_BYTES+1)});
+        app.world_mut().run_system_once(receive);assert!(app.world().resource::<Accessibility>().last_dialogue.is_empty());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+// Private future regressions, NOT INSTALLED / NOT TYPECHECKED / NOT RUN.
+// Exercise the actual accessibility receiver and Core restore/publication.
+// Self voicing stays disabled: this is cache proof, never audible proof.
+#[cfg(test)]
+mod retained_choice_accessibility_contracts {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use crate::resources::VnEngine;
+    struct Fixture { app: App, directory: std::path::PathBuf }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let directory = self.directory.canonicalize().unwrap();
+            assert_eq!(directory.parent(), Some(std::env::temp_dir().canonicalize().unwrap().as_path()));
+            assert!(directory.file_name().unwrap().to_string_lossy().starts_with("rvn-choice-accessibility-"));
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+    fn engine(source: &str) -> VnEngine {
+        let mut engine = rvn_core::Engine::from_program(rvn_parser::parse_program(source).unwrap(),
+            crate::bevy_renderer::BevyRenderer::new(), 32).unwrap();
+        engine.enter_label("P").unwrap(); engine.step_until_interaction().unwrap(); VnEngine(engine)
+    }
+    fn fixture(source: &str) -> Fixture {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let directory = std::env::temp_dir().join(format!("rvn-choice-accessibility-{}-{}-{serial}",
+            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let manager = rvn_core::PersistentDataManager::new(&directory).unwrap();
+        let mut app = crate::display_reveal::tests::ready();
+        app.insert_resource(VnEngine(engine(source).0))
+            .insert_resource(PersistentDataResource { manager, data: Default::default() })
+            .init_resource::<Settings>().insert_non_send_resource(Speech::default())
+            .add_systems(Update, receive.after(crate::systems::dialogue_system));
+        publish(&mut app);
+        assert!(!app.world().resource::<Accessibility>().settings.self_voicing);
+        Fixture { app, directory }
+    }
+    fn publish(app: &mut App) {
+        app.world_mut().run_system_once(crate::scene_publication::consume);
+        app.update();
+    }
+    fn state(app: &App) -> serde_json::Value {
+        serde_json::to_value(&app.world().resource::<VnEngine>().0.state).unwrap()
+    }
+    #[test]
+    fn retained_choice_accessibility_restore_replaces_the_foreign_child_cache_without_a_reveal_source() {
+        let source = "scene label P\nlocal probe=10\n\"parent [probe]\"\nchoice {\"A\"=>{set route=1} \"B\"=>{set route=2}}\n\"after\"\nscene label C\nlocal probe=200\n\"child [probe]\"\nreturn\n";
+        let mut f = fixture(source);
+        assert_eq!(f.app.world().resource::<Accessibility>().last_dialogue, "parent 10");
+        f.app.world_mut().resource_mut::<crate::resources::TypewriterState>().skip();
+        crate::display_reveal::flush_world(f.app.world_mut()).unwrap();
+        {
+            let mut game = f.app.world_mut().resource_mut::<VnEngine>();
+            game.0.advance_dialogue().unwrap(); game.0.step_until_interaction().unwrap();
+            game.0.publish_current_scene_interaction().unwrap();
+        }
+        publish(&mut f.app);
+        let saved = rvn_core::save::SaveData::try_from_state(&f.app.world().resource::<VnEngine>().0.state,
+            1, "choice".into(), "main.rvn".into()).unwrap();
+        {
+            let mut game = f.app.world_mut().resource_mut::<VnEngine>();
+            game.0.execute_timer_action("call C").unwrap(); game.0.step_until_interaction().unwrap();
+        }
+        publish(&mut f.app);
+        assert_eq!(f.app.world().resource::<Accessibility>().last_dialogue, "child 200");
+        f.app.world_mut().resource_mut::<VnEngine>().0.load_data(saved).unwrap();
+        let before = state(&f.app);
+        publish(&mut f.app);
+        assert_eq!(f.app.world().resource::<Accessibility>().last_dialogue, "parent 10",
+            "repeat cache must match the retained parent line, not the previously displayed child");
+        assert_eq!(state(&f.app), before);
+        assert!(matches!(f.app.world().resource::<VnEngine>().0.displayed_interaction().unwrap(),
+            Some(rvn_core::Interaction::Choice { .. })));
+        assert!(f.app.world().resource::<crate::display_reveal::DialogueRevealBinding>().source.is_none());
+        assert!(!crate::display_reveal::flush_world(f.app.world_mut()).unwrap());
+    }
+    #[test]
+    fn retained_choice_accessibility_fresh_first_choice_clears_the_previous_engine_cache() {
+        let mut f = fixture("scene label P\n\"foreign line\"\n");
+        assert_eq!(f.app.world().resource::<Accessibility>().last_dialogue, "foreign line");
+        f.app.world_mut().insert_resource(engine("scene label P\nchoice {\"A\"=>{set route=1} \"B\"=>{set route=2}}\n\"after\"\n"));
+        let before = state(&f.app);
+        publish(&mut f.app);
+        assert_eq!(f.app.world().resource::<Accessibility>().last_dialogue, "",
+            "a new engine without any dialogue must not offer the previous engine's repeat cache");
+        assert_eq!(state(&f.app), before);
+        assert!(f.app.world().resource::<crate::display_reveal::DialogueRevealBinding>().source.is_none());
+        assert!(!f.app.world().resource::<VnEngine>().0.renderer.scene_frame_failed);
+    }
+}
+
+// Private preparation: not installed, not typechecked, not executed.
+// Append inside accessibility.rs for its owner's private cache/scroll state.
+// Uses the existing Core engine, language/file watchers and actual publication.
+#[cfg(test)]
+mod retained_choice_locale_contracts {
+    use bevy::{prelude::*, ecs::system::RunSystemOnce};
+    use crate::resources::{VnEngine, TypewriterState, LocaleConfig};
+    use crate::accessibility::Accessibility;
+    struct Fixture { app: App, directory: std::path::PathBuf }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let path = self.directory.canonicalize().unwrap();
+            assert_eq!(path.parent(), Some(std::env::temp_dir().canonicalize().unwrap().as_path()));
+            assert!(path.file_name().unwrap().to_string_lossy().starts_with("rvn-choice-locale-"));
+            std::fs::remove_dir_all(path).unwrap();
+        }
+    }
+    fn table(text: &str) -> rvn_core::locale::LocaleTable {
+        rvn_core::locale::LocaleTable::parse("fr", &format!("[strings]\n\"Nombre [probe]\" = \"{text}\"\n")).unwrap()
+    }
+    fn publish(app: &mut App) {
+        app.world_mut().run_system_once(crate::scene_publication::consume);
+        app.update();
+    }
+    fn state(app: &App) -> serde_json::Value {
+        serde_json::to_value(&app.world().resource::<VnEngine>().0.state).unwrap()
+    }
+    fn fixture() -> Fixture { fixture_with_lang(false) }
+    fn fixture_with_lang(change_language: bool) -> Fixture {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let directory = std::env::temp_dir().join(format!("rvn-choice-locale-{}-{}-{serial}",
+            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::write(directory.join("fr.toml"), table("Nombre [probe]").to_toml()).unwrap();
+        std::fs::write(directory.join("en.toml"), table("Number [probe]").to_toml()).unwrap();
+        let source = "init {set __lang=\"fr\"}\nscene label P\nlocal probe=10\n\"Nombre [probe]\"\nset probe=20\nchoice {\"A\"=>{set route=1} \"B\"=>{set route=2}}\n\"after\"\n";
+        let source = if change_language { source.replace("set probe=20", "set probe=20\nset __lang=\"en\"") } else { source.to_owned() };
+        let mut game = rvn_core::Engine::from_program(rvn_parser::parse_program(&source).unwrap(),
+            crate::bevy_renderer::BevyRenderer::new(), 32).unwrap();
+        game.locale = Some(rvn_core::LocaleManager::new(&directory, "fr", "fr", vec!["fr".into(), "en".into()]).unwrap());
+        game.enter_label("P").unwrap(); game.step_until_interaction().unwrap();
+        let mut app = crate::display_reveal::tests::ready();
+        app.insert_resource(VnEngine(game)).insert_resource(LocaleConfig {
+            available_langs: vec!["fr".into(), "en".into()],
+            last_modified_current: std::time::UNIX_EPOCH,
+            last_modified_default: std::time::UNIX_EPOCH,
+        }).add_systems(Update, crate::systems::choice_system.after(crate::systems::dialogue_system));
+        publish(&mut app);
+        assert_eq!(app.world().resource::<TypewriterState>().full_text, "Nombre 10");
+        app.world_mut().resource_mut::<TypewriterState>().skip();
+        crate::display_reveal::flush_world(app.world_mut()).unwrap();
+        {
+            let mut engine = app.world_mut().resource_mut::<VnEngine>();
+            engine.0.advance_dialogue().unwrap(); engine.0.step_until_interaction().unwrap();
+            engine.0.publish_current_scene_interaction().unwrap();
+        }
+        publish(&mut app);
+        assert_eq!(app.world().resource::<Accessibility>().last_dialogue, "Nombre 10");
+        assert_eq!(app.world().resource::<VnEngine>().0.get_var("probe"), Some(&rvn_parser::Value::Int(20)));
+        assert_eq!(app.world().resource::<crate::resources::VnRenderState>().choice_options, vec!["A", "B"]);
+        Fixture { app, directory }
+    }
+    fn assert_backdrop(app: &mut App, expected: &str, before: &serde_json::Value) {
+        assert_eq!(app.world().resource::<TypewriterState>().full_text, expected);
+        assert!(!app.world().resource::<TypewriterState>().typing);
+        assert_eq!(app.world().resource::<Accessibility>().last_dialogue, expected);
+        assert_eq!(state(app), *before, "presentation cannot consume narrative input or change snapshot values");
+        assert_eq!(app.world().resource::<crate::resources::VnRenderState>().choice_options, vec!["A", "B"]);
+        assert!(matches!(app.world().resource::<VnEngine>().0.displayed_interaction().unwrap(), Some(rvn_core::Interaction::Choice { .. })));
+        assert!(app.world().resource::<crate::display_reveal::DialogueRevealBinding>().source.is_none());
+        assert!(!crate::display_reveal::flush_world(app.world_mut()).unwrap());
+    }
+    #[test]
+    fn retained_choice_locale_language_watcher_updates_backdrop_with_unchanged_choice_labels() {
+        // The real script sets the global after the retained dialogue and
+        // before Choice; the watcher receives a genuine narrative assignment.
+        let mut f = fixture_with_lang(true);
+        let before = state(&f.app);
+        f.app.world_mut().run_system_once(crate::systems::locale_lang_watch_system);
+        assert_eq!(f.app.world().resource::<VnEngine>().0.locale.as_ref().unwrap().current_lang(), "en");
+        assert!(matches!(f.app.world().resource::<VnEngine>().0.last_dialogue_interaction().unwrap(), Some(rvn_core::Interaction::Dialogue { text, .. }) if text=="Number 10"));
+        publish(&mut f.app);
+        assert_backdrop(&mut f.app, "Number 10", &before);
+    }
+    #[test]
+    fn retained_choice_locale_actual_file_reload_updates_backdrop_without_a_story_mutation() {
+        let mut f = fixture();
+        std::fs::write(f.directory.join("fr.toml"), table("Recharge [probe]").to_toml()).unwrap();
+        let before = state(&f.app);
+        f.app.world_mut().run_system_once(crate::systems::locale_reload_system);
+        assert!(matches!(f.app.world().resource::<VnEngine>().0.last_dialogue_interaction().unwrap(), Some(rvn_core::Interaction::Dialogue { text, .. }) if text=="Recharge 10"));
+        publish(&mut f.app);
+        assert_backdrop(&mut f.app, "Recharge 10", &before);
+    }
+    #[test]
+    fn retained_choice_locale_identical_publication_preserves_scroll_and_focus() {
+        let mut f = fixture();
+        f.app.world_mut().resource_mut::<Accessibility>().dialogue_scroll = 7.0;
+        f.app.world_mut().resource_mut::<crate::resources::ChoiceFocus>().0 = Some(1);
+        let before = state(&f.app);
+        f.app.world_mut().resource_mut::<VnEngine>().0.publish_current_scene_interaction().unwrap();
+        publish(&mut f.app);
+        assert_backdrop(&mut f.app, "Nombre 10", &before);
+        assert_eq!(f.app.world().resource::<Accessibility>().dialogue_scroll, 7.0);
+        assert_eq!(f.app.world().resource::<crate::resources::ChoiceFocus>().0, Some(1));
+    }
+    #[test]
+    fn retained_choice_locale_oversized_translation_refuses_before_replacing_the_backdrop() {
+        let mut f = fixture();
+        let large = "x".repeat(rvn_core::display_reveal::MAX_REVEAL_TEXT_BYTES + 1);
+        std::fs::write(f.directory.join("fr.toml"), table(&large).to_toml()).unwrap();
+        let before = state(&f.app);
+        f.app.world_mut().run_system_once(crate::systems::locale_reload_system);
+        publish(&mut f.app);
+        assert_eq!(f.app.world().resource::<TypewriterState>().full_text, "Nombre 10");
+        assert_eq!(f.app.world().resource::<Accessibility>().last_dialogue, "Nombre 10");
+        assert_eq!(state(&f.app), before);
+        assert!(f.app.world().resource::<VnEngine>().0.renderer.scene_frame_failed);
+    }
+}
+
+#[cfg(test)]
+#[path = "accessibility_widget_text_tests_0912.rs"]
+mod widget_text_tests_0912;
+
+#[cfg(test)]
+#[path="accessibility_widget_lines_tests_0960.rs"]
+mod widget_lines_0960;

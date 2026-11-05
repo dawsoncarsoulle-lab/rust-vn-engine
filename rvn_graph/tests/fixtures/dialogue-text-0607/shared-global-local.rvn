@@ -1,0 +1,5 @@
+init {set message="global"}
+scene label start
+"[message]"
+local message="local"
+"[message]"

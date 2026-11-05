@@ -3,6 +3,8 @@ use rvn_parser::{Position, Transition, Value};
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[path="save_consumer.rs"]
+pub mod consumer_checkpoint;
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -58,6 +60,13 @@ pub enum SaveValue {
     Int(i64),
     Float(f32),
     Str(String),
+    Name(rvn_parser::Name),
+    /// Inert nominal wire; historical player saves reject it before IO.
+    Enum(rvn_parser::enum_asset::EnumValue),
+    /// Typed inert data only; the historical writer rejects it before I/O.
+    WidgetClass(Box<Option<rvn_parser::widget_reference::WidgetClassReference>>),
+    Widget(Box<rvn_parser::widget_reference::WidgetReference>),
+    Text(Box<rvn_parser::localized_text::DeferredText>),
     /// Lists are serialized as JSON arrays of SaveValue.
     List(Vec<SaveValue>),
     Dict(std::collections::BTreeMap<String, SaveValue>),
@@ -70,6 +79,11 @@ impl From<&Value> for SaveValue {
             Value::Int(n) => SaveValue::Int(*n),
             Value::Float(f) => SaveValue::Float(*f),
             Value::Str(s) => SaveValue::Str(s.clone()),
+            Value::Name(name) => SaveValue::Name(name.clone()),
+            Value::Enum(value) => SaveValue::Enum(*value),
+            Value::WidgetClass(value) => SaveValue::WidgetClass(value.clone()),
+            Value::Widget(value) => SaveValue::Widget(value.clone()),
+            Value::Text(text) => SaveValue::Text(text.clone()),
             Value::List(items) => SaveValue::List(items.iter().map(SaveValue::from).collect()),
             Value::Dict(items) => SaveValue::Dict(
                 items
@@ -88,6 +102,11 @@ impl From<SaveValue> for Value {
             SaveValue::Int(n) => Value::Int(n),
             SaveValue::Float(f) => Value::Float(f),
             SaveValue::Str(s) => Value::Str(s),
+            SaveValue::Name(name) => Value::Name(name),
+            SaveValue::Enum(value) => Value::Enum(value),
+            SaveValue::WidgetClass(value) => Value::WidgetClass(value),
+            SaveValue::Widget(value) => Value::Widget(value),
+            SaveValue::Text(text) => Value::Text(text),
             SaveValue::List(items) => Value::List(items.into_iter().map(Value::from).collect()),
             SaveValue::Dict(items) => Value::Dict(
                 items
@@ -213,6 +232,12 @@ impl From<SaveSprite> for SpriteState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaveData {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consumer_frame: Option<crate::consumer_schedule::BoundConsumerFrame>,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub game_audio:Option<crate::scene_resources::ResourceRegistry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene_execution: Option<crate::scene::SceneExecution>,
     #[serde(default)]
     pub accessibility: rvn_ui::accessibility::AccessibilitySettings,
     #[serde(default)]
@@ -257,30 +282,148 @@ pub struct SaveData {
 }
 
 pub const SAVE_FORMAT_VERSION: u32 = 9;
+/// Existing stories still write version 9. Version 10 is an explicit opt-in
+/// for narrative activations; supporting its reader never upgrades old saves.
+pub const SCENE_SAVE_FORMAT_VERSION: u32 = 10;
+/// Mandatory barrier for indispensable owned-CG targets and outgoing payloads.
+/// Legacy writer9 and Scene writer10 without the extended representation stay exact.
+pub const EXTENDED_SCENE_SAVE_FORMAT_VERSION: u32 = 11;
+/// Opt-in barrier for retained Text identity and format history. Writers for
+/// states containing only historical values still use versions 9, 10 or 11.
+pub const TEXT_SAVE_FORMAT_VERSION: u32 = 12;
+/// Opt-in barrier for table/key references requiring an explicit asset host.
+pub const STRING_TABLE_SAVE_FORMAT_VERSION: u32 = 13;
+/// Opt-in Name table lookup history; legacy Text references stay format 13.
+pub const NAME_STRING_TABLE_SAVE_FORMAT_VERSION: u32 = 14;
+/// Reserved opt-in barrier. Reader/writer continuation support is a distinct
+/// dependency; raw DTO construction must not mislabel owned frames as 1–14.
+pub const SCHEDULED_CONSUMER_SAVE_FORMAT_VERSION: u32 = 15;
+pub const MAX_SUPPORTED_SAVE_FORMAT_VERSION: u32 = NAME_STRING_TABLE_SAVE_FORMAT_VERSION;
+#[path="save_text.rs"]
+mod portable_text;
 fn legacy_save_version() -> u32 {
     1
 }
 fn read_save_version<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
     let version = u32::deserialize(deserializer)?;
-    if (1..=SAVE_FORMAT_VERSION).contains(&version) {
+    if (1..=MAX_SUPPORTED_SAVE_FORMAT_VERSION).contains(&version) {
         Ok(version)
     } else {
         Err(serde::de::Error::custom(format!(
-            "Unsupported save format {version}; supported versions: 1–{SAVE_FORMAT_VERSION}"
+            "Unsupported save format {version}; supported versions: 1–{MAX_SUPPORTED_SAVE_FORMAT_VERSION}"
         )))
     }
 }
 
+/// One extended schema gate. The text checkpoint stage adds its optional reveal
+/// predicate here; version11 remains shared, never a separate CG version.
+pub fn requires_extended_scene_format(state:&GameState)->bool {
+    state.scene_execution.as_ref().is_some_and(|execution| {
+        crate::cinematic_state::extended_schema(execution)
+            || execution.display.as_ref().and_then(|display| display.reveal.as_ref()).is_some()
+            || crate::audio_checkpoint::extended_schema(state)
+            || crate::flow_control::extended_schema(execution)
+    })
+}
+
+#[path="save_audio.rs"]
+mod captured_audio;
+
 impl SaveData {
+    /// Validate optional reveal data and its mandatory format barrier before
+    /// Engine restore or any metadata-only writer can publish this DTO again.
+    pub fn validate_checkpoint_shape(&self) -> Result<(), SaveError> {
+        let consumers = self.last_dialogue.as_ref().is_some_and(|dialogue|dialogue.consumer_dialogue.is_some())
+            || self.scene_execution.as_ref().and_then(|execution|execution.display.as_ref()).is_some_and(|display|display.consumer_dialogue.is_some())
+            || self.game_audio.is_some() || self.consumer_frame.is_some() || self.scene_execution.as_ref().is_some_and(|execution|
+            execution.active.as_ref().is_some_and(|active|active.consumer_frame.is_some())
+            || execution.frames.iter().any(|frame|frame.parked.as_ref().is_some_and(|active|active.consumer_frame.is_some())));
+        if consumers {
+            return Err(SaveError::Incompatible("Owned scheduled consumers require the Save15 program/activation/continuation adapter".into()));
+        }
+        portable_text::validate(self)?;
+        if let Some(execution)=&self.scene_execution {
+            if crate::flow_control::extended_schema(execution)&&self.format_version<EXTENDED_SCENE_SAVE_FORMAT_VERSION{return Err(SaveError::Incompatible("Structured flow positions require extended scene format 11".into()));}
+            let measured=!execution.resources.music_checkpoints.is_empty() || execution.resources.tasks.iter().any(|task|task.audio.as_ref().is_some_and(|audio|audio.checkpoint.is_some()));
+            if measured && self.format_version<EXTENDED_SCENE_SAVE_FORMAT_VERSION {return Err(SaveError::Incompatible("Exact PCM checkpoints require extended scene format 11".into()));}
+            crate::audio_checkpoint::validate_music_registry(&execution.resources).map_err(SaveError::Incompatible)?;
+            for task in &execution.resources.tasks {if let Some(audio)=&task.audio {audio.validate().map_err(SaveError::Incompatible)?;}}
+        }
+        if let Some(display) = self.scene_execution.as_ref().and_then(|execution| execution.display.as_ref()) {
+            if let Some(reveal) = &display.reveal {
+                if self.format_version < EXTENDED_SCENE_SAVE_FORMAT_VERSION {
+                    return Err(SaveError::Incompatible("Reveal checkpoints require extended scene format 11".into()));
+                }
+                if !matches!(display.display, crate::HistoryDisplay::Dialogue { .. }) {
+                    return Err(SaveError::Incompatible("Only a dialogue can carry a reveal checkpoint".into()));
+                }
+                reveal.validate().map_err(SaveError::Incompatible)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// All writers use this preflight before publishing bytes. Host presentation
+    /// may be omitted, but an active or suspended narrative wait may not be lost.
+    pub fn try_from_state(
+        state: &GameState,
+        slot: u32,
+        label: String,
+        script_name: String,
+    ) -> Result<Self, SaveError> {
+        if crate::consumer_schedule::state_has_owned_consumers(state) {
+            return Err(SaveError::Incompatible("Owned scheduled consumers require the Save15 program/activation/continuation adapter".into()));
+        }
+        portable_text::state_required_text_format(state).map_err(SaveError::Incompatible)?;
+        let portable =
+            crate::scene_resources::portable_story_state(state).map_err(SaveError::Incompatible)?;
+        Self::checked_portable_data(&portable,slot,label,script_name)
+    }
+
+    /// Shared Reveal validation precedes both raw and captured writers.
+    fn checked_portable_data(portable:&GameState,slot:u32,label:String,script_name:String)->Result<Self,SaveError> {
+        if portable.game_tasks.is_some(){return Err(SaveError::Incompatible("Owned Game tasks require Save15; historical conversion would lose their clock".into()));}
+        crate::display_reveal::validate_state(portable).map_err(SaveError::Incompatible)?;
+        let data = Self::from_state(portable,slot,label,script_name);
+        data.validate_checkpoint_shape()?;
+        Ok(data)
+    }
+
     pub fn from_state(state: &GameState, slot: u32, label: String, script_name: String) -> Self {
+        let required_text_format = portable_text::state_required_text_format(state).unwrap_or(STRING_TABLE_SAVE_FORMAT_VERSION);
         Self {
+            consumer_frame: state.consumer_frame.clone(),
+            game_audio:state.game_audio.clone(),
+            scene_execution: state.scene_execution.as_ref().map(|execution| {
+                let mut story = execution.clone();
+                story.resources = story.resources.story_only();
+                if let Some(active) = &mut story.active {
+                    active.tasks.suspended_ui = active.tasks.suspended_ui.cold_save_story_only();
+                }
+                for frame in &mut story.frames {
+                    if let Some(parent) = &mut frame.parked {
+                        parent.tasks.suspended_ui = parent.tasks.suspended_ui.cold_save_story_only();
+                    }
+                }
+                story
+            }),
             accessibility: state.accessibility.clone(),
             motions: state.motions.clone(),
             videos: state.videos.clone(),
             layered: state.layered.clone(),
             story_identity: state.story_identity.clone(),
-            ui: state.ui.story_only(),
-            format_version: SAVE_FORMAT_VERSION,
+            ui: state.ui.cold_save_story_only(),
+            format_version: if crate::consumer_schedule::state_has_owned_consumers(state) {
+                SCHEDULED_CONSUMER_SAVE_FORMAT_VERSION
+            } else if required_text_format > 0 {
+                required_text_format
+            } else if requires_extended_scene_format(state) {
+                EXTENDED_SCENE_SAVE_FORMAT_VERSION
+            } else if state.scene_execution.is_some() {
+                SCENE_SAVE_FORMAT_VERSION
+            } else {
+                SAVE_FORMAT_VERSION
+            },
             random: state.random,
             display_random: state.display_random,
             display_random_pc: state.display_random_pc,
@@ -294,7 +437,10 @@ impl SaveData {
             } else {
                 Some(state.background_image.clone())
             },
-            pc: if state.motions.waiting.is_some() || state.videos.waiting.is_some() {
+            pc: if state.scene_execution.is_some()
+                || state.motions.waiting.is_some()
+                || state.videos.waiting.is_some()
+            {
                 state.pc
             } else {
                 state.current_interactive_pc
@@ -318,8 +464,31 @@ impl SaveData {
         }
     }
 
-    pub fn into_game_state(self) -> GameState {
+    pub fn into_game_state(mut self) -> GameState {
+        // Also covers direct in-memory DTO hydration without a JSON roundtrip.
+        self.ui.clear_transient_macro_cells();
+        if let Some(execution)=&mut self.scene_execution {
+            for active in execution.active.iter_mut().chain(execution.frames.iter_mut().filter_map(|frame|frame.parked.as_mut())) {
+                active.tasks.suspended_ui.clear_transient_macro_cells();
+            }
+        }
+        let current_interactive_pc = self
+            .scene_execution
+            .as_ref()
+            .and_then(|execution| {
+                execution
+                    .display
+                    .as_ref()
+                    .map(|display| display.position.pc)
+            })
+            .unwrap_or(self.pc);
         GameState {
+            game_tasks:None,
+            game_audio:self.game_audio,
+            consumer_dialogue: None,
+            scene_execution: self.scene_execution,
+            consumer_frame: self.consumer_frame,
+            consumer_choice:None,consumer_imagemap:None,
             accessibility: self.accessibility,
             speech_requests: Vec::new(),
             menu_requests: Vec::new(),
@@ -333,7 +502,7 @@ impl SaveData {
             display_random_pc: self.display_random_pc,
             last_dialogue: self.last_dialogue,
             pc: self.pc,
-            current_interactive_pc: self.pc,
+            current_interactive_pc,
             background_image: self.background_image,
             call_stack: self.call_stack,
             vars: self
@@ -455,7 +624,8 @@ impl SaveManager {
         })
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    // Logical save names also supply the browser localStorage key.
+    // Only the platform-specific writer performs disk or browser I/O.
     fn slot_path(&self, slot: u32) -> PathBuf {
         self.save_dir.join(format!("slot_{slot:02}.json"))
     }
@@ -539,7 +709,7 @@ impl SaveManager {
     ) -> Result<(), SaveError> {
         self.check_slot(slot)?;
         self.check_writable(slot)?;
-        let data = SaveData::from_state(state, slot, label, script_name);
+        let data = SaveData::try_from_state(state, slot, label, script_name)?;
         let json = serde_json::to_string_pretty(&data)?;
         self.write_atomic(&self.slot_path(slot), &json)?;
         Ok(())
@@ -555,7 +725,7 @@ impl SaveManager {
     ) -> Result<(), SaveError> {
         self.check_slot(slot)?;
         self.check_writable(slot)?;
-        let data = SaveData::from_state(state, slot, label, script_name);
+        let data = SaveData::try_from_state(state, slot, label, script_name)?;
         let json = serde_json::to_string_pretty(&data)?;
         Self::local_storage()?
             .set_item(&self.storage_key(&format!("slot_{slot:02}")), &json)
@@ -577,7 +747,7 @@ impl SaveManager {
         label: String,
         script_name: String,
     ) -> Result<(), SaveError> {
-        let data = SaveData::from_state(state, slot, label, script_name);
+        let data = SaveData::try_from_state(state, slot, label, script_name)?;
         let json = serde_json::to_string_pretty(&data)?;
         self.write_atomic(&path, &json)?;
         Ok(())
@@ -592,7 +762,7 @@ impl SaveManager {
         label: String,
         script_name: String,
     ) -> Result<(), SaveError> {
-        let data = SaveData::from_state(state, slot, label, script_name);
+        let data = SaveData::try_from_state(state, slot, label, script_name)?;
         let json = serde_json::to_string_pretty(&data)?;
         let name = path
             .file_stem()
@@ -637,7 +807,8 @@ impl SaveManager {
             return Err(SaveError::SlotVide(slot));
         }
         let json = fs::read_to_string(&path)?;
-        let data = serde_json::from_str(&json)?;
+        let data: SaveData = serde_json::from_str(&json)?;
+        data.validate_checkpoint_shape()?;
         Ok(data)
     }
 
@@ -655,7 +826,9 @@ impl SaveManager {
         else {
             return Err(SaveError::SlotVide(slot));
         };
-        Ok(serde_json::from_str(&json)?)
+        let restored: SaveData = serde_json::from_str(&json)?;
+        restored.validate_checkpoint_shape()?;
+        Ok(restored)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -664,7 +837,8 @@ impl SaveManager {
             return Err(SaveError::SlotVide(0));
         }
         let json = fs::read_to_string(&path)?;
-        let data = serde_json::from_str(&json)?;
+        let data: SaveData = serde_json::from_str(&json)?;
+        data.validate_checkpoint_shape()?;
         Ok(data)
     }
 
@@ -685,7 +859,9 @@ impl SaveManager {
         else {
             return Err(SaveError::SlotVide(0));
         };
-        Ok(serde_json::from_str(&json)?)
+        let restored: SaveData = serde_json::from_str(&json)?;
+        restored.validate_checkpoint_shape()?;
+        Ok(restored)
     }
 
     pub fn load_autosave(&self) -> Result<SaveData, SaveError> {
@@ -882,7 +1058,13 @@ mod tests {
         );
 
         GameState {
+            game_tasks:None,
+            game_audio:None,
+            consumer_dialogue: None,
             story_identity: None,
+            consumer_frame: None,
+            consumer_choice:None,consumer_imagemap:None,
+            scene_execution: None,
             menu_requests: Default::default(),
             accessibility: Default::default(),
             speech_requests: Vec::new(),
@@ -1175,6 +1357,12 @@ mod tests {
         );
 
         let state = GameState {
+            game_tasks:None,
+            game_audio:None,
+            consumer_dialogue: None,
+            consumer_frame: None,
+            consumer_choice:None,consumer_imagemap:None,
+            scene_execution: None,
             menu_requests: Default::default(),
             accessibility: Default::default(),
             speech_requests: Vec::new(),

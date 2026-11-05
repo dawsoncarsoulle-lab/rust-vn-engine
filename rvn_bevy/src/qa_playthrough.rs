@@ -21,8 +21,11 @@ mod design_capture;
 
 #[derive(Default)]
 pub(crate) struct QaPlugin;
+#[derive(SystemSet,Debug,Clone,Copy,PartialEq,Eq,Hash)]
+pub(crate) struct QaGameReady;
 impl Plugin for QaPlugin {
     fn build(&self, app: &mut App) {
+        app.configure_sets(PreUpdate,QaGameReady.run_if(resource_exists::<VnEngine>)).configure_sets(Update,QaGameReady.run_if(resource_exists::<VnEngine>)).configure_sets(PostUpdate,QaGameReady.run_if(resource_exists::<VnEngine>)).configure_sets(Last,QaGameReady.run_if(resource_exists::<VnEngine>));
         let Some(dir) = std::env::var_os("RVN_QA_OUTPUT").map(PathBuf::from) else {
             return;
         };
@@ -35,11 +38,9 @@ impl Plugin for QaPlugin {
         // compositor has not focused this isolated verification window.
         app.insert_resource(bevy::winit::WinitSettings::game());
         app.init_resource::<QaPointer>().add_systems(
-            PreUpdate,
-            apply_qa_pointer
+            PreUpdate, (apply_qa_pointer
                 .after(bevy::input::InputSystem)
-                .before(bevy::ui::UiSystem::Focus),
-        );
+                .before(bevy::ui::UiSystem::Focus)).in_set(QaGameReady));
         if std::env::var_os("RVN_QA_CUSTOM_CANVAS").is_some() {
             app.insert_resource(bevy::winit::WinitSettings {
                 focused_mode: bevy::winit::UpdateMode::Continuous,
@@ -54,14 +55,14 @@ impl Plugin for QaPlugin {
                 focused_mode: bevy::winit::UpdateMode::Continuous,
                 unfocused_mode: bevy::winit::UpdateMode::Continuous,
             });
-            app.add_systems(PreUpdate, source_menus::isolate_inputs
+            app.add_systems(PreUpdate, (source_menus::isolate_inputs
                 .after(bevy::input::InputSystem).before(apply_qa_pointer)
-                .before(bevy::ui::UiSystem::Focus));
-            app.add_systems(PostUpdate, source_menus::drive
+                .before(bevy::ui::UiSystem::Focus)).in_set(QaGameReady));
+            app.add_systems(PostUpdate, (source_menus::drive
                 .after(crate::composed_motion::MotionApply)
                 .after(bevy::ui::UiSystem::Layout)
                 .after(bevy::transform::TransformSystem::TransformPropagate)
-                .after(bevy::render::view::VisibilitySystems::VisibilityPropagate));
+                .after(bevy::render::view::VisibilitySystems::VisibilityPropagate)).in_set(QaGameReady));
             return;
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -71,20 +72,16 @@ impl Plugin for QaPlugin {
                 unfocused_mode: bevy::winit::UpdateMode::Continuous,
             });
             app.add_systems(
-                PreUpdate,
-                atlas::isolate_inputs
+                PreUpdate, (atlas::isolate_inputs
                     .after(bevy::input::InputSystem)
                     .after(apply_qa_pointer)
-                    .before(bevy::ui::UiSystem::Focus),
-            );
+                    .before(bevy::ui::UiSystem::Focus)).in_set(QaGameReady));
             app.add_systems(
-                PostUpdate,
-                atlas::drive
+                PostUpdate, (atlas::drive
                     .after(crate::composed_motion::MotionApply)
                     .after(bevy::ui::UiSystem::Layout)
                     .after(bevy::transform::TransformSystem::TransformPropagate)
-                    .after(bevy::render::view::VisibilitySystems::VisibilityPropagate),
-            );
+                    .after(bevy::render::view::VisibilitySystems::VisibilityPropagate)).in_set(QaGameReady));
             return;
         }
         if std::env::var_os("RVN_QA_COMPOSED_MOTION").is_some() {
@@ -93,11 +90,9 @@ impl Plugin for QaPlugin {
                 unfocused_mode: bevy::winit::UpdateMode::Continuous,
             });
             app.add_systems(
-                PostUpdate,
-                crate::composed_motion::qa_drive
+                PostUpdate, (crate::composed_motion::qa_drive
                     .after(crate::composed_motion::MotionApply)
-                    .after(bevy::transform::TransformSystem::TransformPropagate),
-            );
+                    .after(bevy::transform::TransformSystem::TransformPropagate)).in_set(QaGameReady));
             return;
         }
         if std::env::var_os("RVN_QA_ACCESSIBILITY").is_some() {
@@ -114,11 +109,9 @@ impl Plugin for QaPlugin {
                 unfocused_mode: bevy::winit::UpdateMode::Continuous,
             });
             app.add_systems(
-                PostUpdate,
-                compositions::drive
+                PostUpdate, (compositions::drive
                     .after(crate::composed_motion::MotionApply)
-                    .after(bevy::transform::TransformSystem::TransformPropagate),
-            );
+                    .after(bevy::transform::TransformSystem::TransformPropagate)).in_set(QaGameReady));
             return;
         }
         if std::env::var_os("RVN_QA_MENU_DESIGN").is_some() {
@@ -137,7 +130,7 @@ impl Plugin for QaPlugin {
                 map_clicked: None,
                 slider_step: 0,
             });
-            app.add_systems(Update, design_capture::drive);
+            app.add_systems(Update, (design_capture::drive).in_set(QaGameReady));
             return;
         }
         if std::env::var_os("RVN_QA_LOCAL_CONTROLS").is_some() {
@@ -156,7 +149,7 @@ impl Plugin for QaPlugin {
                 map_clicked: None,
                 slider_step: 0,
             });
-            app.add_systems(Update, local_controls_drive);
+            app.add_systems(Update, (local_controls_drive).in_set(QaGameReady));
             return;
         }
         if std::env::var_os("RVN_QA_AUTO_HEIGHT").is_some() {
@@ -175,7 +168,7 @@ impl Plugin for QaPlugin {
                 map_clicked: None,
                 slider_step: 0,
             });
-            app.add_systems(Update, auto_height_drive);
+            app.add_systems(Update, (auto_height_drive).in_set(QaGameReady));
             return;
         }
         if std::env::var_os("RVN_QA_TEXT_STATES").is_some() {
@@ -194,7 +187,7 @@ impl Plugin for QaPlugin {
                 map_clicked: None,
                 slider_step: 0,
             });
-            app.add_systems(Update, text_states_drive);
+            app.add_systems(Update, (text_states_drive).in_set(QaGameReady));
             return;
         }
         if std::env::var_os("RVN_QA_RESUME_THUMBNAILS").is_some() {
@@ -213,7 +206,7 @@ impl Plugin for QaPlugin {
                 map_clicked: None,
                 slider_step: 0,
             });
-            app.add_systems(Update, resume_thumbnail_drive);
+            app.add_systems(Update, (resume_thumbnail_drive).in_set(QaGameReady));
             return;
         }
         if std::env::var_os("RVN_QA_PAGINATION").is_some() {
@@ -232,7 +225,7 @@ impl Plugin for QaPlugin {
                 map_clicked: None,
                 slider_step: 0,
             });
-            app.add_systems(Update, pagination_drive);
+            app.add_systems(Update, (pagination_drive).in_set(QaGameReady));
             return;
         }
         if std::env::var_os("RVN_QA_NAVIGATION_LOOP").is_some() {
@@ -251,7 +244,7 @@ impl Plugin for QaPlugin {
                 map_clicked: None,
                 slider_step: 0,
             });
-            app.add_systems(Update, navigation_loop_drive);
+            app.add_systems(Update, (navigation_loop_drive).in_set(QaGameReady));
             return;
         }
         if std::env::var_os("RVN_QA_CONDITIONAL_CARDS").is_some() {
@@ -270,7 +263,7 @@ impl Plugin for QaPlugin {
                 map_clicked: None,
                 slider_step: 0,
             });
-            app.add_systems(Update, conditional_cards_drive);
+            app.add_systems(Update, (conditional_cards_drive).in_set(QaGameReady));
             return;
         }
         if std::env::var_os("RVN_QA_CONTROLLER_CHOICES").is_some() {
@@ -289,7 +282,7 @@ impl Plugin for QaPlugin {
                 map_clicked: None,
                 slider_step: 0,
             });
-            app.add_systems(Update, controller_choices_drive);
+            app.add_systems(Update, (controller_choices_drive).in_set(QaGameReady));
             return;
         }
         if std::env::var_os("RVN_QA_DISABLED_CHOICES").is_some() {
@@ -308,7 +301,7 @@ impl Plugin for QaPlugin {
                 map_clicked: None,
                 slider_step: 0,
             });
-            app.add_systems(Update, disabled_choices_drive);
+            app.add_systems(Update, (disabled_choices_drive).in_set(QaGameReady));
             return;
         }
         if std::env::var_os("RVN_QA_DISABLED_CONTROL").is_some() {
@@ -327,7 +320,7 @@ impl Plugin for QaPlugin {
                 map_clicked: None,
                 slider_step: 0,
             });
-            app.add_systems(Update, disabled_control_drive);
+            app.add_systems(Update, (disabled_control_drive).in_set(QaGameReady));
             return;
         }
         if std::env::var_os("RVN_QA_CONTROLLER_FOCUS").is_some() {
@@ -346,11 +339,11 @@ impl Plugin for QaPlugin {
                 map_clicked: None,
                 slider_step: 0,
             });
-            app.add_systems(Update, controller_focus_drive);
+            app.add_systems(Update, (controller_focus_drive).in_set(QaGameReady));
             return;
         }
         if std::env::var_os("RVN_QA_QUICK_ACTIONS").is_some() {
-            app.add_systems(Update, approve_quickload);
+            app.add_systems(Update, (approve_quickload).in_set(QaGameReady));
         }
         app.insert_resource(Qa {
             dir,
@@ -373,43 +366,35 @@ impl Plugin for QaPlugin {
             // Read hit targets only after deferred UI creation and layout.
             // Otherwise a freshly rebuilt button still has a zero transform.
             app.add_systems(
-                PostUpdate,
-                programmable_drive
+                PostUpdate, (programmable_drive
                     .after(bevy::ui::UiSystem::Layout)
                     .after(bevy::transform::TransformSystem::TransformPropagate)
-                    .after(crate::programmable_ui::InterfaceScrollSet),
-            );
+                    .after(crate::programmable_ui::InterfaceScrollSet)).in_set(QaGameReady));
         } else if std::env::var_os("RVN_QA_LONG_DIALOGUE").is_some() {
-            app.add_systems(Update, long_dialogue_drive);
+            app.add_systems(Update, (long_dialogue_drive).in_set(QaGameReady));
         } else if std::env::var_os("RVN_QA_LONG_DROPDOWN").is_some() {
-            app.add_systems(Update, long_dropdown_drive);
+            app.add_systems(Update, (long_dropdown_drive).in_set(QaGameReady));
         } else if std::env::var_os("RVN_QA_POINTER").is_some() {
-            app.add_systems(Update, pointer_drive);
+            app.add_systems(Update, (pointer_drive).in_set(QaGameReady));
         } else if std::env::var_os("RVN_QA_GENERAL_CONFIRM").is_some() {
             app.add_systems(
-                Update,
-                general_confirm_drive.after(crate::systems::player_input_system),
-            );
+                Update, (general_confirm_drive.after(crate::systems::player_input_system)).in_set(QaGameReady));
         } else if std::env::var_os("RVN_QA_SAVE_CARDS").is_some() {
             app.add_systems(
-                Update,
-                slots_drive.after(crate::systems::save_menu_interaction_system),
-            );
+                Update, (slots_drive.after(crate::systems::save_menu_interaction_system)).in_set(QaGameReady));
         } else if std::env::var_os("RVN_QA_ANIMATION").is_some() {
-            app.add_systems(Update, animation_drive);
+            app.add_systems(Update, (animation_drive).in_set(QaGameReady));
         } else if std::env::var_os("RVN_QA_DROPDOWN").is_some() {
-            app.add_systems(Update, dropdown_drive);
+            app.add_systems(Update, (dropdown_drive).in_set(QaGameReady));
         } else if std::env::var_os("RVN_QA_SCROLL").is_some() {
-            app.add_systems(Update, scroll_drive);
+            app.add_systems(Update, (scroll_drive).in_set(QaGameReady));
         } else if std::env::var_os("RVN_QA_CONFIRMATION").is_some() {
             app.add_systems(
-                Update,
-                confirm_drive
+                Update, (confirm_drive
                     .after(crate::systems::save_menu_interaction_system)
-                    .after(crate::systems::player_input_system),
-            );
+                    .after(crate::systems::player_input_system)).in_set(QaGameReady));
         } else {
-            app.add_systems(Update, drive);
+            app.add_systems(Update, (drive).in_set(QaGameReady));
         }
     }
 }

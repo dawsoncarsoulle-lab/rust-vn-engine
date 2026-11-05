@@ -1,13 +1,16 @@
 //! Non-destructive source edits for visual authoring. This API performs no I/O:
 //! callers must resolve conflicts and atomically persist successful results.
 use crate::lexer::Token;
-use crate::{parse, parse_spanned, SpannedStatement};
+use crate::{
+    parse, parse_spanned_with_context, parse_with_context, NarrativeContext, SpannedStatement,
+};
 use logos::Logos;
 
 #[derive(Debug, Clone)]
 pub struct SourceDocument {
     source: String,
     statements: Vec<SpannedStatement>,
+    narrative_context: NarrativeContext,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,10 +41,28 @@ impl std::error::Error for SourceEditError {}
 
 impl SourceDocument {
     pub fn parse(source: impl Into<String>) -> Result<Self, SourceEditError> {
+        Self::parse_with_context(source, NarrativeContext::Legacy)
+    }
+
+    /// The context belongs to the resolved project, not this fragment alone.
+    /// All trial edits retain it; callers still validate the complete project
+    /// before publication, including removal of its last explicit scene entry.
+    pub fn parse_with_context(
+        source: impl Into<String>,
+        narrative_context: NarrativeContext,
+    ) -> Result<Self, SourceEditError> {
         let source = source.into();
-        let statements = parse_spanned(&source)
+        let statements = parse_spanned_with_context(&source, narrative_context)
             .map_err(|error| SourceEditError::InvalidSource(error.to_string()))?;
-        Ok(Self { source, statements })
+        Ok(Self {
+            source,
+            statements,
+            narrative_context,
+        })
+    }
+
+    pub fn narrative_context(&self) -> NarrativeContext {
+        self.narrative_context
     }
 
     pub fn source(&self) -> &str {
@@ -88,7 +109,12 @@ impl SourceDocument {
             let index = self
                 .statements
                 .iter()
-                .position(|statement| matches!(statement.statement, crate::Statement::Label { .. }))
+                .position(|statement| {
+                    matches!(
+                        statement.statement,
+                        crate::Statement::Label { .. } | crate::Statement::SceneLabel { .. }
+                    )
+                })
                 .unwrap_or(self.statements.len());
             self.replace_statement_range_preserving_trivia(
                 index..index,
@@ -187,7 +213,7 @@ impl SourceDocument {
         current_source: &str,
         replacement: &str,
     ) -> Result<(), SourceEditError> {
-        if parse(replacement)
+        if parse_with_context(replacement, self.narrative_context)
             .map_err(|error| SourceEditError::InvalidSource(error.to_string()))?
             .len()
             != 1
@@ -225,7 +251,7 @@ impl SourceDocument {
         if range.start > range.end || range.end > self.statements.len() {
             return Err(SourceEditError::StatementNotFound(range.end));
         }
-        let parsed = parse(replacement)
+        let parsed = parse_with_context(replacement, self.narrative_context)
             .map_err(|error| SourceEditError::InvalidSource(error.to_string()))?;
         let original: Vec<_> = self.statements[range.clone()]
             .iter()
@@ -247,10 +273,19 @@ impl SourceDocument {
         let fragment = &self.source[start..end];
         let candidate = baseline
             .and_then(|before| reconcile_canonical_edit(fragment, before, replacement).ok())
-            .filter(|candidate| parse(candidate).ok().as_deref() == Some(parsed.as_slice()))
+            .filter(|candidate| {
+                parse_with_context(candidate, self.narrative_context)
+                    .ok()
+                    .as_deref()
+                    == Some(parsed.as_slice())
+            })
             .map(Ok)
             .unwrap_or_else(|| reconcile_tokens(fragment, replacement))?;
-        if parse(&candidate).ok().as_deref() != Some(parsed.as_slice()) {
+        if parse_with_context(&candidate, self.narrative_context)
+            .ok()
+            .as_deref()
+            != Some(parsed.as_slice())
+        {
             return Err(SourceEditError::SurroundingCodeWouldChange);
         }
         if comments(replacement)
@@ -267,7 +302,7 @@ impl SourceDocument {
             candidate
         };
         source.replace_range(start..end, &delimited);
-        let statements = parse_spanned(&source)
+        let statements = parse_spanned_with_context(&source, self.narrative_context)
             .map_err(|error| SourceEditError::InvalidSource(error.to_string()))?;
         let mut expected: Vec<_> = self
             .statements
@@ -304,7 +339,7 @@ impl SourceDocument {
             .statements
             .get(index)
             .ok_or(SourceEditError::StatementNotFound(index))?;
-        let parsed = parse(replacement)
+        let parsed = parse_with_context(replacement, self.narrative_context)
             .map_err(|error| SourceEditError::InvalidSource(error.to_string()))?;
         let [new_statement] = parsed.as_slice() else {
             return Err(SourceEditError::ExpectedSingleStatement);
@@ -324,7 +359,7 @@ impl SourceDocument {
         }
         let mut candidate = self.source.clone();
         candidate.replace_range(original.range.clone(), replacement);
-        let statements = parse_spanned(&candidate)
+        let statements = parse_spanned_with_context(&candidate, self.narrative_context)
             .map_err(|error| SourceEditError::InvalidSource(error.to_string()))?;
         let mut expected = self
             .statements

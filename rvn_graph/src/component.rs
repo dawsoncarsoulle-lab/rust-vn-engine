@@ -96,6 +96,7 @@ fn owned_dictionary(graph: &mut GraphDocument, consumer: PinId) -> Result<Option
     let cloned = graph.add_node(model.kind, [model.position[0], model.position[1] + 120.0]);
     graph.nodes.get_mut(&cloned).unwrap().properties = model.properties;
     graph.nodes.get_mut(&cloned).unwrap().title_override = model.title_override;
+    graph.nodes.get_mut(&cloned).unwrap().annotation = model.annotation;
     let mut cloned_output = None;
     for old in model.pins {
         let pin = graph.pins[&old].clone();
@@ -110,6 +111,8 @@ fn owned_dictionary(graph: &mut GraphDocument, consumer: PinId) -> Result<Option
             )
             .map_err(|error| error.to_string())?;
         graph.pins.get_mut(&new).unwrap().default_value = pin.default_value;
+        graph.pins.get_mut(&new).unwrap().text_localization = pin.text_localization;
+        graph.pins.get_mut(&new).unwrap().text_table_reference = pin.text_table_reference;
         if pin.key == "result" {
             cloned_output = Some(new);
         }

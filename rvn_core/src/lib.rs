@@ -1,18 +1,57 @@
+pub mod editor_preview;
+pub mod editor_inspection;
+pub mod effect_sampling;
+pub mod game_audio;
+pub mod game_tasks;
+pub mod audio_playback;
+pub mod audio_checkpoint;
+pub mod frame_audio_checkpoint;
+mod cinematic_state;
+pub mod retired_presentations;
+pub mod retired_sampling;
 pub mod engine;
 pub mod error;
 pub mod eval;
+pub mod enum_runtime_resources1025;
+mod save_enum_values1025;
+pub mod consumer_schedule;
+pub mod ui_consumer;
+pub(crate) mod standard_macro_state;
+pub mod editor_debugger;
+pub mod debugger_provenance;
+mod debugger_producers;
+mod flow_control;
+mod native_loop_cursor;
 pub mod locale;
+pub mod localized_text;
+pub mod string_table;
+pub mod string_table_file;
+pub mod string_table_project;
 pub mod persistent;
+pub mod program;
 pub mod random;
 pub mod renderer;
 pub mod rollback;
 pub mod save;
+pub mod scene;
+pub mod display_reveal;
+pub mod scene_resources;
+pub mod scene_tasks;
+pub mod sprite_effects;
 pub mod text_tags;
 pub mod types;
 pub mod ui;
+pub mod ui_residency;
+pub mod ui_input;
+pub mod widget_class_source_0950;
 pub mod value_limits;
+pub(crate) mod widget_reference_values_0974;
+pub(crate) mod widget_class_getter_0981;
 
-pub use engine::{Engine, Interaction, LoadCompatibility};
+pub use engine::{
+    Engine, GameFrameOutcome, GameFrameReports, GameVideoFeedback, GameVideoReport, HostFrameOutcome, HostFrameReports, HostFrameReceiptOutcome, GameFrameReceiptOutcome, VideoReportAuthority, VideoReportDisposition, VideoReportReceipt, Interaction,
+    LoadCompatibility, TextRuntimeContext,
+};
 pub use error::RuntimeError;
 pub use eval::{eval_bool, eval_expr, eval_interpolated, EvalError};
 pub use locale::{collect_strings_from_flat_script, collect_strings_from_script, LocaleManager};
@@ -516,3 +555,9 @@ set total = persistent.count + 10"#;
 pub mod composition;
 pub mod motion;
 pub mod video;
+
+pub mod widget_backend_0956;
+
+pub mod editor_enum_current1027;
+pub mod editor_widget_preview1027;
+pub mod editor_library_current1027;

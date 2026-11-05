@@ -553,7 +553,8 @@ pub fn apply_settings_to_runtime_system(
     mut music_volume: ResMut<MusicVolume>,
     mut tw_config: ResMut<TypewriterConfig>,
     mut tw_state: ResMut<TypewriterState>,
-    mut engine: ResMut<VnEngine>,
+    engine: Option<ResMut<VnEngine>>,
+    mut startup: Option<ResMut<crate::debugger_startup::DebugBootstrap>>,
     mut vn_events: EventWriter<VnCommand>,
     mut windows: Query<&mut Window>,
     mut dialogue_text_query: Query<&mut Text, With<DialogueText>>,
@@ -561,13 +562,35 @@ pub fn apply_settings_to_runtime_system(
     registry: Res<crate::resources::CharacterRegistry>,
     mut interface_error: ResMut<crate::resources::ScriptErrorMessage>,
     mut next: ResMut<NextState<VnState>>,
+    reveal_binding: Option<Res<crate::display_reveal::DialogueRevealBinding>>,
 ) {
     if !settings.is_changed() {
         return;
     }
+    // Game mutation remains on its historical route. Startup reads the real
+    // frozen owner; changing its language requires an authenticated prepared
+    // locale transaction, not a borrowed LocaleManager mutation.
+    let Some(mut engine) = engine else {
+        let Some(startup) = startup.as_deref_mut() else { return; };
+        if startup.owner.locale().is_some_and(|locale| locale.current_lang() != settings.language) {
+            let message = "Startup settings language change awaits an authenticated locale publication".to_owned();
+            startup.failed = Some(message.clone()); interface_error.0 = message;
+            next.set(VnState::Error); return;
+        }
+        apply_user_presentation(&settings, startup.owner.state(), &mut music_volume,
+            &mut tw_config, &mut tw_state, &mut windows, &mut dialogue_text_query);
+        return;
+    };
+    // The old rendered language is still the checkpoint authority here.
+    if let Err(error)=crate::display_reveal::flush(&mut engine,&tw_state,reveal_binding.as_deref()) {
+        engine.0.renderer.scene_frame_failed=true;interface_error.0=error;next.set(VnState::Error);return;
+    }
 
-    // Audio: music is driven through MusicVolume; SFX uses Settings directly when spawned.
-    music_volume.0 = settings.music_volume.clamp(0.0, 1.0);
+    // Narrative music keeps its saved logical gain; the Host preference is mixed at playback.
+    // Legacy presenters retain their existing MusicVolume bridge.
+    if engine.0.state.scene_execution.is_none() {
+        music_volume.0 = settings.music_volume.clamp(0.0, 1.0);
+    }
 
     if let Some(locale) = &mut engine.0.locale {
         if locale.current_lang() != settings.language {
@@ -594,7 +617,9 @@ pub fn apply_settings_to_runtime_system(
                             if let Ok(Some(rvn_core::Interaction::Dialogue { character, text })) =
                                 engine.0.last_dialogue_interaction()
                             {
-                                vn_events.send(VnCommand::ShowDialogue { character, text });
+                                // A Choice checkpoint does not authorize a Dialogue checkpoint.
+                                // Legacy backing-dialogue redraw keeps its historical immediate route.
+                                if engine.0.state.scene_execution.is_none() { vn_events.send(VnCommand::ShowDialogue { character, text }); }
                             }
                         }
                     }
@@ -622,6 +647,20 @@ pub fn apply_settings_to_runtime_system(
         }
     }
 
+    apply_user_presentation(&settings, &engine.0.state, &mut music_volume,
+        &mut tw_config, &mut tw_state, &mut windows, &mut dialogue_text_query);
+    if let Err(error)=crate::display_reveal::flush(&mut engine,&tw_state,reveal_binding.as_deref()) {
+        engine.0.renderer.scene_frame_failed=true;interface_error.0=error;next.set(VnState::Error);return;
+    }
+}
+
+// Host-only projection shared by real Game and real Startup owners. Does not
+// seek, advance Core, rebuild a renderer batch, or mutate the frozen locale.
+fn apply_user_presentation(settings: &Settings, state: &rvn_core::GameState,
+    music_volume: &mut MusicVolume, tw_config: &mut TypewriterConfig,
+    tw_state: &mut TypewriterState, windows: &mut Query<&mut Window>,
+    dialogue_text_query: &mut Query<&mut Text, With<DialogueText>>) {
+    if state.scene_execution.is_none() { music_volume.0 = settings.music_volume.clamp(0.0, 1.0); }
     if let Ok(mut win) = windows.get_single_mut() {
         win.mode = if settings.fullscreen {
             bevy::window::WindowMode::BorderlessFullscreen
@@ -631,16 +670,19 @@ pub fn apply_settings_to_runtime_system(
     }
 
     // Text: convert the UI multiplier into a chars-per-second value.
-    let cps = if settings.typewriter {
+    let narrative = state.scene_execution.is_some();
+    let cps = if narrative {
+        super::typewriter::narrative_text_speed(state.typewriter.effective_speed(), Some(&settings))
+    } else if settings.typewriter {
         (40.0 * settings.text_speed).max(1.0)
     } else {
         0.0
     };
-    tw_config.enabled = settings.typewriter;
+    tw_config.enabled = if narrative { cps > 0.0 } else { settings.typewriter };
     tw_config.chars_per_sec = cps;
 
     // If a line is already typing, apply the setting immediately.
-    if !settings.typewriter {
+    if !tw_config.enabled {
         tw_state.skip();
         if let Ok(mut text) = dialogue_text_query.get_single_mut() {
             apply_visible_sections(&mut text, &tw_state);
@@ -665,9 +707,10 @@ fn next_language(current: &str, locale_cfg: &LocaleConfig) -> String {
 }
 
 fn refresh_current_interaction(engine: &mut VnEngine, vn_events: &mut EventWriter<VnCommand>) {
-    match engine.0.current_interaction() {
+    let interaction=if engine.0.state.scene_execution.is_some() {engine.0.displayed_interaction()} else {engine.0.current_interaction()};
+    match interaction {
         Ok(Some(rvn_core::Interaction::Dialogue { character, text })) => {
-            vn_events.send(VnCommand::ShowDialogue { character, text });
+            vn_events.send(crate::display_reveal::command(engine,character,text));
         }
         Ok(Some(rvn_core::Interaction::Choice { options })) => {
             vn_events.send(VnCommand::ShowChoice { options });
@@ -697,5 +740,138 @@ pub fn despawn_settings_menu_overlay(
             menu_state.return_to = None;
             next_state.set(VnState::TitleScreen);
         }
+    }
+}
+
+#[cfg(test)]
+mod narrative_text_preference_tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    fn world(source: &str, settings: Settings) -> World {
+        let mut game = rvn_core::Engine::from_program(rvn_parser::parse_program(source).unwrap(),
+            crate::bevy_renderer::BevyRenderer::new(), 32).unwrap();
+        game.step_until_interaction().unwrap();
+        let mut world = World::new();
+        world.insert_resource(VnEngine(game));
+        world.insert_resource(settings);
+        world.init_resource::<MusicVolume>();
+        world.init_resource::<TypewriterConfig>();
+        world.init_resource::<TypewriterState>();
+        world.init_resource::<CharacterRegistry>();
+        world.init_resource::<DialogueHistory>();
+        world.init_resource::<ScriptErrorMessage>();
+        world.init_resource::<NextState<VnState>>();
+        world.init_resource::<Events<VnCommand>>();
+        let mut typing = world.resource_mut::<TypewriterState>();
+        typing.start_segments(rvn_core::parse_text_tags("étoile 🌟").unwrap().segments, 17.0);
+        typing.visible_chars = 2;
+        typing.char_progress = 0.375;
+        typing.pause_remaining = 0.25;
+        drop(typing);
+        world
+    }
+
+    use crate::resources::{CharacterRegistry, DialogueHistory, ScriptErrorMessage};
+
+    #[test]
+    fn narrative_settings_compose_authored_speed_and_preserve_partial_utf8_and_saved_state() {
+        let mut world = world("scene label A\ntypewriter.speed(17)\n\"line\"\n", Settings { text_speed: 0.5, ..default() });
+        let before = serde_json::to_vec(&world.resource::<VnEngine>().0.state).unwrap();
+        let epoch = world.resource::<VnEngine>().0.runtime_epoch();
+        for volume in [0.25, 0.5, 1.0] {
+            world.resource_mut::<Settings>().music_volume = volume;
+            world.run_system_once(apply_settings_to_runtime_system);
+            let config = world.resource::<TypewriterConfig>();
+            assert!(config.enabled);
+            assert_eq!(config.chars_per_sec.to_bits(), 8.5f32.to_bits());
+            let typing = world.resource::<TypewriterState>();
+            assert_eq!(typing.full_text, "étoile 🌟");
+            assert_eq!(typing.visible_chars, 2);
+            assert_eq!(typing.char_progress.to_bits(), 0.375f32.to_bits());
+            assert_eq!(typing.pause_remaining.to_bits(), 0.25f32.to_bits());
+            assert_eq!(typing.chars_per_sec.to_bits(), 8.5f32.to_bits());
+            assert_eq!(serde_json::to_vec(&world.resource::<VnEngine>().0.state).unwrap(), before);
+            assert_eq!(world.resource::<VnEngine>().0.runtime_epoch(), epoch);
+        }
+    }
+
+    #[test]
+    fn narrative_authored_disable_cannot_be_enabled_by_player_preferences() {
+        let mut world = world("scene label A\ntypewriter.speed(17)\ntypewriter = false\n\"line\"\n", Settings::default());
+        let before = serde_json::to_vec(&world.resource::<VnEngine>().0.state).unwrap();
+        world.run_system_once(apply_settings_to_runtime_system);
+        assert!(!world.resource::<TypewriterConfig>().enabled);
+        assert_eq!(world.resource::<TypewriterConfig>().chars_per_sec, 0.0);
+        assert!(!world.resource::<TypewriterState>().typing);
+        assert_eq!(world.resource::<TypewriterState>().visible_chars, "étoile 🌟".chars().count());
+        assert_eq!(serde_json::to_vec(&world.resource::<VnEngine>().0.state).unwrap(), before);
+    }
+
+    #[test]
+    fn disabled_player_preference_survives_authored_publication_without_modifying_story() {
+        let mut world = world("scene label A\ntypewriter.speed(17)\n\"line\"\n", Settings { typewriter: false, ..default() });
+        let before = serde_json::to_vec(&world.resource::<VnEngine>().0.state).unwrap();
+        world.run_system_once(apply_settings_to_runtime_system);
+        world.resource_mut::<Events<VnCommand>>().send(VnCommand::SetTypewriterConfig { speed_cps: 17.0 });
+        world.run_system_once(crate::systems::typewriter::typewriter_config_system);
+        assert!(!world.resource::<TypewriterConfig>().enabled);
+        assert_eq!(world.resource::<TypewriterConfig>().chars_per_sec, 0.0);
+        assert!(!world.resource::<TypewriterState>().typing);
+        assert_eq!(serde_json::to_vec(&world.resource::<VnEngine>().0.state).unwrap(), before);
+    }
+
+    #[test]
+    fn legacy_settings_and_authored_commands_keep_their_original_speed_policy() {
+        let mut world = world("label A\n\"line\"\n", Settings { text_speed: 0.5, ..default() });
+        world.run_system_once(apply_settings_to_runtime_system);
+        assert!(world.resource::<TypewriterConfig>().enabled);
+        assert_eq!(world.resource::<TypewriterConfig>().chars_per_sec, 20.0);
+        world.resource_mut::<Events<VnCommand>>().send(VnCommand::SetTypewriterConfig { speed_cps: 17.0 });
+        world.run_system_once(crate::systems::typewriter::typewriter_config_system);
+        assert_eq!(world.resource::<TypewriterConfig>().chars_per_sec, 17.0);
+    }
+
+
+    #[test]
+    fn authored_publication_updates_active_reveal_without_dialogue_or_preference_change() {
+        let mut world = world("scene label A\ntypewriter.speed(17)\n\"line\"\n", Settings { text_speed: 0.5, ..default() });
+        // Clear Settings change detection: this test runs only the actual config consumer.
+        world.clear_trackers();
+        let before = serde_json::to_vec(&world.resource::<VnEngine>().0.state).unwrap();
+        world.resource_mut::<Events<VnCommand>>().send(VnCommand::SetTypewriterConfig { speed_cps: 23.0 });
+        world.run_system_once(crate::systems::typewriter::typewriter_config_system);
+        let typing = world.resource::<TypewriterState>();
+        assert!(typing.typing);
+        assert_eq!(typing.chars_per_sec.to_bits(), 11.5f32.to_bits());
+        assert_eq!(typing.full_text, "étoile 🌟");
+        assert_eq!(typing.visible_chars, 2);
+        assert_eq!(typing.char_progress.to_bits(), 0.375f32.to_bits());
+        assert_eq!(typing.pause_remaining.to_bits(), 0.25f32.to_bits());
+        assert_eq!(world.resource::<TypewriterConfig>().chars_per_sec.to_bits(), 11.5f32.to_bits());
+        assert!(!world.resource::<Events<VnCommand>>().iter_current_update_events()
+            .any(|command| matches!(command, VnCommand::ShowDialogue { .. })));
+        assert_eq!(serde_json::to_vec(&world.resource::<VnEngine>().0.state).unwrap(), before);
+    }
+
+    #[test]
+    fn authored_disable_publishes_complete_unicode_text_to_the_existing_active_widget() {
+        let mut world = world("scene label A\ntypewriter.speed(17)\n\"line\"\n", Settings::default());
+        let text = world.spawn((crate::components::DialogueText,
+            Text::from_section("ét", TextStyle::default()))).id();
+        world.clear_trackers();
+        let before = serde_json::to_vec(&world.resource::<VnEngine>().0.state).unwrap();
+        world.resource_mut::<Events<VnCommand>>().send(VnCommand::SetTypewriterConfig { speed_cps: 0.0 });
+        world.run_system_once(crate::systems::typewriter::typewriter_config_system);
+        let typing = world.resource::<TypewriterState>();
+        assert!(!typing.typing);
+        assert_eq!(typing.visible_chars, "étoile 🌟".chars().count());
+        assert_eq!(typing.pause_remaining, 0.0);
+        assert_eq!(world.get::<Text>(text).unwrap().sections.iter()
+            .map(|section| section.value.as_str()).collect::<String>(), "étoile 🌟");
+        assert!(!world.resource::<TypewriterConfig>().enabled);
+        assert!(!world.resource::<Events<VnCommand>>().iter_current_update_events()
+            .any(|command| matches!(command, VnCommand::ShowDialogue { .. })));
+        assert_eq!(serde_json::to_vec(&world.resource::<VnEngine>().0.state).unwrap(), before);
     }
 }
